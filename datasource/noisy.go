@@ -12,10 +12,14 @@ import (
 
 type NoisySource struct {
 	Name       string
-	timeTicker time.Ticker
-	Duration   time.Duration
 	W          *sync.WaitGroup
 	TradeChan  *chan model.Trade
+	timeTicker time.Ticker
+	Duration   time.Duration
+}
+
+func (n *NoisySource) Connect() error {
+	return nil
 }
 
 func (n *NoisySource) StartTrades() error {
@@ -47,17 +51,18 @@ func (n *NoisySource) StartTrades() error {
 
 }
 
-func (n *NoisySource) Subscribe(baseList []string, quoteList []string) ([]string, error) {
+func (n *NoisySource) SubscribeTrades(baseList []string, quoteList []string) ([]string, error) {
 	return []string{}, nil
 
 }
 
-func (n *NoisySource) Close() {
+func (n *NoisySource) Close() error {
 	n.W.Done()
 
+	return nil
 }
 
-func NewNoisySource(name string, d time.Duration, tradeChan *chan model.Trade, w *sync.WaitGroup) NoisySource {
+func NewNoisySource(name string, d time.Duration, tradeChan *chan model.Trade, w *sync.WaitGroup) *NoisySource {
 	noisy := NoisySource{
 		Name:      name,
 		Duration:  d,
@@ -65,5 +70,5 @@ func NewNoisySource(name string, d time.Duration, tradeChan *chan model.Trade, w
 		TradeChan: tradeChan,
 	}
 
-	return noisy
+	return &noisy
 }

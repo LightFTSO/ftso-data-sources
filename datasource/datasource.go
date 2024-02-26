@@ -1,7 +1,13 @@
 package datasource
 
 type FtsoDataSource interface {
-	Start(chan<- map[string]interface{}) error
-	Subscribe([]string, []string) ([]string, error)
+	StartTrades() error
+	SubscribeTrades([]string, []string) ([]string, error)
+
+	//StartTickers(chan<- map[string]interface{}) error
+	//SubscribeTickers([]string, []string) ([]string, error)
+	Connect() error
 	Close() error
 }
+
+type DataSourceList []FtsoDataSource

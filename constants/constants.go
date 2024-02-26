@@ -1,7 +1,20 @@
 package constants
 
-var SYMBOLS = [...]string{"xrp",
-	"btc", "eth", "algo", "xlm", "ada", "matic", "sol", "fil", "flr", "sgb", "doge", "xdc", "arb", "avax", "bnb", "usdc", "busd", "usdt"}
+var BASES_CRYPTO = [...]string{"flr", "sgb", "btc", "xrp", "ltc", "xlm", "doge",
+	"ada", "algo", "eth", "fil", "arb", "avax", "bnb", "matic", "sol", "usdc", "usdt", "xdc",
+	"trx", "dot", "shib", "uni", "hbar", "near", "vet", "rndr", "strk", "aave", "qnt",
+	"xtz", "gala", "atom", "etc", "beam", "imx", "stx", "apt", "op", "icp", "inj", "tia", "grt", "sui", "ldo"}
+
+var BASES_FOREX = [...]string{
+	"eur",
+	"jpy",
+	"aud",
+}
+var BASES_COMMODITIES = [...]string{
+	"xau",
+	"xag",
+	"xpt",
+}
 
 const USD = "usd"
 const USDT = "usdt"

@@ -1,4 +1,4 @@
-package datasource
+package noisy
 
 import (
 	"fmt"
@@ -19,12 +19,16 @@ type NoisySource struct {
 }
 
 func (n *NoisySource) Connect() error {
+	n.W.Add(1)
+	log.Info(fmt.Sprintf("Creating new noisy source \"%s\"", n.Name))
+	return nil
+}
+
+func (n *NoisySource) Reconnect() error {
 	return nil
 }
 
 func (n *NoisySource) StartTrades() error {
-	log.Info(fmt.Sprintf("Creating new noisy source \"%s\"", n.Name))
-	n.W.Add(1)
 
 	go func(ch chan<- model.Trade) {
 		n.timeTicker = *time.NewTicker(n.Duration)
@@ -51,8 +55,8 @@ func (n *NoisySource) StartTrades() error {
 
 }
 
-func (n *NoisySource) SubscribeTrades(baseList []string, quoteList []string) ([]string, error) {
-	return []string{}, nil
+func (n *NoisySource) SubscribeTrades() error {
+	return nil
 
 }
 
@@ -62,7 +66,12 @@ func (n *NoisySource) Close() error {
 	return nil
 }
 
+func (b *NoisySource) GetName() string {
+	return b.Name
+}
+
 func NewNoisySource(name string, d time.Duration, tradeChan *chan model.Trade, w *sync.WaitGroup) *NoisySource {
+	log.Info("Created new datasource", "datasource", "noisy")
 	noisy := NoisySource{
 		Name:      name,
 		Duration:  d,

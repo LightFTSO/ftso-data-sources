@@ -9,17 +9,17 @@ import (
 	"roselabs.mx/ftso-data-sources/model"
 )
 
-type Stdout struct {
+type IOWriterConsumer struct {
 	TradeChannel  <-chan model.Trade
 	TickerChannel <-chan model.Ticker
 
 	W io.Writer
 }
 
-func (s *Stdout) StartTradeListener() {
+func (s *IOWriterConsumer) StartTradeListener() {
 	// Listen for trades in the ch channel and sends them to a io.Writer
 	go func() {
-		log.Info("Listening now")
+		log.Info("IOWriter consumer listening now")
 		for trade := range s.TradeChannel {
 			/*jsonStr, err := json.Marshal(trade)
 			if err != nil {
@@ -28,23 +28,23 @@ func (s *Stdout) StartTradeListener() {
 				fmt.Println(jsonStr)
 			}*/
 			s.W.Write([]byte(fmt.Sprintf(
-				"%s source=%s symbol=%s price=%0.5f size=%0.5f side=%s ts=%d\n",
-				time.Now().Format("2006/01/02 03:04:05"), trade.Source, trade.Symbol, trade.Price, trade.Size, trade.Side, trade.Timestamp.UTC().UnixMilli())))
+				"%s source=%s symbol=%s price=%f size=%f side=%s ts=%d\n",
+				time.Now().Format("03:04:05"), trade.Source, trade.Symbol, trade.Price, trade.Size, trade.Side, trade.Timestamp.UTC().UnixMilli())))
 		}
 	}()
 }
-func (s *Stdout) CloseTradeListener() {
+func (s *IOWriterConsumer) CloseTradeListener() {
 
 }
-func (s *Stdout) MessagesInTheLastMinute() {
+func (s *IOWriterConsumer) MessagesInTheLastMinute() {
 
 }
-func (s *Stdout) MessagesThisPriceEpoch() {
+func (s *IOWriterConsumer) MessagesThisPriceEpoch() {
 
 }
 
-func NewIOWriterConsumer(w io.Writer, tradeCh <-chan model.Trade) (Stdout, error) {
-	newConsumer := Stdout{
+func NewIOWriterConsumer(w io.Writer, tradeCh <-chan model.Trade) (IOWriterConsumer, error) {
+	newConsumer := IOWriterConsumer{
 		W:            w,
 		TradeChannel: tradeCh,
 	}

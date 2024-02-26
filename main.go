@@ -8,15 +8,23 @@ import (
 
 	"roselabs.mx/ftso-data-sources/constants"
 	"roselabs.mx/ftso-data-sources/consumer"
-	"roselabs.mx/ftso-data-sources/datasource"
 	"roselabs.mx/ftso-data-sources/factory"
 	"roselabs.mx/ftso-data-sources/model"
+	"roselabs.mx/ftso-data-sources/symbols"
 )
 
 func main() {
+	quotes := constants.BASES_CRYPTO[:] //[]string{"xrp"}
+	symbols, err := symbols.CreateSymbolList(quotes, constants.USD_USDT_USDC_BUSD[:])
+	if err != nil {
+		panic(err)
+	}
+
+	log.Info("Symbol list", "symbols", symbols)
+
 	var w sync.WaitGroup
 
-	fmt.Println("Hell yeah")
+	fmt.Println("Hell yeahhh")
 
 	tradeChan := make(chan model.Trade)
 
@@ -34,24 +42,36 @@ func main() {
 
 	dataSourceList := []string{
 		"binance",
-		"noisy",
+		//"noisy",
 	}
 
-	dataSources := make(datasource.DataSourceList, len(dataSourceList))
+	//dataSources := make(datasource.DataSourceList, len(dataSourceList))
 
-	for i, source := range dataSourceList {
-		src, err := factory.BuilDataSource(source, &tradeChan, &w)
-		if err != nil {
-			log.Error("Error creating data source", "type", source, "error", err.Error())
-		}
-		dataSources[i] = src
-		log.Info("Created new datasource", "kind", source)
-	}
+	for _, source := range dataSourceList {
+		w.Add(1)
+		go func(source string) {
+			src, err := factory.BuilDataSource(source, symbols, &tradeChan, &w)
+			if err != nil {
+				log.Error("Error creating data source", "datasource", source, "error", err.Error())
+				w.Done()
+				return
+			}
+			err = src.Connect()
+			if err != nil {
+				log.Error("Error connecting", "datasource", src.GetName())
+				w.Done()
+				return
+			}
 
-	for _, src := range dataSources {
-		quotes := []string{"xrp"}
-		src.SubscribeTrades(quotes, constants.USD_USDT_USDC_BUSD[:])
-		src.StartTrades()
+			err = src.SubscribeTrades()
+			if err != nil {
+				log.Error("Error subscribing to trades", "datasource", src.GetName())
+				w.Done()
+				return
+			}
+
+			w.Done()
+		}(source)
 	}
 
 	// wait for all datasources to exit

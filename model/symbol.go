@@ -7,7 +7,7 @@ import (
 )
 
 type Symbol struct {
-	Base   string
+	Base   string `mapstructure:",squash"`
 	Quote  string
 	Symbol string
 }

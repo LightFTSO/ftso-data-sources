@@ -6,3 +6,6 @@ public/
 env/
 .DS_Store
 tmp/
+secrets/
+.env/
+config*.yaml

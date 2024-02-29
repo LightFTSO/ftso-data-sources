@@ -47,14 +47,6 @@ type WsTickerEvent struct {
 	Count int64 `json:"n"`
 }
 
-type BinanceData struct {
-	s string  `json:"s"`
-	c float64 `json:"c"`
-	p float64 `json:"p"`
-	q float64 `json:"q"`
-	t int64   `json:"T"`
-}
-
 type BinanceSymbol struct {
 	Symbol     string `json:"symbol"`
 	BaseAsset  string `json:"baseAsset"`

@@ -2,7 +2,9 @@ package symbols
 
 import (
 	"fmt"
+	"slices"
 
+	"roselabs.mx/ftso-data-sources/constants"
 	"roselabs.mx/ftso-data-sources/model"
 )
 
@@ -32,7 +34,7 @@ func iterate(channel chan []interface{}, topLevel, result []interface{}, needUnp
 	}
 }
 
-func CreateSymbolList(bases, quotes []string) ([]model.Symbol, error) {
+func createSymbolList(bases, quotes []string) ([]model.Symbol, error) {
 
 	a := make([]interface{}, len(bases))
 	for i, v := range bases {
@@ -55,4 +57,41 @@ func CreateSymbolList(bases, quotes []string) ([]model.Symbol, error) {
 			Symbol: fmt.Sprintf("%s/%s", product[0].(string), product[1].(string))})
 	}
 	return symbols, nil
+}
+
+type AllSymbols struct {
+	Crypto      []model.Symbol `mapstructure:"crypto"`
+	Forex       []model.Symbol `mapstructure:"forex"`
+	Commodities []model.Symbol `mapstructure:"commodities"`
+	Stocks      []model.Symbol `mapstructure:"stocks"`
+}
+
+func (s *AllSymbols) Flatten() []model.Symbol {
+	return slices.Concat(s.Crypto, s.Forex, s.Commodities, s.Stocks)
+}
+
+func GetAllSymbols() AllSymbols {
+	cryptoSymbols, err := createSymbolList(constants.BASES_CRYPTO[:], constants.USD_USDT_USDC_BUSD[:])
+	if err != nil {
+		panic(err)
+	}
+	forexSymbols, err := createSymbolList(constants.BASES_FOREX, []string{constants.USD}[:])
+	if err != nil {
+		panic(err)
+	}
+	commoditySymbols, err := createSymbolList(constants.BASES_COMMODITIES, []string{constants.USD}[:])
+	if err != nil {
+		panic(err)
+	}
+	stockSymbols, err := createSymbolList(constants.BASES_STOCKS, []string{constants.USD}[:])
+	if err != nil {
+		panic(err)
+	}
+
+	return AllSymbols{
+		Crypto:      cryptoSymbols,
+		Forex:       forexSymbols,
+		Commodities: commoditySymbols,
+		Stocks:      stockSymbols,
+	}
 }

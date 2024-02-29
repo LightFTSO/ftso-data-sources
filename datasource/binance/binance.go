@@ -13,41 +13,46 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	internal "roselabs.mx/ftso-data-sources/internal"
+	"github.com/textileio/go-threads/broadcast"
+	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
+	"roselabs.mx/ftso-data-sources/symbols"
 )
 
-type BinanceWebsocketClient struct {
-	Name        string                   `json:"name"`
-	W           *sync.WaitGroup          `json:"-"`
-	TradeChan   *chan model.Trade        `json:"-"`
-	wsClient    internal.WebsocketClient `json:"-"`
-	wsEndpoint  string                   `json:"-"`
-	apiEndpoint string                   `json:"-"`
-	SymbolList  []model.Symbol           `json:"symbolList"`
+type BinanceClient struct {
+	name        string
+	W           *sync.WaitGroup
+	TradeTopic  *broadcast.Broadcaster
+	TickerChan  *broadcast.Broadcaster
+	wsClient    internal.WebsocketClient
+	wsEndpoint  string
+	apiEndpoint string
+	SymbolList  []model.Symbol
 
 	wsMessageChan chan internal.WsMessage
 }
 
-func NewBinanceWebsocketClient(symbolList []model.Symbol, tradeChan *chan model.Trade, w *sync.WaitGroup) *BinanceWebsocketClient {
+func NewBinanceClient(options interface{}, symbolList symbols.AllSymbols, tradeTopic *broadcast.Broadcaster, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BinanceClient, error) {
 	log.Info("Created new datasource", "datasource", "binance")
 	wsEndpoint := "wss://stream.binance.com:9443/stream?streams="
 
-	binance := BinanceWebsocketClient{
-		Name:          "binance",
+	binance := BinanceClient{
+		name:          "binance",
 		W:             w,
-		TradeChan:     tradeChan,
-		wsClient:      *internal.NewWebsocketClient(wsEndpoint, true),
+		TradeTopic:    tradeTopic,
+		TickerChan:    tickerTopic,
+		wsClient:      *internal.NewWebsocketClient(wsEndpoint, true, nil),
 		wsEndpoint:    wsEndpoint,
 		apiEndpoint:   "https://api.binance.com",
-		SymbolList:    symbolList,
+		SymbolList:    symbolList.Crypto,
 		wsMessageChan: make(chan internal.WsMessage),
 	}
+	binance.wsClient.SetMessageHandler(binance.onMessage)
 
-	return &binance
+	return &binance, nil
 }
 
-func (b *BinanceWebsocketClient) Connect() error {
+func (b *BinanceClient) Connect() error {
 	b.W.Add(1)
 	log.Info("Connecting to binance datasource")
 
@@ -56,13 +61,12 @@ func (b *BinanceWebsocketClient) Connect() error {
 		return err
 	}
 
-	go b.wsClient.Listen(b.wsMessageChan)
-	go b.Listen()
+	go b.wsClient.Listen()
 
 	return nil
 }
 
-func (b *BinanceWebsocketClient) Reconnect() error {
+func (b *BinanceClient) Reconnect() error {
 	log.Info("Reconnecting to binance datasource")
 
 	_, err := b.wsClient.Connect(http.Header{})
@@ -75,41 +79,41 @@ func (b *BinanceWebsocketClient) Reconnect() error {
 		log.Error("Error subscribing to trades", "datasource", b.GetName())
 		return err
 	}
-	go b.wsClient.Listen(b.wsMessageChan)
+	go b.wsClient.Listen()
 	return nil
 }
 
-func (b *BinanceWebsocketClient) Close() error {
+func (b *BinanceClient) Close() error {
 	b.wsClient.Close()
 	b.W.Done()
 
 	return nil
 }
 
-func (b *BinanceWebsocketClient) Listen() {
-	for message := range b.wsMessageChan {
-		if message.Err != nil {
-			log.Error("Error reading websocket data, reconnecting in 5 seconds",
-				"datasource", b.GetName(), "error", message.Err)
-			time.Sleep(5 * time.Second)
-			b.Reconnect()
-		}
+func (b *BinanceClient) onMessage(message internal.WsMessage) error {
+	if message.Err != nil {
+		log.Error("Error reading websocket data, reconnecting in 5 seconds",
+			"datasource", b.GetName(), "error", message.Err)
+		time.Sleep(5 * time.Second)
+		b.Reconnect()
+	}
 
-		if message.Type == websocket.TextMessage {
+	if message.Type == websocket.TextMessage {
 
-			if strings.Contains(string(message.Message), "@trade") {
-				trade, err := b.parseTrade(message.Message)
-				if err != nil {
-					log.Error("Error parsing trade", "datasource", b.GetName(), "error", err.Error())
-					continue
-				}
-				*b.TradeChan <- *trade
+		if strings.Contains(string(message.Message), "@trade") {
+			trade, err := b.parseTrade(message.Message)
+			if err != nil {
+				log.Error("Error parsing trade", "datasource", b.GetName(), "error", err.Error())
+
 			}
+			b.TradeTopic.Send(trade)
 		}
 	}
+
+	return nil
 }
 
-func (b *BinanceWebsocketClient) parseTrade(message []byte) (*model.Trade, error) {
+func (b *BinanceClient) parseTrade(message []byte) (*model.Trade, error) {
 	var newTradeEvent WsCombinedTradeEvent
 	err := json.Unmarshal(message, &newTradeEvent)
 	if err != nil {
@@ -127,12 +131,11 @@ func (b *BinanceWebsocketClient) parseTrade(message []byte) (*model.Trade, error
 	}
 	symbol := model.ParseSymbol(newTradeEvent.Data.Symbol)
 	newTrade := model.Trade{
-		Base:   symbol.Base,
-		Quote:  symbol.Quote,
-		Symbol: symbol.Symbol,
-		Price:  price,
-		Size:   size,
-		//Side:      newTradeEvent.Data.IsBuyerMaker,
+		Base:      symbol.Base,
+		Quote:     symbol.Quote,
+		Symbol:    symbol.Symbol,
+		Price:     price,
+		Size:      size,
 		Source:    b.GetName(),
 		Timestamp: time.UnixMilli(newTradeEvent.Data.Time),
 	}
@@ -140,7 +143,7 @@ func (b *BinanceWebsocketClient) parseTrade(message []byte) (*model.Trade, error
 	return &newTrade, nil
 }
 
-func (b *BinanceWebsocketClient) getAvailableSymbols() ([]BinanceSymbol, error) {
+func (b *BinanceClient) getAvailableSymbols() ([]BinanceSymbol, error) {
 	reqUrl := b.apiEndpoint + "/api/v3/exchangeInfo?permissions=SPOT"
 
 	req, err := http.NewRequest(http.MethodGet, reqUrl, nil)
@@ -182,12 +185,12 @@ func (b *BinanceWebsocketClient) getAvailableSymbols() ([]BinanceSymbol, error) 
 
 *
 */
-func (b *BinanceWebsocketClient) SubscribeTrades() error {
+func (b *BinanceClient) SubscribeTrades() error {
 	availableSymbols, err := b.getAvailableSymbols()
 	if err != nil {
 		b.W.Done()
-		return fmt.Errorf("Error obtaining available symbols. Closing binance datasource %s", err.Error())
-
+		log.Error("Error obtaining available symbols. Closing binance datasource %s", "error", err.Error())
+		return err
 	}
 
 	subscribedSymbols := []model.Symbol{}
@@ -202,46 +205,26 @@ func (b *BinanceWebsocketClient) SubscribeTrades() error {
 		}
 	}
 
-	subMessage := make(map[string]interface{})
-	subMessage["method"] = "SUBSCRIBE"
-	subMessage["id"] = rand.Uint64()
 	s := []string{}
 	for _, v := range subscribedSymbols {
 		s = append(s, fmt.Sprintf("%s%s@trade", strings.ToLower(v.Base), strings.ToLower(v.Quote)))
 	}
-	subMessage["params"] = s
+	subMessage := map[string]interface{}{
+		"method": "SUBSCRIBE",
+		"id":     rand.Uint64(),
+		"params": s,
+	}
+
 	b.wsClient.SendMessageJSON(subMessage)
 
 	log.Info("Subscribed trade symbols", "datasource", b.GetName(), "symbols", len(subscribedSymbols))
 	return nil
 }
 
-func keepAlive(c *websocket.Conn, timeout time.Duration) {
-	ticker := time.NewTicker(timeout)
-
-	lastResponse := time.Now()
-	c.SetPongHandler(func(msg string) error {
-		lastResponse = time.Now()
-		return nil
-	})
-
-	go func() {
-		defer ticker.Stop()
-		for {
-			deadline := time.Now().Add(10 * time.Second)
-			err := c.WriteControl(websocket.PingMessage, []byte{}, deadline)
-			if err != nil {
-				return
-			}
-			<-ticker.C
-			if time.Since(lastResponse) > timeout {
-				c.Close()
-				return
-			}
-		}
-	}()
+func (b *BinanceClient) SubscribeTickers() error {
+	return nil
 }
 
-func (b *BinanceWebsocketClient) GetName() string {
-	return b.Name
+func (b *BinanceClient) GetName() string {
+	return b.name
 }

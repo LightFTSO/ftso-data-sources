@@ -1,0 +1,7 @@
+Add a lot exchanges
+Add non-crypto sources
+Make meaningful statistics
+Create informational keys on redis consumer
+Add questdb consumer
+Add kafka consumer
+Add websocket server consumer

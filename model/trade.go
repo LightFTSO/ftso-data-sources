@@ -3,12 +3,12 @@ package model
 import "time"
 
 type Trade struct {
-	Base      string    `json:"base"`
-	Quote     string    `json:"quote"`
-	Symbol    string    `json:"symbol"`
-	Price     float64   `json:"price"`
-	Size      float64   `json:"size"`
-	Side      string    `json:"side"`
-	Source    string    `json:"source"`
+	Base      string    `json:"-"`
+	Quote     string    `json:"-"`
+	Symbol    string    `json:"s"`
+	Price     float64   `json:"p"`
+	Size      float64   `json:"Q"`
+	Side      string    `json:"b"`
+	Source    string    `json:"S"`
 	Timestamp time.Time `json:"ts"`
 }

@@ -1,26 +1,30 @@
 package noisy
 
 import (
-	"fmt"
 	log "log/slog"
 	"math/rand"
 	"sync"
 	"time"
 
+	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/model"
 )
 
+type NoisySourceOptions struct {
+	Name     string `mapstructure:"name"`
+	Interval string `mapstructure:"interval"`
+}
+
 type NoisySource struct {
-	Name       string
-	W          *sync.WaitGroup
-	TradeChan  *chan model.Trade
-	timeTicker time.Ticker
-	Duration   time.Duration
+	name        string
+	W           *sync.WaitGroup
+	TradeTopic  *broadcast.Broadcaster
+	TickerTopic *broadcast.Broadcaster
+	Interval    time.Duration
 }
 
 func (n *NoisySource) Connect() error {
 	n.W.Add(1)
-	log.Info(fmt.Sprintf("Creating new noisy source \"%s\"", n.Name))
 	return nil
 }
 
@@ -28,14 +32,13 @@ func (n *NoisySource) Reconnect() error {
 	return nil
 }
 
-func (n *NoisySource) StartTrades() error {
+func (n *NoisySource) SubscribeTrades() error {
+	go func(br *broadcast.Broadcaster) {
+		timeInterval := *time.NewTicker(n.Interval)
 
-	go func(ch chan<- model.Trade) {
-		n.timeTicker = *time.NewTicker(n.Duration)
+		defer timeInterval.Stop()
 
-		defer n.timeTicker.Stop()
-
-		for t := range n.timeTicker.C {
+		for t := range timeInterval.C {
 			fakeTrade := model.Trade{
 				Base:      "ABC",
 				Quote:     "XYZ",
@@ -43,21 +46,38 @@ func (n *NoisySource) StartTrades() error {
 				Price:     float64(rand.Intn(1000)) + rand.Float64(),
 				Size:      float64(rand.Intn(1000)) + rand.Float64(),
 				Side:      "WHAT? LMAO",
-				Source:    n.Name,
+				Source:    n.GetName(),
 				Timestamp: t,
 			}
 
-			ch <- fakeTrade
+			br.Send(&fakeTrade)
 		}
-	}(*n.TradeChan)
+	}(n.TradeTopic)
 
 	return nil
-
 }
 
-func (n *NoisySource) SubscribeTrades() error {
-	return nil
+func (n *NoisySource) SubscribeTickers() error {
+	go func(br *broadcast.Broadcaster) {
+		timeInterval := *time.NewTicker(n.Interval)
 
+		defer timeInterval.Stop()
+
+		for t := range timeInterval.C {
+			fakeTicker := model.Ticker{
+				LastPrice: float64(rand.Intn(1000)) + rand.Float64(),
+				Base:      "ABC",
+				Quote:     "XYZ",
+				Symbol:    "ABC/XYZ",
+				Source:    n.GetName(),
+				Timestamp: t,
+			}
+
+			br.Send(&fakeTicker)
+		}
+	}(n.TradeTopic)
+
+	return nil
 }
 
 func (n *NoisySource) Close() error {
@@ -66,18 +86,27 @@ func (n *NoisySource) Close() error {
 	return nil
 }
 
-func (b *NoisySource) GetName() string {
-	return b.Name
+func (n *NoisySource) GetName() string {
+	return n.name
 }
 
-func NewNoisySource(name string, d time.Duration, tradeChan *chan model.Trade, w *sync.WaitGroup) *NoisySource {
-	log.Info("Created new datasource", "datasource", "noisy")
+func NewNoisySource(options *NoisySourceOptions, tradeTopic *broadcast.Broadcaster, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*NoisySource, error) {
+	d, err := time.ParseDuration(options.Interval)
+	if err != nil {
+		log.Info("Using default duration", "datasource", "noisy", "name", options.Name)
+		d = time.Second
+	}
+	if options.Name == "" {
+		options.Name = "noisy" + d.String()
+	}
 	noisy := NoisySource{
-		Name:      name,
-		Duration:  d,
-		W:         w,
-		TradeChan: tradeChan,
+		name:        options.Name,
+		Interval:    d,
+		W:           w,
+		TradeTopic:  tradeTopic,
+		TickerTopic: tickerTopic,
 	}
 
-	return &noisy
+	log.Info("Created new datasource", "datasource", "noisy", "name", options.Name, "interval", d.String())
+	return &noisy, nil
 }

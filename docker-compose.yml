@@ -1,0 +1,24 @@
+version: '3.6'
+
+services:
+  redis:
+    image: redis/redis-stack:latest
+    container_name: redis-instance
+    ports:
+      - 6379:6379
+      - 8001:8001
+    volumes:
+      - ./redis_persistent_storage:/data
+      - ./redis.conf:/redis-stack.conf
+    environment:
+      #- REDIS_ARGS=""
+      #- REDISEARCH_ARGS=""
+      #- REDISJSON_ARGS=""
+      - REDISTIMESERIES_ARGS="RETENTION_POLICY=86400000"
+      #- REDISBLOOM_ARGS=""
+    networks:
+      - lightftso-testing
+
+networks:
+  lightftso-testing:
+

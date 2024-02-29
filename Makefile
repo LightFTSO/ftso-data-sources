@@ -1,21 +1,21 @@
-project_name = creativerotarydie
-image_name = creativerotarydie:latest
-SRC_DIR=./cmd
+project_name = ftso-data-sources
+image_name = ftso-data-sources:latest
+SRC_DIR=.
 
 build-dev:
-	go build -o build/app $(SRC_DIR)/app.go
+	go build -o build/main $(SRC_DIR)/main.go
 
 run: build-dev
-	./build/app
+	./build/main
 
 watch:
-	ENV=development reflex -s -r '\.go$$' make run
+	ENV=development air -c air.conf
 
 watch-prod:
-	ENV=production reflex -s -r '\.go$$' make run
+	ENV=production air -c air.conf
 
 run-local:
-	ENV=development go run $(SRC_DIR)/app.go
+	ENV=development go run $(SRC_DIR)/main.go
 
 requirements:
 	go mod tidy

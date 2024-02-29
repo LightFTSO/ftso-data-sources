@@ -1,6 +1,8 @@
 package consumer
 
-import "roselabs.mx/ftso-data-sources/model"
+import (
+	"roselabs.mx/ftso-data-sources/model"
+)
 
 type Consumer interface {
 	StartTradeListener(<-chan model.Trade)

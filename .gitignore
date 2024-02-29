@@ -9,3 +9,4 @@ tmp/
 secrets/
 .env/
 config*.yaml
+dump.rdb

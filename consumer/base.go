@@ -1,16 +1,14 @@
 package consumer
 
-import (
-	"roselabs.mx/ftso-data-sources/model"
-)
+import "github.com/textileio/go-threads/broadcast"
 
 type Consumer interface {
-	StartTradeListener(<-chan model.Trade)
+	StartTradeListener(*broadcast.Broadcaster)
 	CloseTradeListener()
 
-	StartTickerListener(<-chan model.Ticker)
+	StartTickerListener(*broadcast.Broadcaster)
 	CloseTickerListener()
 
-	MessagesInTheLastMinute()
-	MessagesThisPriceEpoch()
+	//MessagesInTheLastMinute()
+	//MessagesThisPriceEpoch()
 }

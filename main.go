@@ -14,6 +14,7 @@ import (
 	"roselabs.mx/ftso-data-sources/consumer"
 	"roselabs.mx/ftso-data-sources/datasource"
 	"roselabs.mx/ftso-data-sources/flags"
+	"roselabs.mx/ftso-data-sources/logging"
 	"roselabs.mx/ftso-data-sources/symbols"
 )
 
@@ -28,6 +29,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("%v\n", err.Error())
 	}
+
+	logging.SetupLogging()
 
 	fmt.Println("Hell yeahhh")
 	fmt.Println("GO GO GO GO GO GO GO  LIGHTFTSO LIGHTFTSO LIGHTFTSO LIGHTFTSO !!! GO GO GO GO GO GO GO GO ")
@@ -45,8 +48,17 @@ func run(globalConfig config.ConfigOptions) {
 	initDataSources(tradeTopic, tickerTopic, globalConfig)
 }
 
+func enableConsumer(c consumer.Consumer, tradeTopic *broadcast.Broadcaster, tickerTopic *broadcast.Broadcaster, config config.ConfigOptions) {
+	if config.EnabledStreams.Trades {
+		c.StartTradeListener(tradeTopic)
+	}
+	if config.EnabledStreams.Tickers {
+		c.StartTickerListener(tickerTopic)
+	}
+}
+
 func initConsumers(tradeTopic *broadcast.Broadcaster, tickerTopic *broadcast.Broadcaster, config config.ConfigOptions) {
-	if !config.FileFileConsumerOptions.Enabled && !config.RedisOptions.Enabled && !config.WebsocketServerOptions.Enabled {
+	if !config.FileFileConsumerOptions.Enabled && !config.RedisOptions.Enabled && !config.WebsocketServerOptions.Enabled && !config.MosquittoConsumerOptions.Enabled {
 		if config.Env != "development" {
 			err := errors.New("no consumers enabled")
 			panic(err)
@@ -57,33 +69,23 @@ func initConsumers(tradeTopic *broadcast.Broadcaster, tickerTopic *broadcast.Bro
 
 	if config.RedisOptions.Enabled {
 		c := consumer.NewRedisConsumer(config.RedisOptions)
-		if config.EnabledStreams.Trades {
-			c.StartTradeListener(tradeTopic)
-		}
-		if config.EnabledStreams.Tickers {
-			c.StartTickerListener(tickerTopic)
-		}
+		enableConsumer(c, tradeTopic, tickerTopic, config)
 	}
 
 	if config.FileFileConsumerOptions.Enabled {
 		c := consumer.NewFileConsumer(config.FileFileConsumerOptions.OutputFilename)
-		if config.EnabledStreams.Trades {
-			c.StartTradeListener(tradeTopic)
-		}
-		if config.EnabledStreams.Tickers {
-			c.StartTickerListener(tickerTopic)
-		}
+		enableConsumer(c, tradeTopic, tickerTopic, config)
+	}
+
+	if config.MosquittoConsumerOptions.Enabled {
+		c := consumer.NewMqttConsumer(config.MosquittoConsumerOptions)
+		enableConsumer(c, tradeTopic, tickerTopic, config)
 	}
 
 	// enable statistics generator
 	if config.Stats.Enabled {
 		stats := consumer.NewStatisticsGenerator(config.Stats)
-		if config.EnabledStreams.Trades {
-			stats.StartTradeListener(tradeTopic)
-		}
-		if config.EnabledStreams.Tickers {
-			stats.StartTickerListener(tickerTopic)
-		}
+		enableConsumer(stats, tradeTopic, tickerTopic, config)
 	}
 
 }

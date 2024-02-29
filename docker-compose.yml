@@ -3,7 +3,7 @@ version: '3.6'
 services:
   redis:
     image: redis/redis-stack:latest
-    container_name: redis-instance
+    container_name: redis-instance-lightftso
     ports:
       - 6379:6379
       - 8001:8001
@@ -19,6 +19,20 @@ services:
     networks:
       - lightftso-testing
 
+  mosquitto:
+    image: eclipse-mosquitto:latest
+    container_name: mosquitto-lightftso
+    ports:
+      - 127.0.0.1:1883:1883
+      - 127.0.0.1:9001:9001
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - ./mosquitto/storage/data:/mosquitto/data
+      - ./mosquitto/storage/log:/mosquitto/log
+    networks:
+      - lightftso-testing
+
 networks:
   lightftso-testing:
+
 

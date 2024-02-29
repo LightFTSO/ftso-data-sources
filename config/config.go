@@ -29,9 +29,10 @@ type ConfigOptions struct {
 		Tickers bool `mapstructure:"tickers"`
 	} `mapstructure:"enabled_streams"`
 
-	RedisOptions            consumer.RedisOptions                   `mapstructure:"redis"`
-	WebsocketServerOptions  consumer.WebsocketServerConsumerOptions `mapstructure:"websocket_server"`
-	FileFileConsumerOptions consumer.FileConsumerOptions            `mapstructure:"file_output"`
+	RedisOptions             consumer.RedisOptions                   `mapstructure:"redis_ts"`
+	WebsocketServerOptions   consumer.WebsocketServerConsumerOptions `mapstructure:"websocket_server"`
+	FileFileConsumerOptions  consumer.FileConsumerOptions            `mapstructure:"file_output"`
+	MosquittoConsumerOptions consumer.MqttConsumerOptions            `mapstructure:"mosquitto"`
 }
 
 var Config ConfigOptions

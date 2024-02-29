@@ -10,3 +10,4 @@ secrets/
 .env/
 config*.yaml
 dump.rdb
+mosquito/

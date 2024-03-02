@@ -11,6 +11,7 @@ type WebsocketServerConsumerOptions struct {
 		Tickers string
 		Volumes string
 	}
+	UseSbeEncoding bool `mapstructure:"use_sbe_encoding"`
 }
 
 type WebsocketServerConsumer struct {

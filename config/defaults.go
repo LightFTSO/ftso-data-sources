@@ -19,6 +19,11 @@ func setDefaults() {
 	viper.SetDefault("file_consumer.enabled", false)
 	viper.SetDefault("file_consumer.filename", "")
 
+	viper.SetDefault("mosquitto.enabled", false)
+	viper.SetDefault("mosquitto.num_threads", 1)
+	viper.SetDefault("mosquitto.use_sbe_encoding", true)
+	viper.SetDefault("mosquitto.qos_level", 0)
+
 	viper.SetDefault("redis.enabled", false)
 	viper.SetDefault("redis.client_options.initaddress", []string{"127.0.0.1:6379"})
 	viper.SetDefault("redis.client_options.username", "")
@@ -29,6 +34,7 @@ func setDefaults() {
 	viper.SetDefault("redis.ts.chunksize", 4096)
 
 	viper.SetDefault("websocket_server.enabled", false)
+	viper.SetDefault("websocket_server.use_sbe_encoding", false)
 	viper.SetDefault("websocket_server.host", "127.0.0.1")
 	viper.SetDefault("websocket_server.port", 3000)
 	viper.SetDefault("websocket_server.endpoints.trades", "/trades")

@@ -8,7 +8,4 @@ type Consumer interface {
 
 	StartTickerListener(*broadcast.Broadcaster)
 	CloseTickerListener()
-
-	//MessagesInTheLastMinute()
-	//MessagesThisPriceEpoch()
 }

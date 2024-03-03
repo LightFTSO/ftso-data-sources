@@ -3,6 +3,7 @@ package noisy
 import (
 	log "log/slog"
 	"math/rand"
+	"strconv"
 	"sync"
 	"time"
 
@@ -43,8 +44,8 @@ func (n *NoisySource) SubscribeTrades() error {
 				Base:      "ABC",
 				Quote:     "XYZ",
 				Symbol:    "ABC/XYZ",
-				Price:     float64(rand.Intn(1000)) + rand.Float64(),
-				Size:      float64(rand.Intn(1000)) + rand.Float64(),
+				Price:     strconv.FormatFloat(float64(rand.Intn(1000))+rand.Float64(), 'f', 9, 64),
+				Size:      strconv.FormatFloat(float64(rand.Intn(1000))+rand.Float64(), 'f', 9, 64),
 				Side:      "WHAT? LMAO",
 				Source:    n.GetName(),
 				Timestamp: t,
@@ -65,7 +66,7 @@ func (n *NoisySource) SubscribeTickers() error {
 
 		for t := range timeInterval.C {
 			fakeTicker := model.Ticker{
-				LastPrice: float64(rand.Intn(1000)) + rand.Float64(),
+				LastPrice: strconv.FormatFloat(float64(rand.Intn(1000))+rand.Float64(), 'f', 9, 64),
 				Base:      "ABC",
 				Quote:     "XYZ",
 				Symbol:    "ABC/XYZ",

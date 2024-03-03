@@ -16,12 +16,8 @@ type Trade struct {
 	Symbol    Symbol
 	Price     Decimal
 	Size      Decimal
-	Side      []TradeSide
+	Buy_side  uint8
 	Source    []uint8
-}
-type TradeSide struct {
-	Sell BooleanTypeEnum
-	Buy  BooleanTypeEnum
 }
 
 func (t *Trade) Encode(_m *SbeGoMarshaller, _w io.Writer, doRangeCheck bool) error {
@@ -42,18 +38,8 @@ func (t *Trade) Encode(_m *SbeGoMarshaller, _w io.Writer, doRangeCheck bool) err
 	if err := t.Size.Encode(_m, _w); err != nil {
 		return err
 	}
-	var SideBlockLength uint16 = 2
-	if err := _m.WriteUint16(_w, SideBlockLength); err != nil {
+	if err := _m.WriteUint8(_w, t.Buy_side); err != nil {
 		return err
-	}
-	var SideNumInGroup uint16 = uint16(len(t.Side))
-	if err := _m.WriteUint16(_w, SideNumInGroup); err != nil {
-		return err
-	}
-	for _, prop := range t.Side {
-		if err := prop.Encode(_m, _w); err != nil {
-			return err
-		}
 	}
 	if err := _m.WriteUint32(_w, uint32(len(t.Source))); err != nil {
 		return err
@@ -87,28 +73,15 @@ func (t *Trade) Decode(_m *SbeGoMarshaller, _r io.Reader, actingVersion uint16, 
 			return err
 		}
 	}
+	if !t.Buy_sideInActingVersion(actingVersion) {
+		t.Buy_side = t.Buy_sideNullValue()
+	} else {
+		if err := _m.ReadUint8(_r, &t.Buy_side); err != nil {
+			return err
+		}
+	}
 	if actingVersion > t.SbeSchemaVersion() && blockLength > t.SbeBlockLength() {
 		io.CopyN(ioutil.Discard, _r, int64(blockLength-t.SbeBlockLength()))
-	}
-
-	if t.SideInActingVersion(actingVersion) {
-		var SideBlockLength uint16
-		if err := _m.ReadUint16(_r, &SideBlockLength); err != nil {
-			return err
-		}
-		var SideNumInGroup uint16
-		if err := _m.ReadUint16(_r, &SideNumInGroup); err != nil {
-			return err
-		}
-		if cap(t.Side) < int(SideNumInGroup) {
-			t.Side = make([]TradeSide, SideNumInGroup)
-		}
-		t.Side = t.Side[:SideNumInGroup]
-		for i := range t.Side {
-			if err := t.Side[i].Decode(_m, _r, actingVersion, uint(SideBlockLength)); err != nil {
-				return err
-			}
-		}
 	}
 
 	if t.SourceInActingVersion(actingVersion) {
@@ -138,9 +111,9 @@ func (t *Trade) RangeCheck(actingVersion uint16, schemaVersion uint16) error {
 			return fmt.Errorf("Range check failed on t.Timestamp (%v < %v > %v)", t.TimestampMinValue(), t.Timestamp, t.TimestampMaxValue())
 		}
 	}
-	for _, prop := range t.Side {
-		if err := prop.RangeCheck(actingVersion, schemaVersion); err != nil {
-			return err
+	if t.Buy_sideInActingVersion(actingVersion) {
+		if t.Buy_side < t.Buy_sideMinValue() || t.Buy_side > t.Buy_sideMaxValue() {
+			return fmt.Errorf("Range check failed on t.Buy_side (%v < %v > %v)", t.Buy_sideMinValue(), t.Buy_side, t.Buy_sideMaxValue())
 		}
 	}
 	if !utf8.Valid(t.Source[:]) {
@@ -153,49 +126,8 @@ func TradeInit(t *Trade) {
 	return
 }
 
-func (t *TradeSide) Encode(_m *SbeGoMarshaller, _w io.Writer) error {
-	if err := t.Sell.Encode(_m, _w); err != nil {
-		return err
-	}
-	if err := t.Buy.Encode(_m, _w); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (t *TradeSide) Decode(_m *SbeGoMarshaller, _r io.Reader, actingVersion uint16, blockLength uint) error {
-	if t.SellInActingVersion(actingVersion) {
-		if err := t.Sell.Decode(_m, _r, actingVersion); err != nil {
-			return err
-		}
-	}
-	if t.BuyInActingVersion(actingVersion) {
-		if err := t.Buy.Decode(_m, _r, actingVersion); err != nil {
-			return err
-		}
-	}
-	if actingVersion > t.SbeSchemaVersion() && blockLength > t.SbeBlockLength() {
-		io.CopyN(ioutil.Discard, _r, int64(blockLength-t.SbeBlockLength()))
-	}
-	return nil
-}
-
-func (t *TradeSide) RangeCheck(actingVersion uint16, schemaVersion uint16) error {
-	if err := t.Sell.RangeCheck(actingVersion, schemaVersion); err != nil {
-		return err
-	}
-	if err := t.Buy.RangeCheck(actingVersion, schemaVersion); err != nil {
-		return err
-	}
-	return nil
-}
-
-func TradeSideInit(t *TradeSide) {
-	return
-}
-
 func (*Trade) SbeBlockLength() (blockLength uint16) {
-	return 38
+	return 39
 }
 
 func (*Trade) SbeTemplateId() (templateId uint16) {
@@ -350,88 +282,46 @@ func (*Trade) SizeMetaAttribute(meta int) string {
 	return ""
 }
 
-func (*TradeSide) SellId() uint16 {
-	return 6
-}
-
-func (*TradeSide) SellSinceVersion() uint16 {
-	return 0
-}
-
-func (t *TradeSide) SellInActingVersion(actingVersion uint16) bool {
-	return actingVersion >= t.SellSinceVersion()
-}
-
-func (*TradeSide) SellDeprecated() uint16 {
-	return 0
-}
-
-func (*TradeSide) SellMetaAttribute(meta int) string {
-	switch meta {
-	case 1:
-		return ""
-	case 2:
-		return ""
-	case 3:
-		return ""
-	case 4:
-		return "required"
-	}
-	return ""
-}
-
-func (*TradeSide) BuyId() uint16 {
-	return 7
-}
-
-func (*TradeSide) BuySinceVersion() uint16 {
-	return 0
-}
-
-func (t *TradeSide) BuyInActingVersion(actingVersion uint16) bool {
-	return actingVersion >= t.BuySinceVersion()
-}
-
-func (*TradeSide) BuyDeprecated() uint16 {
-	return 0
-}
-
-func (*TradeSide) BuyMetaAttribute(meta int) string {
-	switch meta {
-	case 1:
-		return ""
-	case 2:
-		return ""
-	case 3:
-		return ""
-	case 4:
-		return "required"
-	}
-	return ""
-}
-
-func (*Trade) SideId() uint16 {
+func (*Trade) Buy_sideId() uint16 {
 	return 5
 }
 
-func (*Trade) SideSinceVersion() uint16 {
+func (*Trade) Buy_sideSinceVersion() uint16 {
 	return 0
 }
 
-func (t *Trade) SideInActingVersion(actingVersion uint16) bool {
-	return actingVersion >= t.SideSinceVersion()
+func (t *Trade) Buy_sideInActingVersion(actingVersion uint16) bool {
+	return actingVersion >= t.Buy_sideSinceVersion()
 }
 
-func (*Trade) SideDeprecated() uint16 {
+func (*Trade) Buy_sideDeprecated() uint16 {
 	return 0
 }
 
-func (*TradeSide) SbeBlockLength() (blockLength uint) {
-	return 2
+func (*Trade) Buy_sideMetaAttribute(meta int) string {
+	switch meta {
+	case 1:
+		return ""
+	case 2:
+		return ""
+	case 3:
+		return ""
+	case 4:
+		return "required"
+	}
+	return ""
 }
 
-func (*TradeSide) SbeSchemaVersion() (schemaVersion uint16) {
+func (*Trade) Buy_sideMinValue() uint8 {
 	return 0
+}
+
+func (*Trade) Buy_sideMaxValue() uint8 {
+	return math.MaxUint8 - 1
+}
+
+func (*Trade) Buy_sideNullValue() uint8 {
+	return math.MaxUint8
 }
 
 func (*Trade) SourceMetaAttribute(meta int) string {

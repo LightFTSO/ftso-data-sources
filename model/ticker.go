@@ -3,7 +3,7 @@ package model
 import "time"
 
 type Ticker struct {
-	LastPrice float64   `json:"l"`
+	LastPrice string    `json:"l"`
 	Symbol    string    `json:"s"`
 	Base      string    `json:"-"`
 	Quote     string    `json:"-"`

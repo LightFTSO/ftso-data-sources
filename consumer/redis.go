@@ -61,11 +61,12 @@ func (s *RedisConsumer) setup() error {
 func (s *RedisConsumer) processTrade(trade *model.Trade) {
 	if s.toStdout {
 		fmt.Printf(
-			"%s source=%s symbol=%s price=%f size=%f side=%s ts=%d\n",
+			"%s source=%s symbol=%s price=%s size=%s side=%s ts=%d\n",
 			time.Now().Format(constants.TS_FORMAT), trade.Source, trade.Symbol, trade.Price, trade.Size, trade.Side, trade.Timestamp.UTC().UnixMilli())
 	}
 	key := fmt.Sprintf("ts:%s:%s:trade_prices", trade.Source, trade.Symbol)
-	cmd := s.redisClient.B().TsAdd().Key(key).Timestamp(strconv.FormatInt(trade.Timestamp.UTC().UnixMilli(), 10)).Value(trade.Price).Retention(s.tsRetention.Milliseconds()).EncodingCompressed().OnDuplicateLast().Labels().Labels("type", "trade_prices").Labels("source", trade.Source).Labels("base", trade.Base).Labels("quote", trade.Quote).Build()
+	val, _ := strconv.ParseFloat(trade.Price, 64)
+	cmd := s.redisClient.B().TsAdd().Key(key).Timestamp(strconv.FormatInt(trade.Timestamp.UTC().UnixMilli(), 10)).Value(val).Retention(s.tsRetention.Milliseconds()).EncodingCompressed().OnDuplicateLast().Labels().Labels("type", "trade_prices").Labels("source", trade.Source).Labels("base", trade.Base).Labels("quote", trade.Quote).Build()
 	err := s.redisClient.Do(context.Background(), cmd).Error()
 	if err != nil {
 		log.Error("Error executing ts.ADD", "consumer", "redis", "error", err)
@@ -93,11 +94,12 @@ func (s *RedisConsumer) CloseTradeListener() {
 func (s *RedisConsumer) processTicker(ticker *model.Ticker) {
 	if s.toStdout {
 		fmt.Printf(
-			"%s source=%s symbol=%s last_price=%f ts=%d\n",
+			"%s source=%s symbol=%s last_price=%s ts=%d\n",
 			time.Now().Format(constants.TS_FORMAT), ticker.Source, ticker.Symbol, ticker.LastPrice, ticker.Timestamp.UTC().UnixMilli())
 	}
 	key := fmt.Sprintf("ts:%s:%s:ticker_prices", ticker.Source, ticker.Symbol)
-	cmd := s.redisClient.B().TsAdd().Key(key).Timestamp(strconv.FormatInt(ticker.Timestamp.UTC().UnixMilli(), 10)).Value(ticker.LastPrice).Retention(s.tsRetention.Milliseconds()).EncodingCompressed().OnDuplicateLast().Labels().Labels("type", "ticker_prices").Labels("source", ticker.Source).Labels("base", ticker.Base).Labels("quote", ticker.Quote).Build()
+	val, _ := strconv.ParseFloat(ticker.LastPrice, 64)
+	cmd := s.redisClient.B().TsAdd().Key(key).Timestamp(strconv.FormatInt(ticker.Timestamp.UTC().UnixMilli(), 10)).Value(val).Retention(s.tsRetention.Milliseconds()).EncodingCompressed().OnDuplicateLast().Labels().Labels("type", "ticker_prices").Labels("source", ticker.Source).Labels("base", ticker.Base).Labels("quote", ticker.Quote).Build()
 	err := s.redisClient.Do(context.Background(), cmd).Error()
 	if err != nil {
 		log.Error("Error executing ts.ADD", "consumer", "redis", "error", err)

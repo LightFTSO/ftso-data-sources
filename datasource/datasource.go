@@ -7,7 +7,9 @@ import (
 	"github.com/mitchellh/mapstructure"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/datasource/binance"
+	"roselabs.mx/ftso-data-sources/datasource/bitrue"
 	"roselabs.mx/ftso-data-sources/datasource/bybit"
+	"roselabs.mx/ftso-data-sources/datasource/kraken"
 	"roselabs.mx/ftso-data-sources/datasource/noisy"
 	"roselabs.mx/ftso-data-sources/symbols"
 )
@@ -33,8 +35,12 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tra
 	switch source.Source {
 	case "binance":
 		return binance.NewBinanceClient(source.Options, allSymbols, tradeTopic, tickerTopic, w)
+	case "bitrue":
+		return bitrue.NewBitrueClient(source.Options, allSymbols, tradeTopic, tickerTopic, w)
 	case "bybit":
 		return bybit.NewBybitClient(source.Options, allSymbols, tradeTopic, tickerTopic, w)
+	case "kraken":
+		return kraken.NewKrakenClient(source.Options, allSymbols, tradeTopic, tickerTopic, w)
 	case "noisy":
 		var options = new(noisy.NoisySourceOptions)
 		mapstructure.Decode(source.Options, options)

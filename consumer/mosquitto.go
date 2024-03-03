@@ -57,6 +57,10 @@ func (s *MqttConsumer) processTrade(trade *model.Trade, sbeGoMarshaller *sbe.Sbe
 		copy(base[:], trade.Base)
 		var quote [6]byte
 		copy(quote[:], trade.Quote)
+		isSideBuy := uint8(0)
+		if trade.Side == "buy" {
+			isSideBuy = 1
+		}
 		sbeTrade := sbe.Trade{
 			Timestamp: uint64(trade.Timestamp.UnixMilli()),
 			Symbol: sbe.Symbol{
@@ -71,10 +75,9 @@ func (s *MqttConsumer) processTrade(trade *model.Trade, sbeGoMarshaller *sbe.Sbe
 				Mantissa: 1618,
 				Exponent: 2,
 			},
-			Side:   []sbe.TradeSide{},
-			Source: []uint8(trade.Source),
+			Buy_side: isSideBuy,
+			Source:   []uint8(trade.Source),
 		}
-		fmt.Println(sbeTrade, trade.Source)
 		sbe.TradeInit(&sbeTrade)
 		var buf = new(bytes.Buffer)
 
@@ -90,6 +93,7 @@ func (s *MqttConsumer) processTrade(trade *model.Trade, sbeGoMarshaller *sbe.Sbe
 			log.Error("error encoding trade", "error", err)
 		}
 		token := s.mqttClient.Publish("trades/", byte(s.qosLevel), false, buf.Bytes())
+		//fmt.Println(buf.Bytes())
 		token.Wait()
 
 	} else {

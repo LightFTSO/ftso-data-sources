@@ -25,7 +25,7 @@ type FileConsumer struct {
 
 func (s *FileConsumer) processTrade(trade *model.Trade) {
 	s.W.Write([]byte(fmt.Sprintf(
-		"%s source=%s symbol=%s price=%f size=%f side=%s ts=%d\n",
+		"%s source=%s symbol=%s price=%s size=%s side=%s ts=%d\n",
 		time.Now().Format(constants.TS_FORMAT), trade.Source, trade.Symbol, trade.Price, trade.Size, trade.Side, trade.Timestamp.UTC().UnixMilli())))
 }
 
@@ -49,7 +49,7 @@ func (s *FileConsumer) CloseTradeListener() {
 
 func (s *FileConsumer) processTicker(ticker *model.Ticker) {
 	s.W.Write([]byte(fmt.Sprintf(
-		"%s source=%s symbol=%s last_price=%f ts=%d\n",
+		"%s source=%s symbol=%s last_price=%s ts=%d\n",
 		time.Now().Format(constants.TS_FORMAT), ticker.Source, ticker.Symbol, ticker.LastPrice, ticker.Timestamp.UTC().UnixMilli())))
 }
 

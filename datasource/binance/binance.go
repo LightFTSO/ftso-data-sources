@@ -1,18 +1,17 @@
 package binance
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	log "log/slog"
 	"math/rand"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+	json "github.com/json-iterator/go"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
@@ -28,8 +27,6 @@ type BinanceClient struct {
 	wsEndpoint  string
 	apiEndpoint string
 	SymbolList  []model.Symbol
-
-	wsMessageChan chan internal.WsMessage
 }
 
 func NewBinanceClient(options interface{}, symbolList symbols.AllSymbols, tradeTopic *broadcast.Broadcaster, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BinanceClient, error) {
@@ -37,15 +34,14 @@ func NewBinanceClient(options interface{}, symbolList symbols.AllSymbols, tradeT
 	wsEndpoint := "wss://stream.binance.com:9443/stream?streams="
 
 	binance := BinanceClient{
-		name:          "binance",
-		W:             w,
-		TradeTopic:    tradeTopic,
-		TickerChan:    tickerTopic,
-		wsClient:      *internal.NewWebsocketClient(wsEndpoint, true, nil),
-		wsEndpoint:    wsEndpoint,
-		apiEndpoint:   "https://api.binance.com",
-		SymbolList:    symbolList.Crypto,
-		wsMessageChan: make(chan internal.WsMessage),
+		name:        "binance",
+		W:           w,
+		TradeTopic:  tradeTopic,
+		TickerChan:  tickerTopic,
+		wsClient:    *internal.NewWebsocketClient(wsEndpoint, true, nil),
+		wsEndpoint:  wsEndpoint,
+		apiEndpoint: "https://api.binance.com",
+		SymbolList:  symbolList.Crypto,
 	}
 	binance.wsClient.SetMessageHandler(binance.onMessage)
 
@@ -120,22 +116,13 @@ func (b *BinanceClient) parseTrade(message []byte) (*model.Trade, error) {
 		log.Error(err.Error(), "datasource", b.GetName())
 		return &model.Trade{}, err
 	}
-
-	price, err := strconv.ParseFloat(newTradeEvent.Data.Price, 32)
-	if err != nil {
-		return nil, err
-	}
-	size, err := strconv.ParseFloat(newTradeEvent.Data.Quantity, 32)
-	if err != nil {
-		return nil, err
-	}
 	symbol := model.ParseSymbol(newTradeEvent.Data.Symbol)
 	newTrade := model.Trade{
 		Base:      symbol.Base,
 		Quote:     symbol.Quote,
 		Symbol:    symbol.Symbol,
-		Price:     price,
-		Size:      size,
+		Price:     newTradeEvent.Data.Price,
+		Size:      newTradeEvent.Data.Quantity,
 		Source:    b.GetName(),
 		Timestamp: time.UnixMilli(newTradeEvent.Data.Time),
 	}

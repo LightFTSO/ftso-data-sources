@@ -11,6 +11,7 @@ import (
 	"roselabs.mx/ftso-data-sources/datasource/bybit"
 	"roselabs.mx/ftso-data-sources/datasource/kraken"
 	"roselabs.mx/ftso-data-sources/datasource/noisy"
+	"roselabs.mx/ftso-data-sources/datasource/tiingo"
 	"roselabs.mx/ftso-data-sources/symbols"
 )
 
@@ -41,6 +42,8 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tra
 		return bybit.NewBybitClient(source.Options, allSymbols, tradeTopic, tickerTopic, w)
 	case "kraken":
 		return kraken.NewKrakenClient(source.Options, allSymbols, tradeTopic, tickerTopic, w)
+	case "tiingo":
+		return tiingo.NewTiingoClient(source.Options, allSymbols, tradeTopic, tickerTopic, w)
 	case "noisy":
 		var options = new(noisy.NoisySourceOptions)
 		mapstructure.Decode(source.Options, options)

@@ -11,6 +11,7 @@ require (
 	github.com/redis/rueidis v1.0.31
 	github.com/spf13/viper v1.18.2
 	github.com/textileio/go-threads v1.1.5
+	github.com/shopspring/decimal v1.3.1 
 )
 
 require (

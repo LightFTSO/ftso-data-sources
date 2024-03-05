@@ -7,6 +7,7 @@ import (
 	log "log/slog"
 	"time"
 
+	"github.com/shopspring/decimal"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/constants"
 	"roselabs.mx/ftso-data-sources/model"
@@ -61,6 +62,9 @@ func (s *MqttConsumer) processTrade(trade *model.Trade, sbeGoMarshaller *sbe.Sbe
 		if trade.Side == "buy" {
 			isSideBuy = 1
 		}
+		price, _ := decimal.NewFromString(trade.Price)
+		size, _ := decimal.NewFromString(trade.Size)
+		//fmt.Println(price.Exponent())
 		sbeTrade := sbe.Trade{
 			Timestamp: uint64(trade.Timestamp.UnixMilli()),
 			Symbol: sbe.Symbol{
@@ -68,12 +72,12 @@ func (s *MqttConsumer) processTrade(trade *model.Trade, sbeGoMarshaller *sbe.Sbe
 				Quote: quote,
 			},
 			Price: sbe.Decimal{
-				Mantissa: 31416,
-				Exponent: 2,
+				Mantissa: uint64(price.CoefficientInt64()),
+				Exponent: int8(price.Exponent()),
 			},
 			Size: sbe.Decimal{
-				Mantissa: 1618,
-				Exponent: 2,
+				Mantissa: uint64(size.CoefficientInt64()),
+				Exponent: int8(size.Exponent()),
 			},
 			Buy_side: isSideBuy,
 			Source:   []uint8(trade.Source),
@@ -125,7 +129,7 @@ func (s *MqttConsumer) CloseTradeListener() {
 
 func (s *MqttConsumer) processTicker(ticker *model.Ticker) {
 	payload := fmt.Sprintf(
-		"%s source=%s symbol=%s last_price=%f ts=%d\n",
+		"%s source=%s symbol=%s last_price=%s ts=%d\n",
 		time.Now().Format(constants.TS_FORMAT), ticker.Source, ticker.Symbol, ticker.LastPrice, ticker.Timestamp.UTC().UnixMilli())
 
 	token := s.mqttClient.Publish("tickers", byte(s.qosLevel), false, payload)

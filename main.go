@@ -93,7 +93,9 @@ func initConsumers(tradeTopic *broadcast.Broadcaster, tickerTopic *broadcast.Bro
 func initDataSources(tradeTopic *broadcast.Broadcaster, tickerTopic *broadcast.Broadcaster, config config.ConfigOptions) error {
 	var w sync.WaitGroup
 
-	allSymbols := symbols.GetAllSymbols()
+	allSymbols := symbols.GetAllSymbols(config.Assets.Crypto, config.Assets.Commodities, config.Assets.Forex, config.Assets.Stocks)
+	slog.Info(fmt.Sprintf("list of enabled feeds: %+v", allSymbols))
+
 	dataSourceList := config.Datasources
 	for _, source := range dataSourceList {
 		w.Add(1)

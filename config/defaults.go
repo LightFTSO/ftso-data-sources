@@ -1,6 +1,9 @@
 package config
 
-import "github.com/spf13/viper"
+import (
+	"github.com/spf13/viper"
+	"roselabs.mx/ftso-data-sources/constants"
+)
 
 func setDefaults() {
 	viper.SetDefault("env", "development")
@@ -9,6 +12,11 @@ func setDefaults() {
 	viper.SetDefault("enabled_streams.tickers", false)
 
 	viper.SetDefault("message_buffer_size", 0)
+
+	viper.SetDefault("assets.crypto", constants.BASES_CRYPTO)
+	viper.SetDefault("assets.commodities", constants.BASES_COMMODITIES)
+	viper.SetDefault("assets.forex", constants.BASES_FOREX)
+	viper.SetDefault("assets.stocks", constants.BASES_STOCKS)
 
 	viper.SetDefault("stats.enabled", "1h")
 	viper.SetDefault("stats.interval", "1h")

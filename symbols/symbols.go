@@ -70,20 +70,20 @@ func (s *AllSymbols) Flatten() []model.Symbol {
 	return slices.Concat(s.Crypto, s.Forex, s.Commodities, s.Stocks)
 }
 
-func GetAllSymbols() AllSymbols {
-	cryptoSymbols, err := createSymbolList(constants.BASES_CRYPTO[:], constants.USD_USDT_USDC_BUSD[:])
+func GetAllSymbols(crypto []string, commodities []string, forex []string, stocks []string) AllSymbols {
+	cryptoSymbols, err := createSymbolList(crypto[:], constants.USD_USDT_USDC_BUSD[:])
 	if err != nil {
 		panic(err)
 	}
-	forexSymbols, err := createSymbolList(constants.BASES_FOREX, []string{constants.USD}[:])
+	forexSymbols, err := createSymbolList(forex[:], []string{constants.USD}[:])
 	if err != nil {
 		panic(err)
 	}
-	commoditySymbols, err := createSymbolList(constants.BASES_COMMODITIES, []string{constants.USD}[:])
+	commoditySymbols, err := createSymbolList(commodities[:], []string{constants.USD}[:])
 	if err != nil {
 		panic(err)
 	}
-	stockSymbols, err := createSymbolList(constants.BASES_STOCKS, []string{constants.USD}[:])
+	stockSymbols, err := createSymbolList(stocks[:], []string{constants.USD}[:])
 	if err != nil {
 		panic(err)
 	}

@@ -103,7 +103,7 @@ func (b *KrakenClient) onMessage(message internal.WsMessage) error {
 	if message.Err != nil {
 		log.Error("Error reading websocket data, reconnecting in 5 seconds",
 			"datasource", b.GetName(), "error", message.Err)
-		time.Sleep(5 * time.Second)
+		time.Sleep(1 * time.Second)
 		b.Reconnect()
 	}
 

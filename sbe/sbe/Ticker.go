@@ -12,12 +12,10 @@ import (
 )
 
 type Ticker struct {
-	Timestamp uint64
-	Symbol    Symbol
-	Price     Decimal
-	Size      Decimal
-	Side_sell BooleanTypeEnum
-	Source    []uint8
+	Timestamp  uint64
+	Symbol     Symbol
+	Last_price Decimal
+	Source     []uint8
 }
 
 func (t *Ticker) Encode(_m *SbeGoMarshaller, _w io.Writer, doRangeCheck bool) error {
@@ -32,14 +30,14 @@ func (t *Ticker) Encode(_m *SbeGoMarshaller, _w io.Writer, doRangeCheck bool) er
 	if err := t.Symbol.Encode(_m, _w); err != nil {
 		return err
 	}
-	if err := t.Price.Encode(_m, _w); err != nil {
+	if err := t.Last_price.Encode(_m, _w); err != nil {
 		return err
 	}
-	if err := t.Size.Encode(_m, _w); err != nil {
-		return err
-	}
-	if err := t.Side_sell.Encode(_m, _w); err != nil {
-		return err
+
+	for i := 0; i < 10; i++ {
+		if err := _m.WriteUint8(_w, uint8(0)); err != nil {
+			return err
+		}
 	}
 	if err := _m.WriteUint32(_w, uint32(len(t.Source))); err != nil {
 		return err
@@ -63,24 +61,15 @@ func (t *Ticker) Decode(_m *SbeGoMarshaller, _r io.Reader, actingVersion uint16,
 			return err
 		}
 	}
-	if t.PriceInActingVersion(actingVersion) {
-		if err := t.Price.Decode(_m, _r, actingVersion); err != nil {
-			return err
-		}
-	}
-	if t.SizeInActingVersion(actingVersion) {
-		if err := t.Size.Decode(_m, _r, actingVersion); err != nil {
-			return err
-		}
-	}
-	if t.Side_sellInActingVersion(actingVersion) {
-		if err := t.Side_sell.Decode(_m, _r, actingVersion); err != nil {
+	if t.Last_priceInActingVersion(actingVersion) {
+		if err := t.Last_price.Decode(_m, _r, actingVersion); err != nil {
 			return err
 		}
 	}
 	if actingVersion > t.SbeSchemaVersion() && blockLength > t.SbeBlockLength() {
 		io.CopyN(ioutil.Discard, _r, int64(blockLength-t.SbeBlockLength()))
 	}
+	io.CopyN(ioutil.Discard, _r, 10)
 
 	if t.SourceInActingVersion(actingVersion) {
 		var SourceLength uint32
@@ -108,9 +97,6 @@ func (t *Ticker) RangeCheck(actingVersion uint16, schemaVersion uint16) error {
 		if t.Timestamp < t.TimestampMinValue() || t.Timestamp > t.TimestampMaxValue() {
 			return fmt.Errorf("Range check failed on t.Timestamp (%v < %v > %v)", t.TimestampMinValue(), t.Timestamp, t.TimestampMaxValue())
 		}
-	}
-	if err := t.Side_sell.RangeCheck(actingVersion, schemaVersion); err != nil {
-		return err
 	}
 	if !utf8.Valid(t.Source[:]) {
 		return errors.New("t.Source failed UTF-8 validation")
@@ -218,83 +204,23 @@ func (*Ticker) SymbolMetaAttribute(meta int) string {
 	return ""
 }
 
-func (*Ticker) PriceId() uint16 {
+func (*Ticker) Last_priceId() uint16 {
 	return 3
 }
 
-func (*Ticker) PriceSinceVersion() uint16 {
+func (*Ticker) Last_priceSinceVersion() uint16 {
 	return 0
 }
 
-func (t *Ticker) PriceInActingVersion(actingVersion uint16) bool {
-	return actingVersion >= t.PriceSinceVersion()
+func (t *Ticker) Last_priceInActingVersion(actingVersion uint16) bool {
+	return actingVersion >= t.Last_priceSinceVersion()
 }
 
-func (*Ticker) PriceDeprecated() uint16 {
+func (*Ticker) Last_priceDeprecated() uint16 {
 	return 0
 }
 
-func (*Ticker) PriceMetaAttribute(meta int) string {
-	switch meta {
-	case 1:
-		return ""
-	case 2:
-		return ""
-	case 3:
-		return ""
-	case 4:
-		return "required"
-	}
-	return ""
-}
-
-func (*Ticker) SizeId() uint16 {
-	return 4
-}
-
-func (*Ticker) SizeSinceVersion() uint16 {
-	return 0
-}
-
-func (t *Ticker) SizeInActingVersion(actingVersion uint16) bool {
-	return actingVersion >= t.SizeSinceVersion()
-}
-
-func (*Ticker) SizeDeprecated() uint16 {
-	return 0
-}
-
-func (*Ticker) SizeMetaAttribute(meta int) string {
-	switch meta {
-	case 1:
-		return ""
-	case 2:
-		return ""
-	case 3:
-		return ""
-	case 4:
-		return "required"
-	}
-	return ""
-}
-
-func (*Ticker) Side_sellId() uint16 {
-	return 5
-}
-
-func (*Ticker) Side_sellSinceVersion() uint16 {
-	return 0
-}
-
-func (t *Ticker) Side_sellInActingVersion(actingVersion uint16) bool {
-	return actingVersion >= t.Side_sellSinceVersion()
-}
-
-func (*Ticker) Side_sellDeprecated() uint16 {
-	return 0
-}
-
-func (*Ticker) Side_sellMetaAttribute(meta int) string {
+func (*Ticker) Last_priceMetaAttribute(meta int) string {
 	switch meta {
 	case 1:
 		return ""

@@ -64,7 +64,7 @@ func (s *MqttConsumer) processTicker(ticker *model.Ticker, sbeGoMarshaller *sbe.
 				Base:  base,
 				Quote: quote,
 			},
-			Price: sbe.Decimal{
+			Last_price: sbe.Decimal{
 				Mantissa: uint64(price.CoefficientInt64()),
 				Exponent: int8(price.Exponent()),
 			},

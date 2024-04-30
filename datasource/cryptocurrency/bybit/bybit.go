@@ -24,7 +24,6 @@ import (
 type BybitClient struct {
 	name        string
 	W           *sync.WaitGroup
-	TradeTopic  *broadcast.Broadcaster
 	TickerTopic *broadcast.Broadcaster
 	wsClient    internal.WebsocketClient
 	wsEndpoint  string
@@ -36,14 +35,12 @@ type BybitClient struct {
 	cancel       context.CancelFunc
 }
 
-func NewBybitClient(options interface{}, symbolList symbols.AllSymbols, tradeTopic *broadcast.Broadcaster, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BybitClient, error) {
-	log.Info("Created new datasource", "datasource", "bybit")
+func NewBybitClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BybitClient, error) {
 	wsEndpoint := "wss://stream.bybit.com/v5/public/spot"
 
 	bybit := BybitClient{
 		name:         "bybit",
 		W:            w,
-		TradeTopic:   tradeTopic,
 		TickerTopic:  tickerTopic,
 		wsClient:     *internal.NewWebsocketClient(wsEndpoint, true, nil),
 		wsEndpoint:   wsEndpoint,
@@ -53,6 +50,7 @@ func NewBybitClient(options interface{}, symbolList symbols.AllSymbols, tradeTop
 	}
 	bybit.wsClient.SetMessageHandler(bybit.onMessage)
 
+	log.Info("Created new datasource", "datasource", bybit.GetName())
 	return &bybit, nil
 }
 
@@ -80,9 +78,9 @@ func (b *BybitClient) Reconnect() error {
 		return err
 	}
 	log.Info("Reconnected to bybit datasource")
-	err = b.SubscribeTrades()
+	err = b.SubscribeTickers()
 	if err != nil {
-		log.Error("Error subscribing to trades", "datasource", b.GetName())
+		log.Error("Error subscribing to tickers", "datasource", b.GetName())
 		return err
 	}
 	go b.wsClient.Listen()
@@ -107,13 +105,13 @@ func (b *BybitClient) onMessage(message internal.WsMessage) error {
 	if message.Type == websocket.TextMessage {
 
 		if strings.Contains(string(message.Message), "publicTrade.") {
-			trades, err := b.parseTrade(message.Message)
+			tickers, err := b.parseTicker(message.Message)
 			if err != nil {
 				log.Error("Error parsing trade", "datasource", b.GetName(), "error", err.Error())
 
 			}
-			for _, v := range trades {
-				b.TradeTopic.Send(v)
+			for _, v := range tickers {
+				b.TickerTopic.Send(v)
 
 			}
 		}
@@ -122,29 +120,28 @@ func (b *BybitClient) onMessage(message internal.WsMessage) error {
 	return nil
 }
 
-func (b *BybitClient) parseTrade(message []byte) ([]*model.Trade, error) {
-	var newTradeEvent WsTradeMessage
-	err := json.Unmarshal(message, &newTradeEvent)
+func (b *BybitClient) parseTicker(message []byte) ([]*model.Ticker, error) {
+	var newTickerEvent WsTickerMessage
+	err := json.Unmarshal(message, &newTickerEvent)
 	if err != nil {
 		log.Error(err.Error(), "datasource", b.GetName())
-		return []*model.Trade{}, err
+		return []*model.Ticker{}, err
 	}
 
-	trades := []*model.Trade{}
-	for _, trade := range newTradeEvent.Data {
-		symbol := model.ParseSymbol(trade.Symbol)
-		trades = append(trades, &model.Trade{
+	tickers := []*model.Ticker{}
+	for _, ticker := range newTickerEvent.Data {
+		symbol := model.ParseSymbol(ticker.Symbol)
+		tickers = append(tickers, &model.Ticker{
 			Base:      symbol.Base,
 			Quote:     symbol.Quote,
 			Symbol:    symbol.Symbol,
-			Price:     trade.Price,
-			Size:      trade.Size,
+			LastPrice: ticker.LastPrice,
 			Source:    b.GetName(),
-			Timestamp: time.UnixMilli(trade.TradeTime),
+			Timestamp: time.UnixMilli(newTickerEvent.Time),
 		})
 	}
 
-	return trades, nil
+	return tickers, nil
 }
 
 func (b *BybitClient) getAvailableSymbols() ([]BybitSymbol, error) {

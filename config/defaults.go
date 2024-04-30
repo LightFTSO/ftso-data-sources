@@ -8,9 +8,6 @@ import (
 func setDefaults() {
 	viper.SetDefault("env", "development")
 
-	viper.SetDefault("enabled_streams.trades", false)
-	viper.SetDefault("enabled_streams.tickers", false)
-
 	viper.SetDefault("message_buffer_size", 0)
 
 	viper.SetDefault("assets.crypto", constants.BASES_CRYPTO)
@@ -45,7 +42,6 @@ func setDefaults() {
 	viper.SetDefault("websocket_server.use_sbe_encoding", false)
 	viper.SetDefault("websocket_server.host", "127.0.0.1")
 	viper.SetDefault("websocket_server.port", 3000)
-	viper.SetDefault("websocket_server.endpoints.trades", "/trades")
 	viper.SetDefault("websocket_server.endpoints.tickers", "/tickers")
 	viper.SetDefault("websocket_server.endpoints.volumes", "/volumes")
 }

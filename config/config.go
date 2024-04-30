@@ -24,11 +24,6 @@ type ConfigOptions struct {
 		Stocks      []string `mapstructure:"stocks"`
 	} `mapstructure:"assets"`
 
-	EnabledStreams struct {
-		Trades  bool `mapstructure:"trades"`
-		Tickers bool `mapstructure:"tickers"`
-	} `mapstructure:"enabled_streams"`
-
 	RedisOptions             consumer.RedisOptions                   `mapstructure:"redis_ts"`
 	WebsocketServerOptions   consumer.WebsocketServerConsumerOptions `mapstructure:"websocket_server"`
 	FileFileConsumerOptions  consumer.FileConsumerOptions            `mapstructure:"file_output"`

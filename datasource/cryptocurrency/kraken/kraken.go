@@ -3,6 +3,7 @@ package kraken
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
@@ -25,7 +26,6 @@ import (
 type KrakenClient struct {
 	name        string
 	W           *sync.WaitGroup
-	TradeTopic  *broadcast.Broadcaster
 	TickerTopic *broadcast.Broadcaster
 	wsClient    internal.WebsocketClient
 	wsEndpoint  string
@@ -37,14 +37,12 @@ type KrakenClient struct {
 	cancel       context.CancelFunc
 }
 
-func NewKrakenClient(options interface{}, symbolList symbols.AllSymbols, tradeTopic *broadcast.Broadcaster, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*KrakenClient, error) {
-	log.Info("Created new datasource", "datasource", "kraken")
-	wsEndpoint := "wss://ws.kraken.com/"
+func NewKrakenClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*KrakenClient, error) {
+	wsEndpoint := "wss://ws.kraken.com/v2"
 
 	kraken := KrakenClient{
 		name:         "kraken",
 		W:            w,
-		TradeTopic:   tradeTopic,
 		TickerTopic:  tickerTopic,
 		wsClient:     *internal.NewWebsocketClient(wsEndpoint, true, nil),
 		wsEndpoint:   wsEndpoint,
@@ -53,12 +51,13 @@ func NewKrakenClient(options interface{}, symbolList symbols.AllSymbols, tradeTo
 		pingInterval: 20,
 	}
 
+	log.Info("Created new datasource", "datasource", kraken.GetName())
 	return &kraken, nil
 }
 
 func (b *KrakenClient) Connect() error {
 	b.W.Add(1)
-	log.Info("Connecting to kraken datasource")
+	log.Info("Connecting to kraken datasource", "datasource", b.GetName())
 
 	b.ctx, b.cancel = context.WithCancel(context.Background())
 
@@ -76,16 +75,16 @@ func (b *KrakenClient) Connect() error {
 }
 
 func (b *KrakenClient) Reconnect() error {
-	log.Info("Reconnecting to kraken datasource")
+	log.Info("Reconnecting to kraken datasource", "datasource", b.GetName())
 
 	_, err := b.wsClient.Connect(http.Header{})
 	if err != nil {
 		return err
 	}
-	log.Info("Reconnected to kraken datasource")
-	err = b.SubscribeTrades()
+	log.Info("Reconnected to kraken datasource", "datasource", b.GetName())
+	err = b.SubscribeTickers()
 	if err != nil {
-		log.Error("Error subscribing to trades", "datasource", b.GetName())
+		log.Error("Error subscribing to tickers", "datasource", b.GetName())
 		return err
 	}
 	go b.wsClient.Listen()
@@ -112,18 +111,15 @@ func (b *KrakenClient) onMessage(message internal.WsMessage) error {
 			b.PongHandler(message.Message)
 			return nil
 		}
-
-		if strings.Contains(string(message.Message), "trade") &&
-			!strings.Contains(string(message.Message), `"channelName":"trade","event":"subscriptionStatus"`) {
-			trades, err := b.parseTrade(message.Message)
+		if strings.Contains(string(message.Message), `"channel":"ticker"`) &&
+			!strings.Contains(string(message.Message), `"method":"subscribe"`) {
+			ticker, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing trade", "datasource", b.GetName(), "error", err.Error())
+				log.Error("Error parsing tickers", "datasource", b.GetName(), "error", err.Error())
 
 			}
-			for _, v := range trades {
-				b.TradeTopic.Send(v)
+			b.TickerTopic.Send(ticker)
 
-			}
 			return nil
 		}
 
@@ -132,37 +128,28 @@ func (b *KrakenClient) onMessage(message internal.WsMessage) error {
 	return nil
 }
 
-func (b *KrakenClient) parseTrade(message []byte) ([]*model.Trade, error) {
-	var newTradeEvent WsTradeMessage
-	err := json.Unmarshal(message, &newTradeEvent)
+func (b *KrakenClient) parseTicker(message []byte) (*model.Ticker, error) {
+	var newTickerEvent KrakenSnapshotUpdate
+	err := json.Unmarshal(message, &newTickerEvent)
 	if err != nil {
 		log.Error(err.Error(), "datasource", b.GetName())
-		return []*model.Trade{}, err
+		return &model.Ticker{}, err
 	}
 
-	trades := []*model.Trade{}
-	pair := newTradeEvent[3]
-	for _, tr := range newTradeEvent[1].([]interface{}) {
-		tr := tr.([]interface{})
+	tickerData := newTickerEvent.Data[0]
+	symbol := model.ParseSymbol(tickerData.Symbol)
 
-		ts, err := strconv.ParseInt(strings.Replace(tr[2].(string), ".", "", 1), 10, 64)
-		if err != nil {
-			return nil, err
-		}
-		symbol := model.ParseSymbol(pair.(string))
-		var base = KrakenAsset(symbol.Base)
-		trades = append(trades, &model.Trade{
-			Base:      string(base.GetStdName()),
-			Quote:     symbol.Quote,
-			Symbol:    string(base.GetStdName()) + "/" + symbol.Quote,
-			Price:     tr[0].(string),
-			Size:      tr[0].(string),
-			Source:    b.GetName(),
-			Timestamp: time.UnixMicro(ts),
-		})
+	base := KrakenAsset(symbol.Base)
+	ticker := &model.Ticker{
+		Base:      string(base.GetStdName()),
+		Quote:     symbol.Quote,
+		Symbol:    symbol.Symbol,
+		LastPrice: strconv.FormatFloat(tickerData.Last, 'f', 9, 64),
+		Source:    b.GetName(),
+		Timestamp: time.Now(),
 	}
 
-	return trades, nil
+	return ticker, nil
 }
 
 func (b *KrakenClient) getAvailableSymbols() ([]AssetPairInfo, error) {
@@ -207,11 +194,11 @@ func (b *KrakenClient) getAvailableSymbols() ([]AssetPairInfo, error) {
 
 }
 
-func (b *KrakenClient) SubscribeTrades() error {
+func (b *KrakenClient) SubscribeTickers() error {
 	availableSymbols, err := b.getAvailableSymbols()
 	if err != nil {
 		b.W.Done()
-		log.Error("error obtaining available symbols. Closing kraken datasource", "error", err.Error())
+		log.Error("error obtaining available symbols. Closing kraken datasource", "datasource", b.GetName(), "error", err.Error())
 		return err
 	}
 
@@ -222,6 +209,7 @@ func (b *KrakenClient) SubscribeTrades() error {
 				strings.EqualFold(strings.ToUpper(v1.Quote), strings.ToUpper(string(v2.Quote.GetStdName()))) {
 
 				subscribedSymbols = append(subscribedSymbols, (v2.WsName))
+				fmt.Println(v2.WsName)
 			}
 		}
 	}
@@ -230,12 +218,8 @@ func (b *KrakenClient) SubscribeTrades() error {
 	chunksize := 5
 	for i := 0; i < len(subscribedSymbols); i += chunksize {
 		subMessage := map[string]interface{}{
-			"event": "subscribe",
-			"reqid": rand.Uint32(),
-			"subscription": map[string]interface{}{
-				"name": "trade",
-				//"snapshot": false,
-			},
+			"method": "subscribe",
+			"req_id": rand.Uint32(),
 		}
 		s := []string{}
 		for j := range chunksize {
@@ -245,16 +229,16 @@ func (b *KrakenClient) SubscribeTrades() error {
 			v := subscribedSymbols[i+j]
 			s = append(s, v)
 		}
-		subMessage["pair"] = s
-		//fmt.Println(subMessage)
+		subMessage["params"] = map[string]interface{}{
+			"channel":       "ticker",
+			"event_trigger": "trades",
+			"snapshot":      true,
+			"symbol":        s,
+		}
 		b.wsClient.SendMessageJSON(subMessage)
 	}
 
-	log.Info("Subscribed trade symbols", "datasource", b.GetName(), "symbols", len(subscribedSymbols))
-	return nil
-}
-
-func (b *KrakenClient) SubscribeTickers() error {
+	log.Info("Subscribed ticker symbols", "datasource", b.GetName(), "symbols", len(subscribedSymbols))
 	return nil
 }
 

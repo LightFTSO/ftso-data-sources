@@ -19,7 +19,6 @@ type NoisySourceOptions struct {
 type NoisySource struct {
 	name        string
 	W           *sync.WaitGroup
-	TradeTopic  *broadcast.Broadcaster
 	TickerTopic *broadcast.Broadcaster
 	Interval    time.Duration
 }
@@ -30,31 +29,6 @@ func (n *NoisySource) Connect() error {
 }
 
 func (n *NoisySource) Reconnect() error {
-	return nil
-}
-
-func (n *NoisySource) SubscribeTrades() error {
-	go func(br *broadcast.Broadcaster) {
-		timeInterval := *time.NewTicker(n.Interval)
-
-		defer timeInterval.Stop()
-
-		for t := range timeInterval.C {
-			fakeTrade := model.Trade{
-				Base:      "ABC",
-				Quote:     "XYZ",
-				Symbol:    "ABC/XYZ",
-				Price:     strconv.FormatFloat(float64(rand.Intn(1000))+rand.Float64(), 'f', 9, 64),
-				Size:      strconv.FormatFloat(float64(rand.Intn(1000))+rand.Float64(), 'f', 9, 64),
-				Side:      "WHAT? LMAO",
-				Source:    n.GetName(),
-				Timestamp: t,
-			}
-
-			br.Send(&fakeTrade)
-		}
-	}(n.TradeTopic)
-
 	return nil
 }
 
@@ -76,7 +50,7 @@ func (n *NoisySource) SubscribeTickers() error {
 
 			br.Send(&fakeTicker)
 		}
-	}(n.TradeTopic)
+	}(n.TickerTopic)
 
 	return nil
 }
@@ -91,7 +65,7 @@ func (n *NoisySource) GetName() string {
 	return n.name
 }
 
-func NewNoisySource(options *NoisySourceOptions, tradeTopic *broadcast.Broadcaster, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*NoisySource, error) {
+func NewNoisySource(options *NoisySourceOptions, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*NoisySource, error) {
 	d, err := time.ParseDuration(options.Interval)
 	if err != nil {
 		log.Info("Using default duration", "datasource", "noisy", "name", options.Name)
@@ -104,7 +78,6 @@ func NewNoisySource(options *NoisySourceOptions, tradeTopic *broadcast.Broadcast
 		name:        options.Name,
 		Interval:    d,
 		W:           w,
-		TradeTopic:  tradeTopic,
 		TickerTopic: tickerTopic,
 	}
 

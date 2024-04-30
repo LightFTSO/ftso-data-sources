@@ -43,9 +43,7 @@
     <sbe:message name="Ticker" id="2" description="Description of a basic ticker event" blockLength="39">
         <field name="timestamp" id="1" type="Timestamp" />
         <field name="symbol" id="2" type="Symbol" />
-        <field name="price" id="3" type="Decimal" />
-        <field name="size" id="4" type="Decimal" />
-        <field name="side_sell" id="5" type="BooleanType" />
-        <data name="source" id="6" type="varStringEncoding" />
+        <field name="last_price" id="3" type="Decimal" />
+        <data name="source" id="4" type="varStringEncoding" />
     </sbe:message>
 </sbe:messageSchema>

@@ -34,9 +34,9 @@ type AssetPairInfo struct {
 	WsName          string      `json:"wsname"`
 }
 
-type WsTradeEvent []string
+type WsTickerEvent []string
 
-type WsTradeMessage []interface{}
+type WsTickerMessage []interface{}
 
 // https://support.kraken.com/hc/en-us/articles/360001185506-How-to-interpret-asset-codes
 var KrakenAssetMapping = map[KrakenAsset]KrakenAsset{
@@ -66,4 +66,25 @@ var KrakenAssetMapping = map[KrakenAsset]KrakenAsset{
 	"ZGBP": "GBP",
 	"ZJPY": "JPY",
 	"ZUSD": "USD",
+}
+
+type KrakenSnapshotUpdate struct {
+	Channel string         `json:"channel"`
+	Type    string         `json:"type"`
+	Data    []KrakenTicker `json:"data"`
+}
+
+type KrakenTicker struct {
+	Ask       float64 `json:"ask"`        // Best ask price.
+	AskQty    float64 `json:"ask_qty"`    // Best ask quantity.
+	Bid       float64 `json:"bid"`        // Best bid price.
+	BidQty    float64 `json:"bid_qty"`    // Best bid quantity.
+	Change    float64 `json:"change"`     // 24-hour price change (in quote currency).
+	ChangePct float64 `json:"change_pct"` // 24-hour price change (in percentage points).
+	High      float64 `json:"high"`       // 24-hour highest trade price.
+	Last      float64 `json:"last"`       // Last traded price.
+	Low       float64 `json:"low"`        // 24-hour lowest trade price.
+	Symbol    string  `json:"symbol"`     // Example: "BTC/USD" The symbol of the currency pair.
+	Volume    float64 `json:"volume"`     // 24-hour traded volume (in base currency terms).
+	Vwap      float64 `json:"vwap"`       // 24-hour volume weighted average price.
 }

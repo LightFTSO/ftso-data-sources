@@ -6,18 +6,17 @@ import (
 
 	"github.com/mitchellh/mapstructure"
 	"github.com/textileio/go-threads/broadcast"
-	"roselabs.mx/ftso-data-sources/datasource/binance"
-	"roselabs.mx/ftso-data-sources/datasource/bitrue"
-	"roselabs.mx/ftso-data-sources/datasource/bybit"
-	"roselabs.mx/ftso-data-sources/datasource/kraken"
-	metalsdev "roselabs.mx/ftso-data-sources/datasource/metals.dev"
-	"roselabs.mx/ftso-data-sources/datasource/noisy"
-	"roselabs.mx/ftso-data-sources/datasource/tiingo"
+	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/binance"
+	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bitrue"
+	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bybit"
+	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/kraken"
+	"roselabs.mx/ftso-data-sources/datasource/others/noisy"
+	metalsdev "roselabs.mx/ftso-data-sources/datasource/tradfi/metals.dev"
+	"roselabs.mx/ftso-data-sources/datasource/tradfi/tiingo"
 	"roselabs.mx/ftso-data-sources/symbols"
 )
 
 type FtsoDataSource interface {
-	SubscribeTrades() error
 	SubscribeTickers() error
 	Connect() error
 	Reconnect() error
@@ -32,27 +31,29 @@ type DataSourceOptions struct {
 	Options map[string]interface{} `mapstructure:",remain"`
 }
 
-func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tradeTopic *broadcast.Broadcaster, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (FtsoDataSource, error) {
+func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (FtsoDataSource, error) {
 
 	switch source.Source {
 	case "binance":
-		return binance.NewBinanceClient(source.Options, allSymbols, tradeTopic, tickerTopic, w)
+		return binance.NewBinanceClient(source.Options, allSymbols, tickerTopic, w)
+	case "binance.us":
+		return binance.NewBinanceUSClient(source.Options, allSymbols, tickerTopic, w)
 	case "bitrue":
-		return bitrue.NewBitrueClient(source.Options, allSymbols, tradeTopic, tickerTopic, w)
+		return bitrue.NewBitrueClient(source.Options, allSymbols, tickerTopic, w)
 	case "bybit":
-		return bybit.NewBybitClient(source.Options, allSymbols, tradeTopic, tickerTopic, w)
+		return bybit.NewBybitClient(source.Options, allSymbols, tickerTopic, w)
 	case "kraken":
-		return kraken.NewKrakenClient(source.Options, allSymbols, tradeTopic, tickerTopic, w)
+		return kraken.NewKrakenClient(source.Options, allSymbols, tickerTopic, w)
 	case "tiingo":
-		return tiingo.NewTiingoClient(source.Options, allSymbols, tradeTopic, tickerTopic, w)
+		return tiingo.NewTiingoFxClient(source.Options, allSymbols, tickerTopic, w)
 	case "metalsdev":
 		var options = new(metalsdev.MetalsDevOptions)
 		mapstructure.Decode(source.Options, options)
-		return metalsdev.NewMetalsDevClient(options, allSymbols, tradeTopic, tickerTopic, w)
+		return metalsdev.NewMetalsDevClient(options, allSymbols, tickerTopic, w)
 	case "noisy":
 		var options = new(noisy.NoisySourceOptions)
 		mapstructure.Decode(source.Options, options)
-		return noisy.NewNoisySource(options, tradeTopic, tickerTopic, w)
+		return noisy.NewNoisySource(options, tickerTopic, w)
 
 	default:
 		return nil, fmt.Errorf("source %s doesn't exist", source)

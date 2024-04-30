@@ -26,7 +26,6 @@ type MetalsDevOptions struct {
 type MetalsDevClient struct {
 	name             string
 	W                *sync.WaitGroup
-	TradeTopic       *broadcast.Broadcaster
 	TickerTopic      *broadcast.Broadcaster
 	Interval         time.Duration
 	CommoditySymbols []model.Symbol
@@ -38,7 +37,7 @@ type MetalsDevClient struct {
 	cancel context.CancelFunc
 }
 
-func NewMetalsDevClient(options *MetalsDevOptions, symbolList symbols.AllSymbols, tradeTopic *broadcast.Broadcaster, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*MetalsDevClient, error) {
+func NewMetalsDevClient(options *MetalsDevOptions, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*MetalsDevClient, error) {
 	log.Info("Created new metalsdev datasource", "datasource", "metalsdev")
 
 	d, err := time.ParseDuration(options.Interval)
@@ -50,7 +49,6 @@ func NewMetalsDevClient(options *MetalsDevOptions, symbolList symbols.AllSymbols
 	metalsdev := MetalsDevClient{
 		name:             "metalsdev",
 		W:                w,
-		TradeTopic:       tradeTopic,
 		TickerTopic:      tickerTopic,
 		CommoditySymbols: symbolList.Commodities,
 		ForexSymbols:     symbolList.Forex,
@@ -121,38 +119,7 @@ func (b *MetalsDevClient) getLatest(useSample bool) (*LatestEndpointResponse, er
 
 }
 
-func (b *MetalsDevClient) parseLatest(latestData LatestEndpointResponse) (*model.Trade, error) {
-	/*var newTradeEvent WsFxEvent
-
-
-	//tr := newTradeEvent.Data
-
-	pair := tr[1]
-	symbol := model.ParseSymbol(pair.(string))
-
-	ts, err := time.Parse("2006-01-02T15:04:05.999999+00:00", tr[2].(string))
-	if err != nil {
-		return nil, err
-	}
-	ask := tr[4].(float64)
-	bid := tr[5].(float64)
-	price := (ask + bid) / 2
-
-	trade := &model.Trade{
-		Base:      symbol.Base,
-		Quote:     symbol.Quote,
-		Symbol:    symbol.Symbol,
-		Price:     strconv.FormatFloat(price, 'f', 9, 64),
-		Size:      "0",
-		Source:    b.GetName(),
-		Side:      "none",
-		Timestamp: ts,
-	}
-	return trade, nil*/
-	return nil, nil
-}
-
-func (b *MetalsDevClient) SubscribeTrades() error {
+func (b *MetalsDevClient) SubscribeTickers() error {
 	go func(br *broadcast.Broadcaster) {
 		timeInterval := *time.NewTicker(b.Interval)
 
@@ -169,45 +136,38 @@ func (b *MetalsDevClient) SubscribeTrades() error {
 				if !present {
 					continue
 				}
-				trade := model.Trade{
+				ticker := model.Ticker{
+					LastPrice: strconv.FormatFloat(price, 'f', 8, 64),
+					Symbol:    strings.ToUpper(s.Symbol),
 					Base:      strings.ToUpper(s.Base),
 					Quote:     strings.ToUpper(s.Quote),
-					Symbol:    strings.ToUpper(s.Symbol),
-					Price:     strconv.FormatFloat(price, 'f', 8, 64),
-					Size:      "0",
-					Side:      "sell",
 					Source:    b.GetName(),
 					Timestamp: t,
 				}
-				log.Info(fmt.Sprintf("metalsdev: symbol=%s price=%s", trade.Symbol, trade.Price))
-				br.Send(&trade)
+				log.Info(fmt.Sprintf("metalsdev: symbol=%s price=%s", ticker.Symbol, ticker.LastPrice))
+				br.Send(&ticker)
 			}
 			for _, s := range b.ForexSymbols {
 				price, present := data.Currencies[strings.ToUpper(s.Base)]
 				if !present {
 					continue
 				}
-				trade := model.Trade{
+
+				ticker := model.Ticker{
+					LastPrice: strconv.FormatFloat(price, 'f', 8, 64),
+					Symbol:    strings.ToUpper(s.Symbol),
 					Base:      strings.ToUpper(s.Base),
 					Quote:     strings.ToUpper(s.Quote),
-					Symbol:    strings.ToUpper(s.Symbol),
-					Price:     strconv.FormatFloat(price, 'f', 8, 64),
-					Size:      "0",
-					Side:      "sell",
 					Source:    b.GetName(),
 					Timestamp: t,
 				}
-				log.Info(fmt.Sprintf("metalsdev: symbol=%s price=%s", trade.Symbol, trade.Price))
-				br.Send(&trade)
+				log.Info(fmt.Sprintf("metalsdev: symbol=%s price=%s", ticker.Symbol, ticker.LastPrice))
+				br.Send(&ticker)
 			}
 
 		}
-	}(b.TradeTopic)
+	}(b.TickerTopic)
 
-	return nil
-}
-
-func (b *MetalsDevClient) SubscribeTickers() error {
 	return nil
 }
 

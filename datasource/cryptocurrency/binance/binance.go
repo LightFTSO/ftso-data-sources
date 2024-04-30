@@ -21,23 +21,20 @@ import (
 type BinanceClient struct {
 	name        string
 	W           *sync.WaitGroup
-	TradeTopic  *broadcast.Broadcaster
-	TickerChan  *broadcast.Broadcaster
+	TickerTopic *broadcast.Broadcaster
 	wsClient    internal.WebsocketClient
 	wsEndpoint  string
 	apiEndpoint string
 	SymbolList  []model.Symbol
 }
 
-func NewBinanceClient(options interface{}, symbolList symbols.AllSymbols, tradeTopic *broadcast.Broadcaster, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BinanceClient, error) {
-	log.Info("Created new datasource", "datasource", "binance")
-	wsEndpoint := "wss://stream.binance.com:9443/stream?streams="
+func NewBinanceClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BinanceClient, error) {
+	wsEndpoint := "wss://stream.binance.com:443/stream?streams="
 
 	binance := BinanceClient{
 		name:        "binance",
 		W:           w,
-		TradeTopic:  tradeTopic,
-		TickerChan:  tickerTopic,
+		TickerTopic: tickerTopic,
 		wsClient:    *internal.NewWebsocketClient(wsEndpoint, true, nil),
 		wsEndpoint:  wsEndpoint,
 		apiEndpoint: "https://api.binance.com",
@@ -45,12 +42,13 @@ func NewBinanceClient(options interface{}, symbolList symbols.AllSymbols, tradeT
 	}
 	binance.wsClient.SetMessageHandler(binance.onMessage)
 
+	log.Info("Created new datasource", "datasource", binance.GetName())
 	return &binance, nil
 }
 
 func (b *BinanceClient) Connect() error {
 	b.W.Add(1)
-	log.Info("Connecting to binance datasource")
+	log.Info("Connecting to binance datasource", "datasource", b.GetName())
 
 	_, err := b.wsClient.Connect(http.Header{})
 	if err != nil {
@@ -63,16 +61,16 @@ func (b *BinanceClient) Connect() error {
 }
 
 func (b *BinanceClient) Reconnect() error {
-	log.Info("Reconnecting to binance datasource")
+	log.Info("Reconnecting...", "datasource", b.GetName())
 
 	_, err := b.wsClient.Connect(http.Header{})
 	if err != nil {
 		return err
 	}
-	log.Info("Reconnected to binance datasource")
-	err = b.SubscribeTrades()
+	log.Info("Reconnected to binance datasource", "datasource", b.GetName())
+	err = b.SubscribeTickers()
 	if err != nil {
-		log.Error("Error subscribing to trades", "datasource", b.GetName())
+		log.Error("Error subscribing to tickers", "datasource", b.GetName())
 		return err
 	}
 	go b.wsClient.Listen()
@@ -88,7 +86,7 @@ func (b *BinanceClient) Close() error {
 
 func (b *BinanceClient) onMessage(message internal.WsMessage) error {
 	if message.Err != nil {
-		log.Error("Error reading websocket data, reconnecting in 5 seconds",
+		log.Error("Error reading websocket data, reconnecting in 1 seconds",
 			"datasource", b.GetName(), "error", message.Err)
 		time.Sleep(1 * time.Second)
 		b.Reconnect()
@@ -96,38 +94,37 @@ func (b *BinanceClient) onMessage(message internal.WsMessage) error {
 
 	if message.Type == websocket.TextMessage {
 
-		if strings.Contains(string(message.Message), "@trade") {
-			trade, err := b.parseTrade(message.Message)
+		if strings.Contains(string(message.Message), "@ticker") {
+			ticker, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing trade", "datasource", b.GetName(), "error", err.Error())
+				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
 
 			}
-			b.TradeTopic.Send(trade)
+			b.TickerTopic.Send(ticker)
 		}
 	}
 
 	return nil
 }
 
-func (b *BinanceClient) parseTrade(message []byte) (*model.Trade, error) {
-	var newTradeEvent WsCombinedTradeEvent
-	err := json.Unmarshal(message, &newTradeEvent)
+func (b *BinanceClient) parseTicker(message []byte) (*model.Ticker, error) {
+	var newTickerEvent WsTickerMessage
+	err := json.Unmarshal(message, &newTickerEvent)
 	if err != nil {
 		log.Error(err.Error(), "datasource", b.GetName())
-		return &model.Trade{}, err
+		return &model.Ticker{}, err
 	}
-	symbol := model.ParseSymbol(newTradeEvent.Data.Symbol)
-	newTrade := model.Trade{
+	symbol := model.ParseSymbol(newTickerEvent.Data.Symbol)
+	newTicker := model.Ticker{
 		Base:      symbol.Base,
 		Quote:     symbol.Quote,
 		Symbol:    symbol.Symbol,
-		Price:     newTradeEvent.Data.Price,
-		Size:      newTradeEvent.Data.Quantity,
+		LastPrice: newTickerEvent.Data.LastPrice,
 		Source:    b.GetName(),
-		Timestamp: time.UnixMilli(newTradeEvent.Data.Time),
+		Timestamp: time.UnixMilli(newTickerEvent.Data.Time),
 	}
 
-	return &newTrade, nil
+	return &newTicker, nil
 }
 
 func (b *BinanceClient) getAvailableSymbols() ([]BinanceSymbol, error) {
@@ -164,19 +161,19 @@ func (b *BinanceClient) getAvailableSymbols() ([]BinanceSymbol, error) {
 	{
 	  "method": "SUBSCRIBE",
 	  "params": [
-	    "btcusdt@trade",
-	    "etcusdt@trade"
+	    "btcusdt@ticker",
+	    "etcusdt@ticker"
 	  ],
 	  "id": 1
 	}
 
 *
 */
-func (b *BinanceClient) SubscribeTrades() error {
+func (b *BinanceClient) SubscribeTickers() error {
 	availableSymbols, err := b.getAvailableSymbols()
 	if err != nil {
 		b.W.Done()
-		log.Error("Error obtaining available symbols. Closing binance datasource %s", "error", err.Error())
+		log.Error("Error obtaining available symbols. Closing binance datasource %s", "datasource", b.GetName(), "error", err.Error())
 		return err
 	}
 
@@ -194,7 +191,7 @@ func (b *BinanceClient) SubscribeTrades() error {
 
 	s := []string{}
 	for _, v := range subscribedSymbols {
-		s = append(s, fmt.Sprintf("%s%s@trade", strings.ToLower(v.Base), strings.ToLower(v.Quote)))
+		s = append(s, fmt.Sprintf("%s%s@ticker", strings.ToLower(v.Base), strings.ToLower(v.Quote)))
 	}
 	subMessage := map[string]interface{}{
 		"method": "SUBSCRIBE",
@@ -204,11 +201,7 @@ func (b *BinanceClient) SubscribeTrades() error {
 
 	b.wsClient.SendMessageJSON(subMessage)
 
-	log.Info("Subscribed trade symbols", "datasource", b.GetName(), "symbols", len(subscribedSymbols))
-	return nil
-}
-
-func (b *BinanceClient) SubscribeTickers() error {
+	log.Info("Subscribed ticker symbols", "datasource", b.GetName(), "symbols", len(subscribedSymbols))
 	return nil
 }
 

@@ -22,7 +22,6 @@ import (
 type TiingoClient struct {
 	name           string
 	W              *sync.WaitGroup
-	TradeTopic     *broadcast.Broadcaster
 	TickerTopic    *broadcast.Broadcaster
 	wsClient       internal.WebsocketClient
 	wsEndpoint     string
@@ -35,14 +34,33 @@ type TiingoClient struct {
 	cancel       context.CancelFunc
 }
 
-func NewTiingoClient(options map[string]interface{}, symbolList symbols.AllSymbols, tradeTopic *broadcast.Broadcaster, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*TiingoClient, error) {
-	log.Info("Created new tiingo datasource", "datasource", "tiingo")
+func NewTiingoFxClient(options map[string]interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*TiingoClient, error) {
+	log.Info("Created new tiingo datasource", "datasource", "tiingo_fx")
 	wsEndpoint := "wss://api.tiingo.com/fx"
 
 	tiingo := TiingoClient{
-		name:           "tiingo",
+		name:           "tiingo_fx",
 		W:              w,
-		TradeTopic:     tradeTopic,
+		TickerTopic:    tickerTopic,
+		wsClient:       *internal.NewWebsocketClient(wsEndpoint, true, nil),
+		wsEndpoint:     wsEndpoint,
+		SymbolList:     symbolList.Forex,
+		pingInterval:   20,
+		apiToken:       options["api_token"].(string),
+		thresholdLevel: 5,
+	}
+	tiingo.wsClient.SetMessageHandler(tiingo.onMessage)
+
+	return &tiingo, nil
+}
+
+func NewTiingoIexClient(options map[string]interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*TiingoClient, error) {
+	log.Info("Created new tiingo datasource", "datasource", "tiingo_iex")
+	wsEndpoint := "wss://api.tiingo.com/iex"
+
+	tiingo := TiingoClient{
+		name:           "tiingo_iex",
+		W:              w,
 		TickerTopic:    tickerTopic,
 		wsClient:       *internal.NewWebsocketClient(wsEndpoint, true, nil),
 		wsEndpoint:     wsEndpoint,
@@ -58,7 +76,7 @@ func NewTiingoClient(options map[string]interface{}, symbolList symbols.AllSymbo
 
 func (b *TiingoClient) Connect() error {
 	b.W.Add(1)
-	log.Info("Connecting to tiingo datasource")
+	log.Info("Connecting to tiingo datasource", "datasource", b.GetName())
 
 	b.ctx, b.cancel = context.WithCancel(context.Background())
 
@@ -75,16 +93,16 @@ func (b *TiingoClient) Connect() error {
 }
 
 func (b *TiingoClient) Reconnect() error {
-	log.Info("Reconnecting to tiingo datasource")
+	log.Info("Reconnecting to tiingo datasource", "datasource", b.GetName())
 
 	_, err := b.wsClient.Connect(http.Header{})
 	if err != nil {
 		return err
 	}
-	log.Info("Reconnected to tiingo datasource")
-	err = b.SubscribeTrades()
+	log.Info("Reconnected to tiingo datasource", "datasource", b.GetName())
+	err = b.SubscribeTickers()
 	if err != nil {
-		log.Error("Error subscribing to trades", "datasource", b.GetName())
+		log.Error("Error subscribing to tickers", "datasource", b.GetName())
 		return err
 	}
 	go b.wsClient.Listen()
@@ -110,29 +128,29 @@ func (b *TiingoClient) onMessage(message internal.WsMessage) error {
 	if message.Type == websocket.TextMessage {
 		//fmt.Println(string(message.Message))
 		if strings.Contains(string(message.Message), `"A"`) {
-			trade, err := b.parseTrade(message.Message)
+			ticker, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing trade", "datasource", b.GetName(), "error", err.Error())
+				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
 				return nil
 
 			}
-			b.TradeTopic.Send(trade)
+			b.TickerTopic.Send(ticker)
 		}
 	}
 
 	return nil
 }
 
-func (b *TiingoClient) parseTrade(message []byte) (*model.Trade, error) {
+func (b *TiingoClient) parseTicker(message []byte) (*model.Ticker, error) {
 
-	var newTradeEvent WsFxEvent
-	err := json.Unmarshal(message, &newTradeEvent)
+	var newTickerEvent WsFxEvent
+	err := json.Unmarshal(message, &newTickerEvent)
 	if err != nil {
 		log.Error(err.Error(), "datasource", b.GetName())
-		return &model.Trade{}, err
+		return &model.Ticker{}, err
 	}
 
-	tr := newTradeEvent.Data
+	tr := newTickerEvent.Data
 
 	pair := tr[1]
 	symbol := model.ParseSymbol(pair.(string))
@@ -145,20 +163,18 @@ func (b *TiingoClient) parseTrade(message []byte) (*model.Trade, error) {
 	bid := tr[5].(float64)
 	price := (ask + bid) / 2
 
-	trade := &model.Trade{
+	ticker := &model.Ticker{
 		Base:      symbol.Base,
 		Quote:     symbol.Quote,
 		Symbol:    symbol.Symbol,
-		Price:     strconv.FormatFloat(price, 'f', 9, 64),
-		Size:      "0",
+		LastPrice: strconv.FormatFloat(price, 'f', 9, 64),
 		Source:    b.GetName(),
-		Side:      "none",
 		Timestamp: ts,
 	}
-	return trade, nil
+	return ticker, nil
 }
 
-func (b *TiingoClient) SubscribeTrades() error {
+func (b *TiingoClient) SubscribeTickers() error {
 	subscribedSymbols := []model.Symbol{}
 	for _, v := range b.SymbolList {
 		subscribedSymbols = append(subscribedSymbols, model.Symbol{
@@ -190,11 +206,7 @@ func (b *TiingoClient) SubscribeTrades() error {
 		b.wsClient.SendMessageJSON(subMessage)
 	}
 
-	log.Info("Subscribed trade symbols", "datasource", b.GetName(), "symbols", len(subscribedSymbols))
-	return nil
-}
-
-func (b *TiingoClient) SubscribeTickers() error {
+	log.Info("Subscribed ticker symbols", "datasource", b.GetName(), "symbols", len(subscribedSymbols))
 	return nil
 }
 

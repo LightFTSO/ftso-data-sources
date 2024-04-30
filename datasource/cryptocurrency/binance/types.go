@@ -20,6 +20,11 @@ type WsCombinedTradeEvent struct {
 	Data   WsTradeEvent `json:"data"`
 }
 
+type WsTickerMessage struct {
+	Stream string        `json:"stream"`
+	Data   WsTickerEvent `json:"data"`
+}
+
 // WsMarketStatEvent define websocket market statistics event
 type WsTickerEvent struct {
 	Event              string `json:"e"`
@@ -42,9 +47,9 @@ type WsTickerEvent struct {
 	QuoteVolume        string `json:"q"`
 	OpenTime           int64  `json:"O"`
 	CloseTime          int64  `json:"C"`
-	//FirstID            int64  `json:"F"`
-	//LastID             int64  `json:"L"`
-	Count int64 `json:"n"`
+	FirstID            int64  `json:"F"`
+	LastID             int64  `json:"L"`
+	Count              int64  `json:"n"`
 }
 
 type BinanceSymbol struct {

@@ -16,12 +16,10 @@ type StatisticsGeneratorOptions struct {
 }
 
 type StatisticsGenerator struct {
-	TradeListener  *broadcast.Listener
 	TickerListener *broadcast.Listener
 
 	numThreads int
 
-	tradeCounter  atomic.Uint64
 	tickerCounter atomic.Uint64
 
 	statsInterval time.Duration
@@ -29,21 +27,6 @@ type StatisticsGenerator struct {
 	Statistics map[string]interface{}
 }
 
-func (s *StatisticsGenerator) StartTradeListener(tradeTopic *broadcast.Broadcaster) {
-	log.Debug(fmt.Sprintf("Trade Statistics generator configured with %d consumer goroutines", s.numThreads), "consumer", "statistics", "num_threads", s.numThreads)
-	s.TradeListener = tradeTopic.Listen()
-	for consumerId := 1; consumerId <= s.numThreads; consumerId++ {
-		go func(consumerId int) {
-			log.Debug(fmt.Sprintf("Trade statistics generator %d listening now", consumerId), "consumer", "statistics", "consumer_num", consumerId)
-			for range s.TradeListener.Channel() {
-				s.tradeCounter.Add(1)
-			}
-		}(consumerId)
-	}
-}
-func (s *StatisticsGenerator) CloseTradeListener() {
-
-}
 func (s *StatisticsGenerator) StartTickerListener(tickerTopic *broadcast.Broadcaster) {
 	log.Debug(fmt.Sprintf("Ticker Statistics generator configured with %d consumer goroutines", s.numThreads), "consumer", "statistics", "num_threads", s.numThreads)
 	s.TickerListener = tickerTopic.Listen()
@@ -68,11 +51,8 @@ func (s *StatisticsGenerator) MessagesInTheLastMinute() {
 		defer timeTicker.Stop()
 
 		for range timeTicker.C {
-			if s.TradeListener != nil {
-				log.Info(fmt.Sprintf("Received %d trades in the last %v seconds", s.tradeCounter.Swap(0), s.statsInterval.Seconds()))
-			}
 			if s.TickerListener != nil {
-				log.Info(fmt.Sprintf("Received %d tickers in the last %v seconds", s.tradeCounter.Swap(0), s.statsInterval.Seconds()))
+				log.Info(fmt.Sprintf("Received %d tickers in the last %v seconds", s.tickerCounter.Swap(0), s.statsInterval.Seconds()))
 			}
 		}
 	}()

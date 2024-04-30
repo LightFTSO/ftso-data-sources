@@ -14,7 +14,6 @@ import (
 )
 
 type RedisConsumer struct {
-	TradeListener  *broadcast.Listener
 	TickerListener *broadcast.Listener
 
 	toStdout bool
@@ -58,48 +57,17 @@ func (s *RedisConsumer) setup() error {
 
 }
 
-func (s *RedisConsumer) processTrade(trade *model.Trade) {
-	if s.toStdout {
-		fmt.Printf(
-			"%s source=%s symbol=%s price=%s size=%s side=%s ts=%d\n",
-			time.Now().Format(constants.TS_FORMAT), trade.Source, trade.Symbol, trade.Price, trade.Size, trade.Side, trade.Timestamp.UTC().UnixMilli())
-	}
-	key := fmt.Sprintf("ts:%s:%s:trade_prices", trade.Source, trade.Symbol)
-	val, _ := strconv.ParseFloat(trade.Price, 64)
-	cmd := s.redisClient.B().TsAdd().Key(key).Timestamp(strconv.FormatInt(trade.Timestamp.UTC().UnixMilli(), 10)).Value(val).Retention(s.tsRetention.Milliseconds()).EncodingCompressed().OnDuplicateLast().Labels().Labels("type", "trade_prices").Labels("source", trade.Source).Labels("base", trade.Base).Labels("quote", trade.Quote).Build()
-	err := s.redisClient.Do(context.Background(), cmd).Error()
-	if err != nil {
-		log.Error("Error executing ts.ADD", "consumer", "redis", "error", err)
-	}
-}
-
-func (s *RedisConsumer) StartTradeListener(tradeTopic *broadcast.Broadcaster) {
-	// Listen for trades in the ch channel and sends them to a io.Writer
-	log.Debug(fmt.Sprintf("Redis trade listener configured with %d consumer goroutines", s.numThreads), "consumer", "redis", "num_threads", s.numThreads)
-	s.TradeListener = tradeTopic.Listen()
-	for consumerId := 1; consumerId <= s.numThreads; consumerId++ {
-		go func(consumerId int) {
-			log.Debug(fmt.Sprintf("Redis trade consumer %d listening for trades now", consumerId), "consumer", "redis", "consumer_num", consumerId)
-			for trade := range s.TradeListener.Channel() {
-				s.processTrade(trade.(*model.Trade))
-			}
-		}(consumerId)
-	}
-
-}
-func (s *RedisConsumer) CloseTradeListener() {
-	s.TradeListener.Discard()
-}
-
 func (s *RedisConsumer) processTicker(ticker *model.Ticker) {
 	if s.toStdout {
 		fmt.Printf(
 			"%s source=%s symbol=%s last_price=%s ts=%d\n",
 			time.Now().Format(constants.TS_FORMAT), ticker.Source, ticker.Symbol, ticker.LastPrice, ticker.Timestamp.UTC().UnixMilli())
 	}
-	key := fmt.Sprintf("ts:%s:%s:ticker_prices", ticker.Source, ticker.Symbol)
+	key := fmt.Sprintf("ts:%s:%s", ticker.Source, ticker.Symbol)
 	val, _ := strconv.ParseFloat(ticker.LastPrice, 64)
-	cmd := s.redisClient.B().TsAdd().Key(key).Timestamp(strconv.FormatInt(ticker.Timestamp.UTC().UnixMilli(), 10)).Value(val).Retention(s.tsRetention.Milliseconds()).EncodingCompressed().OnDuplicateLast().Labels().Labels("type", "ticker_prices").Labels("source", ticker.Source).Labels("base", ticker.Base).Labels("quote", ticker.Quote).Build()
+	cmd := s.redisClient.B().TsAdd().Key(key).Timestamp(strconv.FormatInt(ticker.Timestamp.UTC().UnixMilli(), 10)).
+		Value(val).Retention(s.tsRetention.Milliseconds()).EncodingCompressed().OnDuplicateLast().Labels().Labels("type", "ticker").
+		Labels("source", ticker.Source).Labels("base", ticker.Base).Labels("quote", ticker.Quote).Build()
 	err := s.redisClient.Do(context.Background(), cmd).Error()
 	if err != nil {
 		log.Error("Error executing ts.ADD", "consumer", "redis", "error", err)
@@ -107,13 +75,13 @@ func (s *RedisConsumer) processTicker(ticker *model.Ticker) {
 }
 
 func (s *RedisConsumer) StartTickerListener(tickerTopic *broadcast.Broadcaster) {
-	// Listen for trades in the ch channel and sends them to a io.Writer
-	log.Debug(fmt.Sprintf("Redis trade listener configured with %d consumer goroutines", s.numThreads), "consumer", "redis", "num_threads", s.numThreads)
+	// Listen for tickers in the ch channel and sends them to a io.Writer
+	log.Debug(fmt.Sprintf("Redis ticket listener configured with %d consumer goroutines", s.numThreads), "consumer", "redis", "num_threads", s.numThreads)
 	s.TickerListener = tickerTopic.Listen()
 	for consumerId := 1; consumerId <= s.numThreads; consumerId++ {
 		go func(consumerId int) {
 			log.Debug(fmt.Sprintf("Redis ticker consumer %d listening for tickers now", consumerId), "consumer", "redis", "consumer_num", consumerId)
-			for ticker := range s.TradeListener.Channel() {
+			for ticker := range s.TickerListener.Channel() {
 				s.processTicker(ticker.(*model.Ticker))
 			}
 		}(consumerId)

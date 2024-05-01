@@ -36,8 +36,9 @@ func getBaseCurrency(pair string) string {
 	var baseCurrencies = constants.USDT_USDC_BUSD_DAI
 
 	for _, baseCurrency := range baseCurrencies {
-		if strings.HasPrefix(pair, strings.ToUpper(baseCurrency)) {
-			return strings.ToUpper(baseCurrency)
+		upperBase := strings.ToUpper(baseCurrency)
+		if strings.HasPrefix(pair, upperBase) {
+			return upperBase
 		}
 	}
 

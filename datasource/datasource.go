@@ -9,6 +9,7 @@ import (
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/binance"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bitrue"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bybit"
+	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/coinbase"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/kraken"
 	"roselabs.mx/ftso-data-sources/datasource/others/noisy"
 	metalsdev "roselabs.mx/ftso-data-sources/datasource/tradfi/metals.dev"
@@ -40,6 +41,8 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 		return binance.NewBinanceUSClient(source.Options, allSymbols, tickerTopic, w)
 	case "bitrue":
 		return bitrue.NewBitrueClient(source.Options, allSymbols, tickerTopic, w)
+	case "coinbase":
+		return coinbase.NewCoinbaseClient(source.Options, allSymbols, tickerTopic, w)
 	case "bybit":
 		return bybit.NewBybitClient(source.Options, allSymbols, tickerTopic, w)
 	case "kraken":

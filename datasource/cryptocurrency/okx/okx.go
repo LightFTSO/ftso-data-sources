@@ -129,7 +129,6 @@ func (b *OkxClient) parseTicker(message []byte) ([]model.Ticker, error) {
 
 	tickers := []model.Ticker{}
 	for _, v := range tickerMessage.Data {
-		fmt.Println(v.InstId)
 		symbol := model.ParseSymbol(v.InstId)
 
 		ts, err := strconv.ParseInt(v.Ts, 10, 64)

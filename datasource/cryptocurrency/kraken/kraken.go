@@ -3,7 +3,6 @@ package kraken
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
@@ -207,7 +206,6 @@ func (b *KrakenClient) SubscribeTickers() error {
 				strings.EqualFold(strings.ToUpper(v1.Quote), strings.ToUpper(string(v2.Quote.GetStdName()))) {
 
 				subscribedSymbols = append(subscribedSymbols, (v2.WsName))
-				fmt.Println(v2.WsName)
 			}
 		}
 	}

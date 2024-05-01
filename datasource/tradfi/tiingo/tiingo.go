@@ -202,7 +202,6 @@ func (b *TiingoClient) SubscribeTickers() error {
 			"thresholdLevel": b.thresholdLevel,
 			"tickers":        s,
 		}
-		fmt.Println(subMessage)
 		b.wsClient.SendMessageJSON(subMessage)
 	}
 

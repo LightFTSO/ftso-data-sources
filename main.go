@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	slog "log/slog"
+	"strings"
 	"sync"
 
 	"github.com/textileio/go-threads/broadcast"
@@ -88,7 +89,11 @@ func initDataSources(tickerTopic *broadcast.Broadcaster, config config.ConfigOpt
 	var w sync.WaitGroup
 
 	allSymbols := symbols.GetAllSymbols(config.Assets.Crypto, config.Assets.Commodities, config.Assets.Forex, config.Assets.Stocks)
-	slog.Info(fmt.Sprintf("list of enabled feeds: %+v", allSymbols))
+	syms := []string{}
+	for _, s := range allSymbols.Flatten() {
+		syms = append(syms, strings.ToUpper(s.Symbol))
+	}
+	slog.Info(fmt.Sprintf("list of enabled feeds: %+v", syms))
 
 	dataSourceList := config.Datasources
 	for _, source := range dataSourceList {

@@ -125,7 +125,6 @@ func (b *BitrueClient) onMessage(message internal.WsMessage) error {
 				return nil
 			}
 			b.TickerTopic.Send(ticker)
-			fmt.Println(ticker)
 		}
 	}
 

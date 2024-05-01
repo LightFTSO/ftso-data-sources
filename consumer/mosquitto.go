@@ -39,7 +39,7 @@ func (s *MqttConsumer) setup() error {
 	if token := s.mqttClient.Connect(); token.Wait() && token.Error() != nil {
 		panic(token.Error())
 	}
-	fmt.Println("Sample Publisher Started")
+	log.Info("Mosquitto MQTT Consumer started")
 
 	token := s.mqttClient.Publish("info/", byte(0), false, []byte("datatest"))
 	token.Wait()

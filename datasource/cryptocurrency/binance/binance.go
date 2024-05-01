@@ -98,7 +98,7 @@ func (b *BinanceClient) onMessage(message internal.WsMessage) error {
 			ticker, err := b.parseTicker(message.Message)
 			if err != nil {
 				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
-
+				return nil
 			}
 			b.TickerTopic.Send(ticker)
 		}

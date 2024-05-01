@@ -40,7 +40,7 @@ func (s *MqttConsumer) setup() error {
 	}
 	fmt.Println("Sample Publisher Started")
 
-	token := s.mqttClient.Publish("trades/", byte(0), false, []byte("datatest"))
+	token := s.mqttClient.Publish("info/", byte(0), false, []byte("datatest"))
 	token.Wait()
 	//s.mqttClient.Disconnect(250)
 	//fmt.Println("Sample Publisher Disconnected")

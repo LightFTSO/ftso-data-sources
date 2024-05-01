@@ -116,11 +116,9 @@ func (b *KrakenClient) onMessage(message internal.WsMessage) error {
 			ticker, err := b.parseTicker(message.Message)
 			if err != nil {
 				log.Error("Error parsing tickers", "datasource", b.GetName(), "error", err.Error())
-
+				return nil
 			}
 			b.TickerTopic.Send(ticker)
-
-			return nil
 		}
 
 	}

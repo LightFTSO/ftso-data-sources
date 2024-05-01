@@ -121,8 +121,8 @@ func (b *BitrueClient) onMessage(message internal.WsMessage) error {
 		if strings.Contains(string(data), "_ticker") && strings.Contains(string(data), "tick") && !strings.Contains(string(data), "event_rep") {
 			ticker, err := b.parseTicker(data)
 			if err != nil {
-				log.Error("Error parsing trade", "datasource", b.GetName(), "error", err.Error())
-
+				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
+				return nil
 			}
 			b.TickerTopic.Send(ticker)
 			fmt.Println(ticker)

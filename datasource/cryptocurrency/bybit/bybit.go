@@ -108,11 +108,10 @@ func (b *BybitClient) onMessage(message internal.WsMessage) error {
 			tickers, err := b.parseTicker(message.Message)
 			if err != nil {
 				log.Error("Error parsing trade", "datasource", b.GetName(), "error", err.Error())
-
+				return nil
 			}
 			for _, v := range tickers {
 				b.TickerTopic.Send(v)
-
 			}
 		}
 	}

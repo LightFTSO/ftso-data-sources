@@ -11,6 +11,7 @@ import (
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bybit"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/coinbase"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/kraken"
+	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/okx"
 	"roselabs.mx/ftso-data-sources/datasource/others/noisy"
 	metalsdev "roselabs.mx/ftso-data-sources/datasource/tradfi/metals.dev"
 	"roselabs.mx/ftso-data-sources/datasource/tradfi/tiingo"
@@ -47,6 +48,8 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 		return bybit.NewBybitClient(source.Options, allSymbols, tickerTopic, w)
 	case "kraken":
 		return kraken.NewKrakenClient(source.Options, allSymbols, tickerTopic, w)
+	case "okx":
+		return okx.NewOkxClient(source.Options, allSymbols, tickerTopic, w)
 	case "tiingo":
 		return tiingo.NewTiingoFxClient(source.Options, allSymbols, tickerTopic, w)
 	case "metalsdev":

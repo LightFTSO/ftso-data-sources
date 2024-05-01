@@ -27,6 +27,7 @@ type MqttConsumer struct {
 
 type MqttConsumerOptions struct {
 	Enabled        bool
+	Url            string             `mapstructure:"url"`
 	ClientOptions  mqtt.ClientOptions `mapstructure:"client_options"`
 	NumThreads     int                `mapstructure:"num_threads"`
 	UseSbeEncoding bool               `mapstructure:"use_sbe_encoding"`
@@ -117,7 +118,7 @@ func (s *MqttConsumer) CloseTickerListener() {
 
 func NewMqttConsumer(options MqttConsumerOptions) *MqttConsumer {
 	opts := mqtt.NewClientOptions()
-	opts.AddBroker("tcp://127.0.0.1:1883")
+	opts.AddBroker(options.Url)
 	opts.SetCleanSession(false)
 	//opts.SetDefaultPublishHandler()
 	opts.SetAutoReconnect(true)

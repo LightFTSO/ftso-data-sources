@@ -17,7 +17,7 @@ func ParseSymbol(s string) Symbol {
 	base := getBaseCurrency(pair)
 	quote := strings.Replace(pair, base, "", 1)
 	return Symbol{
-		Base:   getBaseCurrency(pair),
+		Base:   base,
 		Quote:  quote,
 		Symbol: base + "/" + quote,
 	}
@@ -27,16 +27,17 @@ func cleanRemotePair(s string) string {
 	s = strings.ReplaceAll(s, "-", "")
 	s = strings.ReplaceAll(s, "_", "")
 	s = strings.ReplaceAll(s, "/", "")
+	s = strings.ReplaceAll(s, ":", "")
 	s = strings.ToUpper(s)
 	return s
 }
 
 func getBaseCurrency(pair string) string {
-	var baseCurrencies = constants.USD_USDT_USDC
+	var baseCurrencies = constants.USDT_USDC_BUSD_DAI
 
 	for _, baseCurrency := range baseCurrencies {
-		if strings.HasPrefix(pair, baseCurrency) {
-			return baseCurrency
+		if strings.HasPrefix(pair, strings.ToUpper(baseCurrency)) {
+			return strings.ToUpper(baseCurrency)
 		}
 	}
 

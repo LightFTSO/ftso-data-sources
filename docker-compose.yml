@@ -1,6 +1,19 @@
-version: '3.6'
-
 services:
+  ftso-data-sources:
+    container_name: ftso-data-sources
+    image: ftso-data-sources:latest
+    build: .
+    command: ./app
+    restart: unless-stopped
+    ports:
+      - "5500:5500"
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    networks:
+      - lightftso-testing
+    environment:
+      - ENV=production
+
   redis:
     image: redis/redis-stack:latest
     container_name: redis-instance-lightftso

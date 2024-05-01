@@ -22,11 +22,14 @@ var BASES_COMMODITIES = AssetList{
 var BASES_STOCKS = AssetList{}
 
 const USD = "usd"
+
 const USDT = "usdt"
 const USDC = "usdc"
 const BUSD = "busd"
 const DAI = "dai"
 
+var USDT_USDC_BUSD_DAI = AssetList{USDT, USDC, BUSD, DAI}
+var USD_USDT_USDC_BUSD_DAI = AssetList{USD, USDT, USDC, BUSD, DAI}
 var USD_USDT_USDC_BUSD = AssetList{USD, USDT, USDC, BUSD}
 var USD_USDT_USDC_DAI = AssetList{USD, USDT, USDC, DAI}
 var USD_USDT_USDC = AssetList{USD, USDT, USDC}

@@ -8,7 +8,7 @@
     description="Example base schema which can be extended."
     byteOrder="littleEndian">
     <types>
-        <type name="Timestamp" primitiveType="uint64" />
+        <type name="UTCTimestamp" primitiveType="uint64" />
         <composite name="messageHeader" description="Message identifiers and length of message root.">
             <type name="blockLength" primitiveType="uint16"/>
             <type name="templateId" primitiveType="uint16"/>
@@ -33,17 +33,16 @@
         </enum>
     </types> 
     <sbe:message name="Trade" id="1" description="Description of a basic trade event" blockLength="39">
-        <field name="timestamp" id="1" type="Timestamp" />
+        <field name="timestamp" id="1" type="UTCTimestamp" />
         <field name="symbol" id="2" type="Symbol" />
         <field name="price" id="3" type="Decimal" />
         <field name="size" id="4" type="Decimal" />
         <field name="buy_side" id="5" type="uint8" />
         <data name="source" id="6" type="varStringEncoding" />
     </sbe:message>
-    <sbe:message name="Ticker" id="2" description="Description of a basic ticker event" blockLength="39">
-        <field name="timestamp" id="1" type="Timestamp" />
-        <field name="symbol" id="2" type="Symbol" />
-        <field name="last_price" id="3" type="Decimal" />
-        <data name="source" id="4" type="varStringEncoding" />
+    <sbe:message name="Ticker" id="2" description="Description of a basic ticker event" blockLength="29">
+        <field name="timestamp" id="1" type="UTCTimestamp" />
+        <field name="price" id="2" type="Decimal" semanticType="Price" />
+        <field name="symbol" id="3" type="Symbol" />
     </sbe:message>
 </sbe:messageSchema>

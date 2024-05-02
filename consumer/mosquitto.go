@@ -41,15 +41,13 @@ func (s *MqttConsumer) setup() error {
 	}
 	log.Info("Mosquitto MQTT Consumer started")
 
-	token := s.mqttClient.Publish("info/", byte(0), false, []byte("datatest"))
-	token.Wait()
-	//s.mqttClient.Disconnect(250)
-	//fmt.Println("Sample Publisher Disconnected")
 	return nil
 
 }
 
 func (s *MqttConsumer) processTicker(ticker *model.Ticker, sbeGoMarshaller *sbe.SbeGoMarshaller) {
+	channel := fmt.Sprintf("tickers/%s/%s/%s", ticker.Source, ticker.Base, ticker.Quote)
+
 	var payload []byte
 	if s.useSbeEncoding {
 		var base [6]byte
@@ -58,20 +56,19 @@ func (s *MqttConsumer) processTicker(ticker *model.Ticker, sbeGoMarshaller *sbe.
 		copy(quote[:], ticker.Quote)
 
 		price, _ := decimal.NewFromString(ticker.LastPrice)
-		//fmt.Println(price.Exponent())
+
 		sbeTicker := sbe.Ticker{
 			Timestamp: uint64(ticker.Timestamp.UnixMilli()),
 			Symbol: sbe.Symbol{
 				Base:  base,
 				Quote: quote,
 			},
-			Last_price: sbe.Decimal{
+			Price: sbe.Decimal{
 				Mantissa: uint64(price.CoefficientInt64()),
 				Exponent: int8(price.Exponent()),
 			},
-			Source: []uint8(ticker.Source),
 		}
-		sbe.TickerInit(&sbeTicker)
+		//sbe.TickerInit(&sbeTicker)
 		var buf = new(bytes.Buffer)
 
 		header := sbe.SbeGoMessageHeader{
@@ -83,15 +80,16 @@ func (s *MqttConsumer) processTicker(ticker *model.Ticker, sbeGoMarshaller *sbe.
 		header.Encode(sbeGoMarshaller, buf)
 		if err := sbeTicker.Encode(sbeGoMarshaller, buf, true); err != nil {
 			/// handle errors
-			log.Error("error encoding trade", "error", err)
+			log.Error("error encoding ticker", "error", err)
+			return
 		}
-		token := s.mqttClient.Publish("tickers/", byte(s.qosLevel), false, buf.Bytes())
+		token := s.mqttClient.Publish(channel, byte(s.qosLevel), false, buf.Bytes())
 		//fmt.Println(buf.Bytes())
 		token.Wait()
 
 	} else {
 		payload, _ = json.Marshal(ticker)
-		token := s.mqttClient.Publish("tickers/", byte(s.qosLevel), false, payload)
+		token := s.mqttClient.Publish(channel, byte(s.qosLevel), false, payload)
 		token.Wait()
 	}
 }
@@ -102,10 +100,10 @@ func (s *MqttConsumer) StartTickerListener(tickerTopic *broadcast.Broadcaster) {
 	s.TickerListener = tickerTopic.Listen()
 	for consumerId := 1; consumerId <= s.numThreads; consumerId++ {
 		go func(consumerId int) {
-			m := sbe.NewSbeGoMarshaller()
+			sbeMarshaller := sbe.NewSbeGoMarshaller()
 			log.Debug(fmt.Sprintf("Mosquitto ticker consumer %d listening for tickers now", consumerId), "consumer", "mosquitto", "consumer_num", consumerId)
 			for ticker := range s.TickerListener.Channel() {
-				s.processTicker(ticker.(*model.Ticker), m)
+				s.processTicker(ticker.(*model.Ticker), sbeMarshaller)
 			}
 		}(consumerId)
 	}

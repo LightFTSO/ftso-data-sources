@@ -52,7 +52,9 @@ func (s *StatisticsGenerator) MessagesInTheLastMinute() {
 
 		for range timeTicker.C {
 			if s.TickerListener != nil {
-				log.Info(fmt.Sprintf("Received %d tickers in the last %v seconds", s.tickerCounter.Swap(0), s.statsInterval.Seconds()))
+				totalTickers := s.tickerCounter.Swap(0)
+				tickersPerSecond := float64(totalTickers) / s.statsInterval.Seconds()
+				log.Info(fmt.Sprintf("Received %d tickers in the last %.1f seconds %.1f tickers/s", totalTickers, s.statsInterval.Seconds(), tickersPerSecond))
 			}
 		}
 	}()
@@ -65,7 +67,7 @@ func (s *StatisticsGenerator) MessagesThisPriceEpoch() {
 func NewStatisticsGenerator(options StatisticsGeneratorOptions) *StatisticsGenerator {
 	newConsumer := &StatisticsGenerator{
 		numThreads:    options.NumThreads,
-		statsInterval: options.Interval,
+		statsInterval: options.Interval, //10 * time.Second,
 	}
 	newConsumer.MessagesInTheLastMinute()
 	return newConsumer

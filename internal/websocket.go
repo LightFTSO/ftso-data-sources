@@ -62,6 +62,14 @@ func (ws *WebsocketClient) SendMessageJSON(message interface{}) error {
 	return nil
 }
 
+func (ws *WebsocketClient) SendMessage(message []byte) error {
+	err := ws.Connection.WriteMessage(websocket.TextMessage, message)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // Listen receives and parses the message into a map structure
 func (ws *WebsocketClient) Listen() {
 	for {

@@ -76,7 +76,7 @@ func NewTiingoIexClient(options map[string]interface{}, symbolList symbols.AllSy
 
 func (b *TiingoClient) Connect() error {
 	b.W.Add(1)
-	log.Info("Connecting to tiingo datasource", "datasource", b.GetName())
+	log.Info("Connecting to datasource", "datasource", b.GetName())
 
 	b.ctx, b.cancel = context.WithCancel(context.Background())
 
@@ -93,7 +93,7 @@ func (b *TiingoClient) Connect() error {
 }
 
 func (b *TiingoClient) Reconnect() error {
-	log.Info("Reconnecting to tiingo datasource", "datasource", b.GetName())
+	log.Info("Reconnecting...", "datasource", b.GetName())
 
 	_, err := b.wsClient.Connect(http.Header{})
 	if err != nil {

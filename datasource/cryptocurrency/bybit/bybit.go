@@ -56,7 +56,7 @@ func NewBybitClient(options interface{}, symbolList symbols.AllSymbols, tickerTo
 
 func (b *BybitClient) Connect() error {
 	b.W.Add(1)
-	log.Info("Connecting to bybit datasource")
+	log.Info("Connecting to datasource")
 
 	b.ctx, b.cancel = context.WithCancel(context.Background())
 
@@ -71,7 +71,7 @@ func (b *BybitClient) Connect() error {
 }
 
 func (b *BybitClient) Reconnect() error {
-	log.Info("Reconnecting to bybit datasource")
+	log.Info("Reconnecting...")
 
 	_, err := b.wsClient.Connect(http.Header{})
 	if err != nil {

@@ -56,7 +56,7 @@ func NewKrakenClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 
 func (b *KrakenClient) Connect() error {
 	b.W.Add(1)
-	log.Info("Connecting to kraken datasource", "datasource", b.GetName())
+	log.Info("Connecting to datasource", "datasource", b.GetName())
 
 	b.ctx, b.cancel = context.WithCancel(context.Background())
 
@@ -74,7 +74,7 @@ func (b *KrakenClient) Connect() error {
 }
 
 func (b *KrakenClient) Reconnect() error {
-	log.Info("Reconnecting to kraken datasource", "datasource", b.GetName())
+	log.Info("Reconnecting...", "datasource", b.GetName())
 
 	_, err := b.wsClient.Connect(http.Header{})
 	if err != nil {

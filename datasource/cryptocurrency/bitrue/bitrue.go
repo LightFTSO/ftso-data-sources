@@ -135,7 +135,6 @@ func (b *BitrueClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var newEvent TickerResponse
 	err := json.Unmarshal(message, &newEvent)
 	if err != nil {
-		log.Error(err.Error(), "datasource", b.GetName())
 		return &model.Ticker{}, err
 	}
 

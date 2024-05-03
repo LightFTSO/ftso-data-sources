@@ -113,7 +113,6 @@ func (b *CoinbaseClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var tickerMessage CoinbaseTicker
 	err := json.Unmarshal(message, &tickerMessage)
 	if err != nil {
-		log.Error(err.Error(), "datasource", b.GetName())
 		return &model.Ticker{}, err
 	}
 

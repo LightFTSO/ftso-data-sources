@@ -146,7 +146,6 @@ func (b *TiingoClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var newTickerEvent WsFxEvent
 	err := json.Unmarshal(message, &newTickerEvent)
 	if err != nil {
-		log.Error(err.Error(), "datasource", b.GetName())
 		return &model.Ticker{}, err
 	}
 

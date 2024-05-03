@@ -129,7 +129,6 @@ func (b *KrakenClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var newTickerEvent KrakenSnapshotUpdate
 	err := json.Unmarshal(message, &newTickerEvent)
 	if err != nil {
-		log.Error(err.Error(), "datasource", b.GetName())
 		return &model.Ticker{}, err
 	}
 

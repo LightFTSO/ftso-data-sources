@@ -111,7 +111,6 @@ func (b *BinanceClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var newTickerEvent WsTickerMessage
 	err := json.Unmarshal(message, &newTickerEvent)
 	if err != nil {
-		log.Error(err.Error(), "datasource", b.GetName())
 		return &model.Ticker{}, err
 	}
 	symbol := model.ParseSymbol(newTickerEvent.Data.Symbol)

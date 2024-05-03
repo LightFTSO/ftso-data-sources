@@ -99,7 +99,7 @@ func (b *TiingoClient) Reconnect() error {
 	if err != nil {
 		return err
 	}
-	log.Info("Reconnected to tiingo datasource", "datasource", b.GetName())
+	log.Info("Reconnected", "datasource", b.GetName())
 	err = b.SubscribeTickers()
 	if err != nil {
 		log.Error("Error subscribing to tickers", "datasource", b.GetName())
@@ -119,7 +119,7 @@ func (b *TiingoClient) Close() error {
 
 func (b *TiingoClient) onMessage(message internal.WsMessage) error {
 	if message.Err != nil {
-		log.Error("Error reading websocket data, reconnecting in 5 seconds",
+		log.Error("Error reading websocket message",
 			"datasource", b.GetName(), "error", message.Err)
 		time.Sleep(1 * time.Second)
 		b.Reconnect()

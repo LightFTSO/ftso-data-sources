@@ -64,7 +64,7 @@ func (b *CoinbaseClient) Reconnect() error {
 	if err != nil {
 		return err
 	}
-	log.Info("Reconnected to coinbase datasource", "datasource", b.GetName())
+	log.Info("Reconnected", "datasource", b.GetName())
 	err = b.SubscribeTickers()
 	if err != nil {
 		log.Error("Error subscribing to tickers", "datasource", b.GetName())
@@ -83,7 +83,7 @@ func (b *CoinbaseClient) Close() error {
 
 func (b *CoinbaseClient) onMessage(message internal.WsMessage) error {
 	if message.Err != nil {
-		log.Error("Error reading websocket data, reconnecting in 1 seconds",
+		log.Error("Error reading websocket message",
 			"datasource", b.GetName(), "error", message.Err)
 		time.Sleep(1 * time.Second)
 		b.Reconnect()

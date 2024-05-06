@@ -56,7 +56,7 @@ func NewKrakenClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 
 func (b *KrakenClient) Connect() error {
 	b.W.Add(1)
-	log.Info("Connecting to datasource", "datasource", b.GetName())
+	log.Info("Connecting...", "datasource", b.GetName())
 
 	b.ctx, b.cancel = context.WithCancel(context.Background())
 

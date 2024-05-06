@@ -48,7 +48,7 @@ func NewHuobiClient(options interface{}, symbolList symbols.AllSymbols, tickerTo
 
 func (b *HuobiClient) Connect() error {
 	b.W.Add(1)
-	log.Info("Connecting to datasource", "datasource", b.GetName())
+	log.Info("Connecting...", "datasource", b.GetName())
 
 	_, err := b.wsClient.Connect(http.Header{})
 	if err != nil {

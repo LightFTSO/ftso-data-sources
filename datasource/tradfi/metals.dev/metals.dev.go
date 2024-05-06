@@ -62,7 +62,7 @@ func NewMetalsDevClient(options *MetalsDevOptions, symbolList symbols.AllSymbols
 
 func (b *MetalsDevClient) Connect() error {
 	b.W.Add(1)
-	log.Info("Connecting to datasource")
+	log.Info("Connecting...")
 
 	b.ctx, b.cancel = context.WithCancel(context.Background())
 	return nil

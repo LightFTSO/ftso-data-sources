@@ -10,6 +10,7 @@ import (
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bitrue"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bybit"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/coinbase"
+	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/gateio"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/huobi"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/kraken"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/okx"
@@ -43,16 +44,20 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 		return binance.NewBinanceUSClient(source.Options, allSymbols, tickerTopic, w)
 	case "bitrue":
 		return bitrue.NewBitrueClient(source.Options, allSymbols, tickerTopic, w)
-	case "coinbase":
-		return coinbase.NewCoinbaseClient(source.Options, allSymbols, tickerTopic, w)
 	case "bybit":
 		return bybit.NewBybitClient(source.Options, allSymbols, tickerTopic, w)
+	case "coinbase":
+		return coinbase.NewCoinbaseClient(source.Options, allSymbols, tickerTopic, w)
+	case "gateio":
+		return gateio.NewGateIoClient(source.Options, allSymbols, tickerTopic, w)
 	case "huobi":
 		return huobi.NewHuobiClient(source.Options, allSymbols, tickerTopic, w)
 	case "kraken":
 		return kraken.NewKrakenClient(source.Options, allSymbols, tickerTopic, w)
 	case "okx":
 		return okx.NewOkxClient(source.Options, allSymbols, tickerTopic, w)
+
+	// non crypto
 	case "tiingo":
 		return tiingo.NewTiingoFxClient(source.Options, allSymbols, tickerTopic, w)
 	case "metalsdev":

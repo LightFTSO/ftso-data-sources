@@ -46,6 +46,8 @@ func (s *StatisticsGenerator) CloseTickerListener() {
 
 func (s *StatisticsGenerator) MessagesInTheLastMinute() {
 	go func() {
+		time.Sleep(time.Duration(60-time.Now().Second()) * time.Second)
+
 		timeTicker := time.NewTicker(s.statsInterval)
 
 		defer timeTicker.Stop()

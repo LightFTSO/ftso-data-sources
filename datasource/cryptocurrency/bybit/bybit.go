@@ -112,8 +112,6 @@ func (b *BybitClient) onMessage(message internal.WsMessage) error {
 			}
 
 			b.TickerTopic.Send(ticker)
-		} else {
-			fmt.Println(message.Type, string(message.Message))
 		}
 	}
 

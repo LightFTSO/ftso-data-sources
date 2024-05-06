@@ -1,18 +1,28 @@
-# Building the binary of the App
 FROM golang:1.22 AS build
 
 # `boilerplate` should be replaced with your project name
-WORKDIR /app
+WORKDIR /go/src/ftso-data-sources
 
 # Copy all the Code and stuff to compile everything
 COPY . .
-
-# Downloads all the dependencies in advance (could be left out, but it's more clear this way)
 RUN go mod download
 
 # Builds the application as a staticly linked one, to allow it to run on alpine
-RUN GOOS=linux go build -a -o /app/ftso-data-sources
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o ftso-data-sources ./
 
-EXPOSE 5500
+# Moving the binary to the 'final Image' to make it smaller
+FROM alpine:latest as release
+WORKDIR /app
 
-ENTRYPOINT ["/app/ftso-data-sources", "--"]
+# `boilerplate` should be replaced here as well
+COPY --from=build /go/src/ftso-data-sources/ftso-data-sources .
+
+# Add packages
+RUN apk -U upgrade \
+    && apk add --no-cache dumb-init ca-certificates \
+    && chmod +x /app/ftso-data-sources
+
+
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+
+CMD [ "/app/ftso-data-sources" ]

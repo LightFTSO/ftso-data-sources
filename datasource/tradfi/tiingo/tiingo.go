@@ -121,7 +121,7 @@ func (b *TiingoClient) onMessage(message internal.WsMessage) error {
 	if message.Err != nil {
 		log.Error("Error reading websocket message",
 			"datasource", b.GetName(), "error", message.Err)
-		time.Sleep(1 * time.Second)
+
 		b.Reconnect()
 	}
 

@@ -3,7 +3,6 @@ services:
     container_name: ftso-data-sources
     image: ftso-data-sources:latest
     build: .
-    command: ./app
     restart: unless-stopped
     ports:
       - "5500:5500"

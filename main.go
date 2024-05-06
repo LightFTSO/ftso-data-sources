@@ -33,13 +33,13 @@ func main() {
 
 	logging.SetupLogging()
 
-	fmt.Println("Hell yeahhh")
-	fmt.Println("GO GO GO GO GO GO GO  LIGHTFTSO LIGHTFTSO LIGHTFTSO LIGHTFTSO !!! GO GO GO GO GO GO GO GO ")
+	slog.Info("--- FTSO Data Sources v1.0 ---")
+	slog.Info("Created with <3 by RoseLabs.Mx (LightFTSO)")
+	slog.Info("Get in contact at x.com @lightftso or @roselabs.mx")
 
 	run(config)
 
-	fmt.Println("Bye!")
-
+	slog.Warn("À Bientôt! Adiós! Goodbye!")
 }
 
 func run(globalConfig config.ConfigOptions) {

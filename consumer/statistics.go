@@ -46,22 +46,31 @@ func (s *StatisticsGenerator) CloseTickerListener() {
 
 func (s *StatisticsGenerator) MessagesInTheLastMinute() {
 	go func() {
-		time.Sleep(time.Duration(60-time.Now().Second()) * time.Second)
+		startTs := time.Now()
+		time.Sleep(time.Duration(60-startTs.Truncate(time.Second).Second()) * time.Second)
+		s.printTickerCount(startTs)
 
 		timeTicker := time.NewTicker(s.statsInterval)
 
 		defer timeTicker.Stop()
 
 		for range timeTicker.C {
-			if s.TickerListener != nil {
-				totalTickers := s.tickerCounter.Swap(0)
-				tickersPerSecond := float64(totalTickers) / s.statsInterval.Seconds()
-				log.Info(fmt.Sprintf("Received %d tickers in the last %.1f seconds %.1f tickers/s", totalTickers, s.statsInterval.Seconds(), tickersPerSecond))
-			}
+			s.printTickerCount(time.Now().Add(-s.statsInterval))
 		}
 	}()
 
 }
+
+func (s *StatisticsGenerator) printTickerCount(startTime time.Time) {
+	if s.TickerListener != nil {
+		runningTime := time.Since(startTime)
+
+		totalTickers := s.tickerCounter.Swap(0)
+		tickersPerSecond := float64(totalTickers) / runningTime.Seconds()
+		log.Info(fmt.Sprintf("Received %d tickers in the last %.0f seconds %.1f tickers/s", totalTickers, runningTime.Seconds(), tickersPerSecond))
+	}
+}
+
 func (s *StatisticsGenerator) MessagesThisPriceEpoch() {
 
 }

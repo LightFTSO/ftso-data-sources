@@ -105,21 +105,23 @@ func (b *BitrueClient) onMessage(message internal.WsMessage) error {
 	}
 
 	if message.Type == websocket.TextMessage {
-		if strings.Contains(string(message.Message), "ping") {
+		msg := string(message.Message)
+		if strings.Contains(msg, "ping") {
 			log.Debug("Pong received", "datasource", b.GetName())
-			b.wsClient.SendMessageJSON(strings.ReplaceAll(string(message.Message), "ping", "pong"))
+			b.wsClient.SendMessage([]byte(strings.ReplaceAll(msg, "ping", "pong")))
 			return nil
 		}
 	}
 
 	if message.Type == websocket.BinaryMessage {
 		// decompress
-		data, err := b.decompressGzip(message.Message)
+		compressedData, err := b.decompressGzip(message.Message)
 		if err != nil {
 			log.Error("Error parsing binary message", "datasource", b.GetName(), "error", err.Error())
 		}
-		if strings.Contains(string(data), "_ticker") && strings.Contains(string(data), "tick") && !strings.Contains(string(data), "event_rep") {
-			ticker, err := b.parseTicker(data)
+		data := string(compressedData)
+		if strings.Contains(data, "_ticker") && strings.Contains(data, "tick") && !strings.Contains(data, "event_rep") {
+			ticker, err := b.parseTicker([]byte(data))
 			if err != nil {
 				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
 				return nil
@@ -151,37 +153,6 @@ func (b *BitrueClient) parseTicker(message []byte) (*model.Ticker, error) {
 	}
 
 	return ticker, nil
-}
-
-func (b *BitrueClient) getAvailableSymbols() ([]BitrueSymbol, error) {
-	reqUrl := b.apiEndpoint + "/v5/market/instruments-info?category=spot"
-
-	req, err := http.NewRequest(http.MethodGet, reqUrl, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-
-	data, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	type instrumentInfoResponse struct {
-		InstrumentsInfo *InstrumentInfoResponse `json:"result"`
-	}
-	var exchangeInfo = new(instrumentInfoResponse)
-	err = json.Unmarshal(data, exchangeInfo)
-	if err != nil {
-		return nil, err
-	}
-
-	return exchangeInfo.InstrumentsInfo.List, nil
-
 }
 
 func (b *BitrueClient) SubscribeTickers() error {
@@ -217,21 +188,4 @@ func (b *BitrueClient) decompressGzip(compressedData []byte) ([]byte, error) {
 	r.Close()
 
 	return data, nil
-}
-
-func (b *BitrueClient) SetPing() {
-	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
-	go func() {
-		defer ticker.Stop() // Ensure the ticker is stopped when this goroutine ends
-		for {
-			select {
-			case <-ticker.C: // Wait until the ticker sends a signal
-				if err := b.wsClient.Connection.WriteMessage(websocket.PingMessage, []byte(`{"op":"ping"}`)); err != nil {
-					log.Warn("Failed to send ping", "error", err, "datasource", b.GetName())
-				}
-			case <-b.ctx.Done():
-				return
-			}
-		}
-	}()
 }

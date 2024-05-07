@@ -117,7 +117,6 @@ func (b *CryptoComClient) onMessage(message internal.WsMessage) error {
 			}
 
 			for _, t := range tickers {
-				fmt.Println(t)
 				b.TickerTopic.Send(t)
 			}
 		}

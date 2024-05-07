@@ -32,8 +32,8 @@ func (s *StatisticsGenerator) StartTickerListener(tickerTopic *broadcast.Broadca
 	s.TickerListener = tickerTopic.Listen()
 	for consumerId := 1; consumerId <= s.numThreads; consumerId++ {
 		go func(consumerId int) {
+			log.Debug(fmt.Sprintf("Ticker statistics generator %d listening now", consumerId), "consumer", "statistics", "consumer_num", consumerId)
 			for range s.TickerListener.Channel() {
-				log.Debug(fmt.Sprintf("Ticker statistics generator %d listening now", consumerId), "consumer", "statistics", "consumer_num", consumerId)
 				s.tickerCounter.Add(1)
 			}
 		}(consumerId)

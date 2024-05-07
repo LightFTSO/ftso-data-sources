@@ -31,7 +31,7 @@ func main() {
 		log.Fatalf("%v\n", err.Error())
 	}
 
-	logging.SetupLogging()
+	logging.SetupLogging(config)
 
 	slog.Info("--- FTSO Data Sources v1.0 ---")
 	slog.Info("Created with <3 by RoseLabs.Mx (LightFTSO)")
@@ -43,7 +43,7 @@ func main() {
 }
 
 func run(globalConfig config.ConfigOptions) {
-	tickerTopic := broadcast.NewBroadcaster(config.Config.MessageBufferSize) //make(chan model.Ticker, config.Config.MessageBufferSize)
+	tickerTopic := broadcast.NewBroadcaster(config.Config.MessageBufferSize)
 	initConsumers(tickerTopic, globalConfig)
 	initDataSources(tickerTopic, globalConfig)
 }

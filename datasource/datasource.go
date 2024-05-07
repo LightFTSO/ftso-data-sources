@@ -12,6 +12,7 @@ import (
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/coinbase"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/cryptocom"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/gateio"
+	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/hitbtc"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/huobi"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/kraken"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/okx"
@@ -57,6 +58,8 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 		fallthrough
 	case "gateio":
 		return gateio.NewGateIoClient(source.Options, allSymbols, tickerTopic, w)
+	case "hitbtc":
+		return hitbtc.NewHitbtcClient(source.Options, allSymbols, tickerTopic, w)
 	case "huobi":
 		return huobi.NewHuobiClient(source.Options, allSymbols, tickerTopic, w)
 	case "kraken":

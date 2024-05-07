@@ -189,6 +189,7 @@ func (b *CryptoComClient) GetName() string {
 }
 
 func (b *CryptoComClient) pong(pingMessage []byte) {
+	log.Debug("Sending pong message", "datasource", b.GetName())
 	var ping PublicHeartbeat
 	err := json.Unmarshal(pingMessage, &ping)
 	if err != nil {
@@ -197,7 +198,7 @@ func (b *CryptoComClient) pong(pingMessage []byte) {
 	}
 
 	pong := ping
-	pong.Method = "public/respong-heartbeat"
+	pong.Method = "public/respond-heartbeat"
 
 	if err := b.wsClient.Connection.WriteJSON(pong); err != nil {
 		log.Warn("Failed to send ping", "error", err, "datasource", b.GetName())

@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 
@@ -19,6 +20,8 @@ func SetupLogging(Config config.ConfigOptions) {
 		logLevel = slog.LevelInfo
 	case "debug":
 		logLevel = slog.LevelDebug
+	default:
+		panic(fmt.Sprintf("Unknown log level \"%s\"", Config.LogLevel))
 	}
 
 	defaultLogger := slog.New(

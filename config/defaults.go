@@ -7,6 +7,7 @@ import (
 
 func setDefaults() {
 	viper.SetDefault("env", "development")
+	viper.SetDefault("log_level", "info")
 
 	viper.SetDefault("message_buffer_size", 0)
 

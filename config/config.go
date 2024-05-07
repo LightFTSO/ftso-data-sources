@@ -11,6 +11,8 @@ import (
 type ConfigOptions struct {
 	Env string `mapstructure:"env"`
 
+	LogLevel string `mapstructure:"log_level"`
+
 	Datasources []datasource.DataSourceOptions `mapstructure:"datasources"`
 
 	Stats consumer.StatisticsGeneratorOptions `mapstructure:"stats"`

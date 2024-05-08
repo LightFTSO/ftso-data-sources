@@ -71,7 +71,7 @@ func (s *AllSymbols) Flatten() []model.Symbol {
 }
 
 func GetAllSymbols(crypto []string, commodities []string, forex []string, stocks []string) AllSymbols {
-	cryptoSymbols, err := createSymbolList(crypto[:], constants.USD_USDT_USDC_BUSD[:])
+	cryptoSymbols, err := createSymbolList(crypto[:], constants.ALL_QUOTE_ASSETS[:])
 	if err != nil {
 		panic(err)
 	}

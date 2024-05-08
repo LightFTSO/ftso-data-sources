@@ -11,3 +11,6 @@ secrets/
 config*.yaml
 dump.rdb
 mosquitto/
+redis/redis_persistent_storage/
+questdb/db
+questdb/public

@@ -33,17 +33,7 @@ type QuestDbConsumer struct {
 	individualFeedTable bool
 	numThreads          int
 	flushInterval       time.Duration
-	flushIntervalTicker *time.Ticker
 	txContext           *context.Context
-}
-
-func (q *QuestDbConsumer) flushILPBuffer() error {
-	log.Debug("Flushing ILP buffer", "consumer", "questdb")
-
-	if err := (*q.questdbSender).Flush(*q.txContext); err != nil {
-		log.Error("Error ILP buffer", "consumer", "questdb", "error", err)
-	}
-	return nil
 }
 
 func (q *QuestDbConsumer) processTicker(ticker *model.Ticker) {

@@ -106,10 +106,7 @@ func (b *BitstampClient) onMessage(message internal.WsMessage) error {
 				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
 				return nil
 			}
-
-			fmt.Println(ticker)
 			b.TickerTopic.Send(ticker)
-
 		}
 	}
 

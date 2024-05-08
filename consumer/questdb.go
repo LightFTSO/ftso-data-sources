@@ -9,7 +9,6 @@ import (
 
 	questdb "github.com/questdb/go-questdb-client/v3"
 	"github.com/textileio/go-threads/broadcast"
-	"roselabs.mx/ftso-data-sources/constants"
 	"roselabs.mx/ftso-data-sources/model"
 )
 
@@ -45,7 +44,6 @@ func (q *QuestDbConsumer) processTicker(ticker *model.Ticker) {
 			Symbol("base", ticker.Base).
 			Symbol("quote", ticker.Quote).
 			Float64Column("price", ticker.LastPriceFloat64).
-			BoolColumn("stablecoin", constants.IsStablecoin(ticker.Base)).
 			At(*q.txContext, ticker.Timestamp)
 	} else {
 		err = (*q.questdbSender).Table("tickers").
@@ -53,7 +51,6 @@ func (q *QuestDbConsumer) processTicker(ticker *model.Ticker) {
 			Symbol("quote", ticker.Quote).
 			Symbol("exchange", ticker.Source).
 			Float64Column("price", ticker.LastPriceFloat64).
-			BoolColumn("stablecoin", constants.IsStablecoin(ticker.Base)).
 			At(*q.txContext, ticker.Timestamp)
 	}
 	if err != nil {

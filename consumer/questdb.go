@@ -31,7 +31,6 @@ type QuestDbConsumer struct {
 	questdbSender       *questdb.LineSender
 	TickerListener      *broadcast.Listener
 	individualFeedTable bool
-	numThreads          int
 	flushInterval       time.Duration
 	txContext           *context.Context
 }
@@ -64,16 +63,14 @@ func (q *QuestDbConsumer) processTicker(ticker *model.Ticker) {
 
 func (q *QuestDbConsumer) StartTickerListener(tickerTopic *broadcast.Broadcaster) {
 	// Listen for tickers in the ch channel and sends them to a io.Writer
-	log.Debug(fmt.Sprintf("QuestDB ILP ticker listener configured with %d consumer goroutines", q.numThreads), "consumer", "questdb", "num_threads", q.numThreads)
+	log.Debug("QuestDB ILP ticker listener configured", "consumer", "questdb")
 	q.TickerListener = tickerTopic.Listen()
-	for consumerId := 1; consumerId <= q.numThreads; consumerId++ {
-		go func(consumerId int) {
-			log.Debug(fmt.Sprintf("QuestDB ILP ticker consumer %d listening for tickers now", consumerId), "consumer", "questdb", "consumer_num", consumerId)
-			for ticker := range q.TickerListener.Channel() {
-				q.processTicker(ticker.(*model.Ticker))
-			}
-		}(consumerId)
-	}
+	go func() {
+		log.Debug("QuestDB ILP ticker consumer listening for tickers now", "consumer", "questdb")
+		for ticker := range q.TickerListener.Channel() {
+			q.processTicker(ticker.(*model.Ticker))
+		}
+	}()
 
 }
 func (q *QuestDbConsumer) CloseTickerListener() {
@@ -128,7 +125,6 @@ func NewQuestDbConsumer(options QuestDbConsumerOptions) *QuestDbConsumer {
 	newConsumer := &QuestDbConsumer{
 		questdbSender:       &sender,
 		individualFeedTable: options.IndividualFeedTable,
-		numThreads:          options.NumThreads,
 		flushInterval:       options.FlushInterval,
 		txContext:           &ctx,
 	}

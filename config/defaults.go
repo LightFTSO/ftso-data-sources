@@ -48,7 +48,6 @@ func setDefaults() {
 
 	viper.SetDefault("questdb.enabled", false)
 	viper.SetDefault("questdb.flush_interval", "10s")
-	viper.SetDefault("questdb.num_threads", 1)
 	viper.SetDefault("questdb.client_options.address", "127.0.0.0.1:9000")
 	viper.SetDefault("questdb.client_options.schema", "http")
 }

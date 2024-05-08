@@ -7,6 +7,7 @@ import (
 	"github.com/mitchellh/mapstructure"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/binance"
+	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bitget"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bitmart"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bitrue"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bitstamp"
@@ -49,6 +50,8 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 		return binance.NewBinanceClient(source.Options, allSymbols, tickerTopic, w)
 	case "binance.us":
 		return binance.NewBinanceUSClient(source.Options, allSymbols, tickerTopic, w)
+	case "bitget":
+		return bitget.NewBitgetClient(source.Options, allSymbols, tickerTopic, w)
 	case "bitmart":
 		return bitmart.NewBitmartClient(source.Options, allSymbols, tickerTopic, w)
 	case "bitrue":

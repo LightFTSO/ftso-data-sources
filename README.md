@@ -12,7 +12,7 @@ Flow goes like this:
 Supported exchanges:
 
 Crypto:
-binance,binance.us,bitmart,bitrue,bitstamp,bybit,coinbase,cryptocom,gateio,
+binance,binance.us,bitget,bitmart,bitrue,bitstamp,bybit,coinbase,cryptocom,gateio,
 hitbtc,huobi,kraken,lbank,okx,whitebit,toobit
 
 Stocks, Commodities, Forex:

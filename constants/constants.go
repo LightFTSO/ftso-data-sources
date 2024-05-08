@@ -29,10 +29,10 @@ const BUSD = "busd"
 const DAI = "dai"
 
 var USD_USDT_USDC_BUSD_DAI = AssetList{USD, USDT, USDC, BUSD, DAI}
-var USDT_USDC_BUSD_DAI = AssetList{USDT, USDC, BUSD, DAI}
 var USD_USDT_USDC_BUSD = AssetList{USD, USDT, USDC, BUSD}
 var USD_USDT_USDC_DAI = AssetList{USD, USDT, USDC, DAI}
 var USD_USDT_USDC = AssetList{USD, USDT, USDC}
+var USDT_USDC_BUSD_DAI = AssetList{USDT, USDC, BUSD, DAI}
 var USDT_USDC_BUSD = AssetList{USDT, USDC, BUSD}
 var USDT_USDC_DAI = AssetList{USDT, USDC, DAI}
 var USDT_USDC = AssetList{USDT, USDC}

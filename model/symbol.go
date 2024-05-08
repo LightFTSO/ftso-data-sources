@@ -33,13 +33,16 @@ func cleanRemotePair(s string) string {
 }
 
 func getBaseCurrency(pair string) string {
-	var baseCurrencies = constants.USDT_USDC_BUSD_DAI
-
-	for _, baseCurrency := range baseCurrencies {
-		upperBase := strings.ToUpper(baseCurrency)
-		if strings.HasPrefix(pair, upperBase) {
-			return upperBase
+	for _, stablecoin := range constants.USDT_USDC_BUSD_DAI {
+		upperSc := strings.ToUpper(stablecoin)
+		if strings.HasPrefix(pair, upperSc) {
+			return upperSc
 		}
+	}
+
+	upperDAI := strings.ToUpper(constants.DAI)
+	if strings.HasSuffix(pair, upperDAI) {
+		return strings.Replace(pair, upperDAI, "", 1)
 	}
 
 	var quote = substr(pair, len(pair)-4, 6)

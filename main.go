@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -53,10 +52,13 @@ func enableConsumer(c consumer.Consumer, tickerTopic *broadcast.Broadcaster) {
 }
 
 func initConsumers(tickerTopic *broadcast.Broadcaster, config config.ConfigOptions) {
-	if !config.FileFileConsumerOptions.Enabled && !config.RedisOptions.Enabled && !config.WebsocketServerOptions.Enabled && !config.MosquittoConsumerOptions.Enabled {
+	if !config.FileFileConsumerOptions.Enabled &&
+		!config.RedisOptions.Enabled &&
+		!config.WebsocketServerOptions.Enabled &&
+		!config.MosquittoConsumerOptions.Enabled &&
+		!config.QuestDBConsumerOptions.Enabled {
 		if config.Env != "development" {
-			err := errors.New("no consumers enabled")
-			panic(err)
+			panic("no consumers enabled")
 		} else {
 			slog.Warn("No consumers enabled, data will go nowhere!")
 		}
@@ -74,6 +76,11 @@ func initConsumers(tickerTopic *broadcast.Broadcaster, config config.ConfigOptio
 
 	if config.MosquittoConsumerOptions.Enabled {
 		c := consumer.NewMqttConsumer(config.MosquittoConsumerOptions)
+		enableConsumer(c, tickerTopic)
+	}
+
+	if config.QuestDBConsumerOptions.Enabled {
+		c := consumer.NewQuestDbConsumer(config.QuestDBConsumerOptions)
 		enableConsumer(c, tickerTopic)
 	}
 

@@ -16,8 +16,8 @@ func setDefaults() {
 	viper.SetDefault("assets.forex", constants.BASES_FOREX)
 	viper.SetDefault("assets.stocks", constants.BASES_STOCKS)
 
-	viper.SetDefault("stats.enabled", "1h")
-	viper.SetDefault("stats.interval", "1h")
+	viper.SetDefault("stats.enabled", "true")
+	viper.SetDefault("stats.interval", "60s")
 	viper.SetDefault("stats.num_threads", 1)
 
 	viper.SetDefault("datasources", []string{"noisy"})
@@ -45,4 +45,10 @@ func setDefaults() {
 	viper.SetDefault("websocket_server.port", 3000)
 	viper.SetDefault("websocket_server.endpoints.tickers", "/tickers")
 	viper.SetDefault("websocket_server.endpoints.volumes", "/volumes")
+
+	viper.SetDefault("questdb.enabled", false)
+	viper.SetDefault("questdb.flush_interval", "10s")
+	viper.SetDefault("questdb.num_threads", 1)
+	viper.SetDefault("questdb.client_options.address", "127.0.0.0.1:9000")
+	viper.SetDefault("questdb.client_options.schema", "http")
 }

@@ -47,7 +47,7 @@ services:
       - lightftso-testing
 
   questdb:
-    image: questdb/questdb
+    image: questdb/questdb:latest
     container_name: questdb
     restart: unless-stopped
     ports:

@@ -30,6 +30,7 @@ type ConfigOptions struct {
 	WebsocketServerOptions   consumer.WebsocketServerConsumerOptions `mapstructure:"websocket_server"`
 	FileFileConsumerOptions  consumer.FileConsumerOptions            `mapstructure:"file_output"`
 	MosquittoConsumerOptions consumer.MqttConsumerOptions            `mapstructure:"mosquitto"`
+	QuestDBConsumerOptions   consumer.QuestDbConsumerOptions         `mapstructure:"questdb"`
 }
 
 var Config ConfigOptions

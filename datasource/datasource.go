@@ -9,6 +9,7 @@ import (
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/binance"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bitmart"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bitrue"
+	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bitstamp"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bybit"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/coinbase"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/cryptocom"
@@ -49,6 +50,8 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 		return bitmart.NewBitmartClient(source.Options, allSymbols, tickerTopic, w)
 	case "bitrue":
 		return bitrue.NewBitrueClient(source.Options, allSymbols, tickerTopic, w)
+	case "bitstamp":
+		return bitstamp.NewBitstampClient(source.Options, allSymbols, tickerTopic, w)
 	case "bybit":
 		return bybit.NewBybitClient(source.Options, allSymbols, tickerTopic, w)
 	case "coinbase":

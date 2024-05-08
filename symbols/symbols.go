@@ -1,7 +1,6 @@
 package symbols
 
 import (
-	"fmt"
 	"slices"
 
 	"roselabs.mx/ftso-data-sources/constants"
@@ -52,9 +51,9 @@ func createSymbolList(bases, quotes []string) ([]model.Symbol, error) {
 	symbols := []model.Symbol{}
 	for product := range c {
 		symbols = append(symbols, model.Symbol{
-			Base:   product[0].(string),
-			Quote:  product[1].(string),
-			Symbol: fmt.Sprintf("%s/%s", product[0].(string), product[1].(string))})
+			Base:  product[0].(string),
+			Quote: product[1].(string),
+		})
 	}
 	return symbols, nil
 }

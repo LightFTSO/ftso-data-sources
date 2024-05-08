@@ -99,7 +99,8 @@ func (b *CoinbaseClient) onMessage(message internal.WsMessage) error {
 		if strings.Contains(msg, `"type":"ticker"`) {
 			ticker, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
+				log.Error("Error parsing ticker", "datasource", b.GetName(),
+					"ticker", ticker, "error", err.Error())
 				return nil
 			}
 			b.TickerTopic.Send(ticker)
@@ -122,16 +123,12 @@ func (b *CoinbaseClient) parseTicker(message []byte) (*model.Ticker, error) {
 		return nil, err
 	}
 
-	newTicker := model.Ticker{
-		Base:      symbol.Base,
-		Quote:     symbol.Quote,
-		Symbol:    symbol.Symbol,
-		LastPrice: tickerMessage.LastPrice,
-		Source:    b.GetName(),
-		Timestamp: ts,
-	}
+	ticker, err := model.NewTicker(tickerMessage.LastPrice,
+		symbol,
+		b.GetName(),
+		ts)
 
-	return &newTicker, nil
+	return ticker, err
 }
 
 func (b *CoinbaseClient) parseSubscriptions(message []byte) error {

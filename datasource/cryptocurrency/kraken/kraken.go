@@ -114,7 +114,8 @@ func (b *KrakenClient) onMessage(message internal.WsMessage) error {
 			!strings.Contains(string(message.Message), `"method":"subscribe"`) {
 			ticker, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing tickers", "datasource", b.GetName(), "error", err.Error())
+				log.Error("Error parsing ticker", "datasource", b.GetName(),
+					"ticker", ticker, "error", err.Error())
 				return nil
 			}
 			b.TickerTopic.Send(ticker)
@@ -136,16 +137,14 @@ func (b *KrakenClient) parseTicker(message []byte) (*model.Ticker, error) {
 	symbol := model.ParseSymbol(tickerData.Symbol)
 
 	base := KrakenAsset(symbol.Base)
-	ticker := &model.Ticker{
-		Base:      string(base.GetStdName()),
-		Quote:     symbol.Quote,
-		Symbol:    symbol.Symbol,
-		LastPrice: strconv.FormatFloat(tickerData.Last, 'f', 9, 64),
-		Source:    b.GetName(),
-		Timestamp: time.Now(),
-	}
 
-	return ticker, nil
+	ticker, err := model.NewTicker(strconv.FormatFloat(tickerData.Last, 'f', 9, 64),
+		model.Symbol{Base: string(base.GetStdName()),
+			Quote: symbol.Quote},
+		b.GetName(),
+		time.Now())
+
+	return ticker, err
 }
 
 func (b *KrakenClient) getAvailableSymbols() ([]AssetPairInfo, error) {

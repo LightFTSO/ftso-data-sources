@@ -1,5 +1,9 @@
 package constants
 
+import (
+	"strings"
+)
+
 type AssetName string
 type AssetList []string
 
@@ -43,6 +47,15 @@ const TS_FORMAT = "01/02/2006 03:04:05.000"
 func IsStablecoin(asset string) bool {
 	for _, a := range USD_USDT_USDC_BUSD_DAI {
 		if a == asset {
+			return true
+		}
+	}
+	return false
+}
+
+func IsValidQuote(asset string) bool {
+	for _, a := range ALL_QUOTE_ASSETS {
+		if strings.ToUpper(a) == asset {
 			return true
 		}
 	}

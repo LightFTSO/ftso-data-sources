@@ -110,7 +110,8 @@ func (b *WhitebitClient) onMessage(message internal.WsMessage) error {
 		if strings.Contains(msg, "lastprice_update") {
 			ticker, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
+				log.Error("Error parsing ticker", "datasource", b.GetName(),
+					"ticker", ticker, "error", err.Error())
 				return nil
 			}
 			b.TickerTopic.Send(ticker)
@@ -139,16 +140,12 @@ func (b *WhitebitClient) parseTicker(message []byte) (*model.Ticker, error) {
 	}
 
 	symbol := model.ParseSymbol(newTickerEvent.Params[0])
-	ticker := model.Ticker{
-		Base:      symbol.Base,
-		Quote:     symbol.Quote,
-		Symbol:    symbol.Symbol,
-		LastPrice: newTickerEvent.Params[1],
-		Source:    b.GetName(),
-		Timestamp: time.Now(),
-	}
+	ticker, err := model.NewTicker(newTickerEvent.Params[1],
+		symbol,
+		b.GetName(),
+		time.Now())
 
-	return &ticker, nil
+	return ticker, err
 }
 
 func (b *WhitebitClient) getAvailableSymbols() ([]WhitebitMarketPair, error) {
@@ -192,9 +189,9 @@ func (b *WhitebitClient) SubscribeTickers() error {
 			symbol := model.ParseSymbol(v2.Name)
 			if strings.EqualFold(strings.ToUpper(v1.Base), strings.ToUpper(symbol.Base)) && strings.EqualFold(strings.ToUpper(v1.Quote), strings.ToUpper(symbol.Quote)) {
 				subscribedSymbols = append(subscribedSymbols, model.Symbol{
-					Base:   symbol.Base,
-					Quote:  symbol.Quote,
-					Symbol: symbol.Symbol},
+					Base:  symbol.Base,
+					Quote: symbol.Quote,
+				},
 				)
 			}
 		}

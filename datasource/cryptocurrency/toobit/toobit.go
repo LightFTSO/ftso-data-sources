@@ -107,7 +107,8 @@ func (b *ToobitClient) onMessage(message internal.WsMessage) error {
 		if strings.Contains(msg, "realtimes") {
 			tickers, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
+				log.Error("Error parsing ticker", "datasource", b.GetName(),
+					"error", err.Error())
 				return nil
 			}
 			for _, v := range tickers {
@@ -130,15 +131,16 @@ func (b *ToobitClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	tickers := []*model.Ticker{}
 	for _, t := range newTickerEvent.Data {
 		symbol := model.ParseSymbol(t.Symbol)
-		ticker := model.Ticker{
-			Base:      symbol.Base,
-			Quote:     symbol.Quote,
-			Symbol:    symbol.Symbol,
-			LastPrice: t.Close,
-			Source:    b.GetName(),
-			Timestamp: time.UnixMilli(t.Timestamp),
+		newTicker, err := model.NewTicker(t.Close,
+			symbol,
+			b.GetName(),
+			time.UnixMilli(t.Timestamp))
+		if err != nil {
+			log.Error("Error parsing ticker", "datasource", b.GetName(),
+				"ticker", newTicker, "error", err.Error())
+			continue
 		}
-		tickers = append(tickers, &ticker)
+		tickers = append(tickers, newTicker)
 	}
 
 	return tickers, nil
@@ -155,7 +157,7 @@ func (b *ToobitClient) SubscribeTickers() error {
 			"symbol": fmt.Sprintf("%s%s", strings.ToUpper(v.Base), strings.ToUpper(v.Quote)),
 		}
 		b.wsClient.SendMessageJSON(subMessage)
-		log.Debug("Subscribed ticker symbol", "datasource", b.GetName(), "symbols", v.Symbol)
+		log.Debug("Subscribed ticker symbol", "datasource", b.GetName(), "symbols", v.GetSymbol())
 	}
 
 	log.Debug("Subscribed ticker symbols", "datasource", b.GetName())

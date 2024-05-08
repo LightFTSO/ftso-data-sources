@@ -130,7 +130,8 @@ func (b *TiingoClient) onMessage(message internal.WsMessage) error {
 		if strings.Contains(string(message.Message), `"A"`) {
 			ticker, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
+				log.Error("Error parsing ticker", "datasource", b.GetName(),
+					"ticker", ticker, "error", err.Error())
 				return nil
 
 			}
@@ -163,9 +164,9 @@ func (b *TiingoClient) parseTicker(message []byte) (*model.Ticker, error) {
 	price := (ask + bid) / 2
 
 	ticker := &model.Ticker{
-		Base:      symbol.Base,
-		Quote:     symbol.Quote,
-		Symbol:    symbol.Symbol,
+		Base:  symbol.Base,
+		Quote: symbol.Quote,
+
 		LastPrice: strconv.FormatFloat(price, 'f', 9, 64),
 		Source:    b.GetName(),
 		Timestamp: ts,
@@ -177,9 +178,8 @@ func (b *TiingoClient) SubscribeTickers() error {
 	subscribedSymbols := []model.Symbol{}
 	for _, v := range b.SymbolList {
 		subscribedSymbols = append(subscribedSymbols, model.Symbol{
-			Base:   v.Base,
-			Quote:  v.Quote,
-			Symbol: fmt.Sprintf("%s/%s", v.Base, v.Quote)})
+			Base:  v.Base,
+			Quote: v.Quote})
 	}
 
 	// batch subscriptions in packets of 5

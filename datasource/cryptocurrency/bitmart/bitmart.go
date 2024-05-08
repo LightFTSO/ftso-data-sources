@@ -107,10 +107,10 @@ func (b *BitmartClient) onMessage(message internal.WsMessage) error {
 		if strings.Contains(msg, `"table":"spot/ticker"`) {
 			tickers, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
-				return nil
+				log.Error("Error parsing ticker", "datasource", b.GetName(),
+					"error", err.Error())
+				return err
 			}
-
 			for _, v := range tickers {
 				b.TickerTopic.Send(v)
 			}
@@ -118,20 +118,21 @@ func (b *BitmartClient) onMessage(message internal.WsMessage) error {
 
 		// decompress
 		/*compressedData, err := internal.DecompressFlate(message.Message)
-		if err != nil {
-			log.Error("Error decompressing message", "datasource", b.GetName(), "error", err.Error())
-			return nil
-		}
-		data := string(compressedData)
-		fmt.Println(compressedData)
-		if strings.Contains(data, "_ticker") && strings.Contains(data, "tick") && !strings.Contains(data, "event_rep") {
-			ticker, err := b.parseTicker([]byte(data))
-			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
-				return nil
-			}
-			b.TickerTopic.Send(ticker)
-		}*/
+				if err != nil {
+					log.Error("Error decompressing message", "datasource", b.GetName(), "error", err.Error())
+					return nil
+				}
+				data := string(compressedData)
+				fmt.Println(compressedData)
+				if strings.Contains(data, "_ticker") && strings.Contains(data, "tick") && !strings.Contains(data, "event_rep") {
+					ticker, err := b.parseTicker([]byte(data))
+					if err != nil {
+						log.Error("Error parsing ticker", "datasource", b.GetName(),
+		"ticker",ticker,"error", err.Error())
+						return nil
+					}
+					b.TickerTopic.Send(ticker)
+				}*/
 	}
 
 	return nil
@@ -148,15 +149,16 @@ func (b *BitmartClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	tickers := []*model.Ticker{}
 	for _, t := range newTickerEvent.Data {
 		symbol := model.ParseSymbol(t.Symbol)
-		ticker := model.Ticker{
-			Base:      symbol.Base,
-			Quote:     symbol.Quote,
-			Symbol:    symbol.Symbol,
-			LastPrice: t.LastPrice,
-			Source:    b.GetName(),
-			Timestamp: time.UnixMilli(t.TimestampMs),
+		newTicker, err := model.NewTicker(t.LastPrice,
+			symbol,
+			b.GetName(),
+			time.UnixMilli(t.TimestampMs))
+		if err != nil {
+			log.Error("Error parsing ticker", "datasource", b.GetName(),
+				"ticker", newTicker, "error", err.Error())
+			continue
 		}
-		tickers = append(tickers, &ticker)
+		tickers = append(tickers, newTicker)
 	}
 
 	return tickers, nil

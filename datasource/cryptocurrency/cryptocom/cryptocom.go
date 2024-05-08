@@ -112,7 +112,8 @@ func (b *CryptoComClient) onMessage(message internal.WsMessage) error {
 		if strings.Contains(msg, "\"channel\":\"ticker\"") && strings.Contains(msg, "\"subscription\":\"ticker.") {
 			tickers, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
+				log.Error("Error parsing ticker", "datasource", b.GetName(),
+					"error", err.Error())
 				return nil
 			}
 
@@ -143,17 +144,16 @@ func (b *CryptoComClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 			continue
 		}
 
-		t := model.Ticker{
-			Base:      symbol.Base,
-			Quote:     symbol.Quote,
-			Symbol:    symbol.Symbol,
-			LastPrice: v.LastPrice,
-			Source:    b.GetName(),
-			Timestamp: time.UnixMilli(v.Timestamp),
+		newTicker, err := model.NewTicker(v.LastPrice,
+			symbol,
+			b.GetName(),
+			time.UnixMilli(v.Timestamp))
+		if err != nil {
+			log.Error("Error parsing ticker", "datasource", b.GetName(),
+				"ticker", newTicker, "error", err.Error())
+			continue
 		}
-
-		//fmt.Println(v)
-		tickers = append(tickers, &t)
+		tickers = append(tickers, newTicker)
 	}
 
 	return tickers, nil

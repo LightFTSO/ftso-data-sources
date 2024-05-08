@@ -111,7 +111,8 @@ func (b *HuobiClient) onMessage(message internal.WsMessage) error {
 
 		ticker, err := b.parseTicker(data)
 		if err != nil {
-			log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
+			log.Error("Error parsing ticker", "datasource", b.GetName(),
+				"ticker", ticker, "error", err.Error())
 			return nil
 		}
 		b.TickerTopic.Send(ticker)
@@ -132,16 +133,12 @@ func (b *HuobiClient) parseTicker(message []byte) (*model.Ticker, error) {
 
 	symbol := model.ParseSymbol(market)
 
-	newTicker := model.Ticker{
-		Base:      symbol.Base,
-		Quote:     symbol.Quote,
-		Symbol:    symbol.Symbol,
-		LastPrice: fmt.Sprint(tickerMessage.Tick.LastPrice),
-		Source:    b.GetName(),
-		Timestamp: time.UnixMilli(tickerMessage.Timestamp),
-	}
+	ticker, err := model.NewTicker(fmt.Sprint(tickerMessage.Tick.LastPrice),
+		symbol,
+		b.GetName(),
+		time.UnixMilli(tickerMessage.Timestamp))
 
-	return &newTicker, nil
+	return ticker, err
 }
 
 func (b *HuobiClient) SubscribeTickers() error {
@@ -151,7 +148,7 @@ func (b *HuobiClient) SubscribeTickers() error {
 			"id":  time.Now().UnixMilli(),
 		}
 		b.wsClient.SendMessageJSON(subMessage)
-		log.Debug("Subscribed ticker symbol", "datasource", b.GetName(), "symbols", v.Symbol)
+		log.Debug("Subscribed ticker symbol", "datasource", b.GetName(), "symbols", v.GetSymbol())
 	}
 
 	return nil

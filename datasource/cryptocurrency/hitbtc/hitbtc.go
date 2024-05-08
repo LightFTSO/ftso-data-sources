@@ -101,7 +101,8 @@ func (b *HitbtcClient) onMessage(message internal.WsMessage) error {
 		if strings.Contains(string(message.Message), "ticker/price/1s") && strings.Contains(string(message.Message), "data") {
 			tickers, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
+				log.Error("Error parsing ticker", "datasource", b.GetName(),
+					"error", err.Error())
 				return nil
 			}
 
@@ -131,15 +132,16 @@ func (b *HitbtcClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	for _, key := range keys {
 		tickData := newTickerEvent.Data[key]
 		symbol := model.ParseSymbol(key)
-		ticker := model.Ticker{
-			Base:      symbol.Base,
-			Quote:     symbol.Quote,
-			Symbol:    symbol.Symbol,
-			LastPrice: tickData.LastPrice,
-			Source:    b.GetName(),
-			Timestamp: time.UnixMilli(tickData.Timestamp),
+		newTicker, err := model.NewTicker(tickData.LastPrice,
+			symbol,
+			b.GetName(),
+			time.UnixMilli(tickData.Timestamp))
+		if err != nil {
+			log.Error("Error parsing ticker", "datasource", b.GetName(),
+				"ticker", newTicker, "error", err.Error())
+			continue
 		}
-		tickers = append(tickers, &ticker)
+		tickers = append(tickers, newTicker)
 	}
 
 	return tickers, nil

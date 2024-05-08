@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	log "log/slog"
-	"strconv"
 	"strings"
 	"time"
 
@@ -38,21 +37,6 @@ type QuestDbConsumer struct {
 	txContext           *context.Context
 }
 
-func (q *QuestDbConsumer) setup() error {
-
-	go func() {
-		log.Debug("Setting up QuestDB ILP sender", "consumer", "questdb")
-		q.flushIntervalTicker = time.NewTicker(q.flushInterval)
-		defer q.flushIntervalTicker.Stop()
-
-		for range q.flushIntervalTicker.C {
-			q.flushILPBuffer()
-		}
-	}()
-
-	return nil
-}
-
 func (q *QuestDbConsumer) flushILPBuffer() error {
 	log.Debug("Flushing ILP buffer", "consumer", "questdb")
 
@@ -64,21 +48,14 @@ func (q *QuestDbConsumer) flushILPBuffer() error {
 
 func (q *QuestDbConsumer) processTicker(ticker *model.Ticker) {
 	//fmt.Printf("tickers,%s,%s,%s,%s,%v,%v\n", ticker.Base, ticker.Quote, ticker.Source, ticker.LastPrice, constants.IsStablecoin(ticker.Base), ticker.Timestamp)
-	lastPrice, err := strconv.ParseFloat(ticker.LastPrice, 64)
-	if err != nil {
-		log.Error("Error formatting price as float64 for ILP", "consumer", "questdb", "error", err, "ticker", ticker)
-		return
-	}
-	if ticker.Timestamp.IsZero() {
-		ticker.Timestamp = time.Now()
-	}
+	var err error
 	if q.individualFeedTable {
 		tableName := fmt.Sprintf("%s_tickers", ticker.Base)
 		err = (*q.questdbSender).Table(tableName).
 			Symbol("exchange", ticker.Source).
 			Symbol("base", ticker.Base).
 			Symbol("quote", ticker.Quote).
-			Float64Column("price", lastPrice).
+			Float64Column("price", ticker.LastPriceFloat64).
 			BoolColumn("stablecoin", constants.IsStablecoin(ticker.Base)).
 			At(*q.txContext, ticker.Timestamp)
 	} else {
@@ -86,7 +63,7 @@ func (q *QuestDbConsumer) processTicker(ticker *model.Ticker) {
 			Symbol("base", ticker.Base).
 			Symbol("quote", ticker.Quote).
 			Symbol("exchange", ticker.Source).
-			Float64Column("price", lastPrice).
+			Float64Column("price", ticker.LastPriceFloat64).
 			BoolColumn("stablecoin", constants.IsStablecoin(ticker.Base)).
 			At(*q.txContext, ticker.Timestamp)
 	}
@@ -138,10 +115,18 @@ func NewQuestDbConsumer(options QuestDbConsumerOptions) *QuestDbConsumer {
 
 	minFlushInterval := time.Duration(1) * time.Second
 	if options.FlushInterval < minFlushInterval {
+		options.FlushInterval = minFlushInterval
 		log.Warn(fmt.Sprintf("The flush interval %v is set to less than the current minimum %v, using %v",
 			options.FlushInterval, minFlushInterval, minFlushInterval))
 	}
+	if schema == "http" || schema == "https" {
+		configString = fmt.Sprintf("%sauto_flush_interval=%d;", configString, options.FlushInterval)
+	} else {
+		log.Warn(fmt.Sprintf("Flush interval %v only applies to senders using the http(s) schema",
+			options.FlushInterval))
+	}
 
+	fmt.Println(configString)
 	ctx := context.TODO()
 	log.Info(fmt.Sprintf("Connecting to QuestDB at %s", options.ClientOptions.Address), "consumer", "questdb")
 	log.Debug(configString, "consumer", "questdb")
@@ -157,7 +142,5 @@ func NewQuestDbConsumer(options QuestDbConsumerOptions) *QuestDbConsumer {
 		flushInterval:       options.FlushInterval,
 		txContext:           &ctx,
 	}
-	newConsumer.setup()
-
 	return newConsumer
 }

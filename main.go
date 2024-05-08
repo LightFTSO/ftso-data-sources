@@ -27,7 +27,7 @@ func init() {
 func main() {
 	config, err := config.LoadConfig(*flags.ConfigFile)
 	if err != nil {
-		log.Fatalf("%v\n", err.Error())
+		log.Fatalf("%s\n", err)
 	}
 
 	logging.SetupLogging(config)
@@ -98,7 +98,7 @@ func initDataSources(tickerTopic *broadcast.Broadcaster, config config.ConfigOpt
 	allSymbols := symbols.GetAllSymbols(config.Assets.Crypto, config.Assets.Commodities, config.Assets.Forex, config.Assets.Stocks)
 	syms := []string{}
 	for _, s := range allSymbols.Flatten() {
-		syms = append(syms, strings.ToUpper(s.Symbol))
+		syms = append(syms, strings.ToUpper(s.GetSymbol()))
 	}
 	slog.Debug(fmt.Sprintf("list of enabled feeds: %+v", syms))
 

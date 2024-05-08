@@ -138,7 +138,7 @@ func (b *MetalsDevClient) SubscribeTickers() error {
 				}
 				ticker := model.Ticker{
 					LastPrice: strconv.FormatFloat(price, 'f', 8, 64),
-					Symbol:    strings.ToUpper(s.Symbol),
+					Symbol:    strings.ToUpper(s.GetSymbol()),
 					Base:      strings.ToUpper(s.Base),
 					Quote:     strings.ToUpper(s.Quote),
 					Source:    b.GetName(),
@@ -155,7 +155,7 @@ func (b *MetalsDevClient) SubscribeTickers() error {
 
 				ticker := model.Ticker{
 					LastPrice: strconv.FormatFloat(price, 'f', 8, 64),
-					Symbol:    strings.ToUpper(s.Symbol),
+					Symbol:    strings.ToUpper(s.GetSymbol()),
 					Base:      strings.ToUpper(s.Base),
 					Quote:     strings.ToUpper(s.Quote),
 					Source:    b.GetName(),

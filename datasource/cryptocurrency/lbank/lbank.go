@@ -107,7 +107,8 @@ func (b *LbankClient) onMessage(message internal.WsMessage) error {
 		if strings.Contains(msg, `"type":"tick"`) {
 			ticker, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
+				log.Error("Error parsing ticker", "datasource", b.GetName(),
+					"ticker", ticker, "error", err.Error())
 				return nil
 			}
 			b.TickerTopic.Send(ticker)
@@ -131,16 +132,13 @@ func (b *LbankClient) parseTicker(message []byte) (*model.Ticker, error) {
 	if err != nil {
 		return nil, err
 	}
-	ticker := &model.Ticker{
-		Base:      symbol.Base,
-		Quote:     symbol.Quote,
-		Symbol:    symbol.Symbol,
-		LastPrice: fmt.Sprintf("%.6f", newTickerEvent.Ticker.LastPrice),
-		Source:    b.GetName(),
-		Timestamp: ts,
-	}
 
-	return ticker, nil
+	ticker, err := model.NewTicker(fmt.Sprintf("%.6f", newTickerEvent.Ticker.LastPrice),
+		symbol,
+		b.GetName(),
+		ts)
+
+	return ticker, err
 }
 
 func (b *LbankClient) SubscribeTickers() error {
@@ -151,7 +149,7 @@ func (b *LbankClient) SubscribeTickers() error {
 			"pair":      fmt.Sprintf("%s_%s", strings.ToUpper(v.Base), strings.ToUpper(v.Quote)),
 		}
 		b.wsClient.SendMessageJSON(subMessage)
-		log.Debug("Subscribed ticker symbol", "datasource", b.GetName(), "symbols", v.Symbol)
+		log.Debug("Subscribed ticker symbol", "datasource", b.GetName(), "symbols", v.GetSymbol())
 	}
 
 	log.Debug("Subscribed ticker symbols", "datasource", b.GetName())

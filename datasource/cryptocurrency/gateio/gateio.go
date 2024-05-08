@@ -105,7 +105,8 @@ func (b *GateIoClient) onMessage(message internal.WsMessage) error {
 		if strings.Contains(string(message.Message), "spot.tickers") && strings.Contains(string(message.Message), "\"event\":\"update\"") {
 			ticker, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
+				log.Error("Error parsing ticker", "datasource", b.GetName(),
+					"ticker", ticker, "error", err.Error())
 				return nil
 			}
 
@@ -125,16 +126,12 @@ func (b *GateIoClient) parseTicker(message []byte) (*model.Ticker, error) {
 	}
 
 	symbol := model.ParseSymbol(newTickerEvent.Result.CurrencyPair)
-	ticker := model.Ticker{
-		Base:      symbol.Base,
-		Quote:     symbol.Quote,
-		Symbol:    symbol.Symbol,
-		LastPrice: newTickerEvent.Result.Last,
-		Source:    b.GetName(),
-		Timestamp: time.UnixMilli(newTickerEvent.TimeMs),
-	}
+	ticker, err := model.NewTicker(newTickerEvent.Result.Last,
+		symbol,
+		b.GetName(),
+		time.UnixMilli(newTickerEvent.TimeMs))
 
-	return &ticker, nil
+	return ticker, err
 }
 
 func (b *GateIoClient) getAvailableSymbols() (*[]GateIoInstrument, error) {
@@ -177,9 +174,8 @@ func (b *GateIoClient) SubscribeTickers() error {
 		for _, v2 := range *availableSymbols {
 			if strings.EqualFold(strings.ToUpper(v1.Base), strings.ToUpper(v2.Base)) && strings.EqualFold(strings.ToUpper(v1.Quote), strings.ToUpper(v2.Quote)) {
 				subscribedSymbols = append(subscribedSymbols, model.Symbol{
-					Base:   v2.Base,
-					Quote:  v2.Quote,
-					Symbol: fmt.Sprintf("%s/%s", v2.Base, v2.Quote)})
+					Base:  v2.Base,
+					Quote: v2.Quote})
 			}
 		}
 	}

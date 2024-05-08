@@ -7,9 +7,12 @@ import (
 )
 
 type Symbol struct {
-	Base   string `mapstructure:",squash"`
-	Quote  string
-	Symbol string
+	Base  string `mapstructure:",squash"`
+	Quote string
+}
+
+func (s *Symbol) GetSymbol() string {
+	return s.Base + "/" + s.Quote
 }
 
 func ParseSymbol(s string) Symbol {
@@ -17,9 +20,8 @@ func ParseSymbol(s string) Symbol {
 	base := getBaseCurrency(pair)
 	quote := strings.Replace(pair, base, "", 1)
 	return Symbol{
-		Base:   base,
-		Quote:  quote,
-		Symbol: base + "/" + quote,
+		Base:  base,
+		Quote: quote,
 	}
 }
 

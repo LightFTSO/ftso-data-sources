@@ -96,7 +96,8 @@ func (b *BinanceClient) onMessage(message internal.WsMessage) error {
 		if strings.Contains(string(message.Message), "@ticker") {
 			ticker, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
+				log.Error("Error parsing ticker", "datasource", b.GetName(),
+					"ticker", ticker, "error", err.Error())
 				return nil
 			}
 			b.TickerTopic.Send(ticker)
@@ -113,16 +114,12 @@ func (b *BinanceClient) parseTicker(message []byte) (*model.Ticker, error) {
 		return &model.Ticker{}, err
 	}
 	symbol := model.ParseSymbol(newTickerEvent.Data.Symbol)
-	newTicker := model.Ticker{
-		Base:      symbol.Base,
-		Quote:     symbol.Quote,
-		Symbol:    symbol.Symbol,
-		LastPrice: newTickerEvent.Data.LastPrice,
-		Source:    b.GetName(),
-		Timestamp: time.UnixMilli(newTickerEvent.Data.Time),
-	}
+	ticker, err := model.NewTicker(newTickerEvent.Data.LastPrice,
+		symbol,
+		b.GetName(),
+		time.UnixMilli(newTickerEvent.Data.Time))
 
-	return &newTicker, nil
+	return ticker, err
 }
 
 func (b *BinanceClient) getAvailableSymbols() ([]BinanceSymbol, error) {
@@ -180,9 +177,8 @@ func (b *BinanceClient) SubscribeTickers() error {
 		for _, v2 := range availableSymbols {
 			if strings.EqualFold(strings.ToUpper(v1.Base), strings.ToUpper(v2.BaseAsset)) && strings.EqualFold(strings.ToUpper(v1.Quote), strings.ToUpper(v2.QuoteAsset)) {
 				subscribedSymbols = append(subscribedSymbols, model.Symbol{
-					Base:   v2.BaseAsset,
-					Quote:  v2.QuoteAsset,
-					Symbol: fmt.Sprintf("%s/%s", v2.BaseAsset, v2.QuoteAsset)})
+					Base:  v2.BaseAsset,
+					Quote: v2.QuoteAsset})
 			}
 		}
 	}

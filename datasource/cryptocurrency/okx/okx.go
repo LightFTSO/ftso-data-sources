@@ -106,11 +106,12 @@ func (b *OkxClient) onMessage(message internal.WsMessage) error {
 		if strings.Contains(msg, `"channel":"index-tickers"`) {
 			tickers, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
+				log.Error("Error parsing ticker", "datasource", b.GetName(),
+					"error", err.Error())
 				return nil
 			}
 			for _, v := range tickers {
-				b.TickerTopic.Send(&v)
+				b.TickerTopic.Send(v)
 			}
 
 		}
@@ -119,15 +120,15 @@ func (b *OkxClient) onMessage(message internal.WsMessage) error {
 	return nil
 }
 
-func (b *OkxClient) parseTicker(message []byte) ([]model.Ticker, error) {
+func (b *OkxClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	var tickerMessage OkxTicker
 	err := json.Unmarshal(message, &tickerMessage)
 	if err != nil {
 		log.Error(err.Error(), "datasource", b.GetName())
-		return []model.Ticker{}, err
+		return []*model.Ticker{}, err
 	}
 
-	tickers := []model.Ticker{}
+	tickers := []*model.Ticker{}
 	for _, v := range tickerMessage.Data {
 		symbol := model.ParseSymbol(v.InstId)
 
@@ -136,16 +137,16 @@ func (b *OkxClient) parseTicker(message []byte) ([]model.Ticker, error) {
 			return nil, err
 		}
 
-		t := model.Ticker{
-			Base:      symbol.Base,
-			Quote:     symbol.Quote,
-			Symbol:    symbol.Symbol,
-			LastPrice: v.Idxpx,
-			Source:    b.GetName(),
-			Timestamp: time.UnixMilli(ts),
+		newTicker, err := model.NewTicker(v.Idxpx,
+			symbol,
+			b.GetName(),
+			time.UnixMilli(ts))
+		if err != nil {
+			log.Error("Error parsing ticker", "datasource", b.GetName(),
+				"ticker", newTicker, "error", err.Error())
+			continue
 		}
-
-		tickers = append(tickers, t)
+		tickers = append(tickers, newTicker)
 	}
 
 	return tickers, nil

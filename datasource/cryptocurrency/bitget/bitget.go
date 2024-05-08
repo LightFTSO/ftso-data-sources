@@ -103,8 +103,9 @@ func (b *BitgetClient) onMessage(message internal.WsMessage) error {
 		if strings.Contains(msg, `"action":"snapshot"`) && strings.Contains(msg, `"channel":"ticker"`) {
 			tickers, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
-				return nil
+				log.Error("Error parsing ticker", "datasource", b.GetName(),
+					"error", err.Error())
+				return err
 			}
 			for _, v := range tickers {
 				b.TickerTopic.Send(v)
@@ -126,15 +127,16 @@ func (b *BitgetClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	tickers := []*model.Ticker{}
 	for _, t := range newTickerEvent.Data {
 		symbol := model.ParseSymbol(t.InstId)
-		ticker := model.Ticker{
-			Base:      symbol.Base,
-			Quote:     symbol.Quote,
-			Symbol:    symbol.Symbol,
-			LastPrice: t.LastPrice,
-			Source:    b.GetName(),
-			Timestamp: time.UnixMilli(newTickerEvent.Timestamp),
+		newTicker, err := model.NewTicker(t.LastPrice,
+			symbol,
+			b.GetName(),
+			time.UnixMilli(newTickerEvent.Timestamp))
+		if err != nil {
+			log.Error("Error parsing ticker", "datasource", b.GetName(),
+				"ticker", newTicker, "error", err.Error())
+			continue
 		}
-		tickers = append(tickers, &ticker)
+		tickers = append(tickers, newTicker)
 	}
 
 	return tickers, nil

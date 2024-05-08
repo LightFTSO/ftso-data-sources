@@ -103,7 +103,8 @@ func (b *BitstampClient) onMessage(message internal.WsMessage) error {
 		if strings.Contains(string(message.Message), `"event":"trade"`) {
 			ticker, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
+				log.Error("Error parsing ticker", "datasource", b.GetName(),
+					"ticker", ticker, "error", err.Error())
 				return nil
 			}
 			b.TickerTopic.Send(ticker)
@@ -127,16 +128,12 @@ func (b *BitstampClient) parseTicker(message []byte) (*model.Ticker, error) {
 		return nil, err
 	}
 
-	ticker := &model.Ticker{
-		Base:      symbol.Base,
-		Quote:     symbol.Quote,
-		Symbol:    symbol.Symbol,
-		LastPrice: newTickerEvent.Data.LastPrice,
-		Source:    b.GetName(),
-		Timestamp: time.UnixMicro(ts),
-	}
+	ticker, err := model.NewTicker(newTickerEvent.Data.LastPrice,
+		symbol,
+		b.GetName(),
+		time.UnixMicro(ts))
 
-	return ticker, nil
+	return ticker, err
 }
 
 func (b *BitstampClient) SubscribeTickers() error {
@@ -148,7 +145,7 @@ func (b *BitstampClient) SubscribeTickers() error {
 			},
 		}
 		b.wsClient.SendMessageJSON(subMessage)
-		log.Debug("Subscribed ticker symbol", "datasource", b.GetName(), "symbols", v.Symbol)
+		log.Debug("Subscribed ticker symbol", "datasource", b.GetName(), "symbols", v.GetSymbol())
 	}
 
 	log.Debug("Subscribed ticker symbols", "datasource", b.GetName())

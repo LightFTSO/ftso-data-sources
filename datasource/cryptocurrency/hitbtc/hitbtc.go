@@ -101,7 +101,7 @@ func (b *HitbtcClient) onMessage(message internal.WsMessage) error {
 		if strings.Contains(string(message.Message), "ticker/price/1s") && strings.Contains(string(message.Message), "data") {
 			tickers, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing trade", "datasource", b.GetName(), "error", err.Error())
+				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
 				return nil
 			}
 

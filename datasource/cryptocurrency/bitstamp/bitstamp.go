@@ -103,7 +103,7 @@ func (b *BitstampClient) onMessage(message internal.WsMessage) error {
 		if strings.Contains(string(message.Message), `"event":"trade"`) {
 			ticker, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing trade", "datasource", b.GetName(), "error", err.Error())
+				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
 				return nil
 			}
 

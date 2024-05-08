@@ -47,7 +47,9 @@ func (s *StatisticsGenerator) CloseTickerListener() {
 func (s *StatisticsGenerator) MessagesInTheLastMinute() {
 	go func() {
 		startTs := time.Now()
-		time.Sleep(time.Duration(60-startTs.Truncate(time.Second).Second()) * time.Second)
+		// wait enough time to be aligned with the start of the next minute
+		time.Sleep((time.Duration(60-startTs.Second()-1) * time.Second) +
+			(time.Duration((1e9 - startTs.Nanosecond())) * time.Nanosecond))
 		s.printTickerCount(startTs)
 
 		timeTicker := time.NewTicker(s.statsInterval)

@@ -133,9 +133,16 @@ func (b *CryptoComClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 		return []*model.Ticker{}, err
 	}
 
+	//fmt.Println(string(message))
+	//fmt.Println(tickerMessage)
 	symbol := model.ParseSymbol(tickerMessage.Result.IntrumentName)
 	tickers := []*model.Ticker{}
 	for _, v := range tickerMessage.Result.Data {
+		// some messages come with null data
+		if v.LastPrice == "" {
+			continue
+		}
+
 		t := model.Ticker{
 			Base:      symbol.Base,
 			Quote:     symbol.Quote,
@@ -145,6 +152,7 @@ func (b *CryptoComClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 			Timestamp: time.UnixMilli(v.Timestamp),
 		}
 
+		//fmt.Println(v)
 		tickers = append(tickers, &t)
 	}
 

@@ -65,7 +65,7 @@ func (q *QuestDbConsumer) flushILPBuffer() error {
 func (q *QuestDbConsumer) processTicker(ticker *model.Ticker) {
 	lastPrice, err := strconv.ParseFloat(ticker.LastPrice, 64)
 	if err != nil {
-		log.Error("Error formatting price as float64 for ILP", "consumer", "questdb", "error", err)
+		log.Error("Error formatting price as float64 for ILP", "consumer", "questdb", "error", err, "ticker", ticker)
 		return
 	}
 	if q.individualFeedTable {

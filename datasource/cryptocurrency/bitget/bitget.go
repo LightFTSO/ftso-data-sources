@@ -45,7 +45,7 @@ func NewBitgetClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 	}
 	bitget.wsClient.SetMessageHandler(bitget.onMessage)
 
-	log.Info("Created new datasource", "datasource", bitget.GetName())
+	log.Debug("Created new datasource", "datasource", bitget.GetName())
 	return &bitget, nil
 }
 
@@ -167,7 +167,7 @@ func (b *BitgetClient) SubscribeTickers() error {
 		b.wsClient.SendMessageJSON(subMessage)
 	}
 
-	log.Info("Subscribed ticker symbols", "datasource", b.GetName())
+	log.Debug("Subscribed ticker symbols", "datasource", b.GetName())
 
 	return nil
 }

@@ -45,7 +45,7 @@ func NewHitbtcClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 	}
 	hitbtc.wsClient.SetMessageHandler(hitbtc.onMessage)
 
-	log.Info("Created new datasource", "datasource", hitbtc.GetName())
+	log.Debug("Created new datasource", "datasource", hitbtc.GetName())
 	return &hitbtc, nil
 }
 
@@ -173,7 +173,7 @@ func (b *HitbtcClient) SubscribeTickers() error {
 		b.wsClient.SendMessageJSON(subMessage)
 	}
 
-	log.Info("Subscribed ticker symbols", "datasource", b.GetName())
+	log.Debug("Subscribed ticker symbols", "datasource", b.GetName())
 
 	return nil
 }

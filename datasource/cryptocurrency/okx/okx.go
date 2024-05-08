@@ -47,13 +47,13 @@ func NewOkxClient(options interface{}, symbolList symbols.AllSymbols, tickerTopi
 	}
 	okx.wsClient.SetMessageHandler(okx.onMessage)
 
-	log.Info("Created new datasource", "datasource", okx.GetName())
+	log.Debug("Created new datasource", "datasource", okx.GetName())
 	return &okx, nil
 }
 
 func (b *OkxClient) Connect() error {
 	b.W.Add(1)
-	log.Info("Connecting to okx datasource", "datasource", b.GetName())
+	log.Info("Connecting...", "datasource", b.GetName())
 
 	b.ctx, b.cancel = context.WithCancel(context.Background())
 

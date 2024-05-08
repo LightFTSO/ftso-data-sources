@@ -50,7 +50,7 @@ func NewKrakenClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 		pingInterval: 20,
 	}
 
-	log.Info("Created new datasource", "datasource", kraken.GetName())
+	log.Debug("Created new datasource", "datasource", kraken.GetName())
 	return &kraken, nil
 }
 
@@ -233,7 +233,7 @@ func (b *KrakenClient) SubscribeTickers() error {
 		b.wsClient.SendMessageJSON(subMessage)
 	}
 
-	log.Info("Subscribed ticker symbols", "datasource", b.GetName(), "symbols", len(subscribedSymbols))
+	log.Debug("Subscribed ticker symbols", "datasource", b.GetName(), "symbols", len(subscribedSymbols))
 	return nil
 }
 

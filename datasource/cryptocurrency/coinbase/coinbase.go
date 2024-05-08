@@ -39,7 +39,7 @@ func NewCoinbaseClient(options interface{}, symbolList symbols.AllSymbols, ticke
 	}
 	coinbase.wsClient.SetMessageHandler(coinbase.onMessage)
 
-	log.Info("Created new datasource", "datasource", coinbase.GetName())
+	log.Debug("Created new datasource", "datasource", coinbase.GetName())
 	return &coinbase, nil
 }
 
@@ -142,7 +142,7 @@ func (b *CoinbaseClient) parseSubscriptions(message []byte) error {
 		return err
 	}
 
-	log.Info("Subscribed ticker symbols", "datasource", b.GetName(),
+	log.Debug("Subscribed ticker symbols", "datasource", b.GetName(),
 		"symbols", len(subscrSuccessMessage.Channels[0].ProductIds))
 
 	return nil

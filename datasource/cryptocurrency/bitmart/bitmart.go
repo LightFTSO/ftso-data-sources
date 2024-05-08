@@ -45,7 +45,7 @@ func NewBitmartClient(options interface{}, symbolList symbols.AllSymbols, ticker
 	}
 	bitmart.wsClient.SetMessageHandler(bitmart.onMessage)
 
-	log.Info("Created new datasource", "datasource", bitmart.GetName())
+	log.Debug("Created new datasource", "datasource", bitmart.GetName())
 	return &bitmart, nil
 }
 
@@ -185,7 +185,7 @@ func (b *BitmartClient) SubscribeTickers() error {
 		b.wsClient.SendMessageJSON(subMessage)
 	}
 
-	log.Info("Subscribed ticker symbols", "datasource", b.GetName())
+	log.Debug("Subscribed ticker symbols", "datasource", b.GetName())
 
 	return nil
 }

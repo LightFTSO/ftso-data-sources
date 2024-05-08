@@ -50,7 +50,7 @@ func NewCryptoComClient(options interface{}, symbolList symbols.AllSymbols, tick
 	}
 	cryptocom.wsClient.SetMessageHandler(cryptocom.onMessage)
 
-	log.Info("Created new datasource", "datasource", cryptocom.GetName())
+	log.Debug("Created new datasource", "datasource", cryptocom.GetName())
 	return &cryptocom, nil
 }
 
@@ -187,7 +187,7 @@ func (b *CryptoComClient) SubscribeTickers() error {
 		b.wsClient.SendMessageJSON(subMessage)
 	}
 
-	log.Info("Subscribed ticker symbols", "datasource", b.GetName())
+	log.Debug("Subscribed ticker symbols", "datasource", b.GetName())
 
 	return nil
 }

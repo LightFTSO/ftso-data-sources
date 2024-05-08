@@ -46,7 +46,7 @@ func NewBitstampClient(options interface{}, symbolList symbols.AllSymbols, ticke
 	}
 	bitstamp.wsClient.SetMessageHandler(bitstamp.onMessage)
 
-	log.Info("Created new datasource", "datasource", bitstamp.GetName())
+	log.Debug("Created new datasource", "datasource", bitstamp.GetName())
 	return &bitstamp, nil
 }
 
@@ -151,7 +151,7 @@ func (b *BitstampClient) SubscribeTickers() error {
 		log.Debug("Subscribed ticker symbol", "datasource", b.GetName(), "symbols", v.Symbol)
 	}
 
-	log.Info("Subscribed ticker symbols", "datasource", b.GetName())
+	log.Debug("Subscribed ticker symbols", "datasource", b.GetName())
 
 	return nil
 }

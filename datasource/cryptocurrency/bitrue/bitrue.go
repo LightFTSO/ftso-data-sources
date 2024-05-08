@@ -49,7 +49,7 @@ func NewBitrueClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 	}
 	bitrue.wsClient.SetMessageHandler(bitrue.onMessage)
 
-	log.Info("Created new datasource", "datasource", bitrue.GetName())
+	log.Debug("Created new datasource", "datasource", bitrue.GetName())
 	return &bitrue, nil
 }
 

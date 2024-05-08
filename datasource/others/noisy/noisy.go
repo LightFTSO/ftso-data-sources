@@ -81,6 +81,6 @@ func NewNoisySource(options *NoisySourceOptions, tickerTopic *broadcast.Broadcas
 		TickerTopic: tickerTopic,
 	}
 
-	log.Info("Created new datasource", "datasource", "noisy", "name", options.Name, "interval", d.String())
+	log.Debug("Created new datasource", "datasource", "noisy", "name", options.Name, "interval", d.String())
 	return &noisy, nil
 }

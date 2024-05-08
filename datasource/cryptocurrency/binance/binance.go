@@ -42,7 +42,7 @@ func NewBinanceClient(options interface{}, symbolList symbols.AllSymbols, ticker
 	}
 	binance.wsClient.SetMessageHandler(binance.onMessage)
 
-	log.Info("Created new datasource", "datasource", binance.GetName())
+	log.Debug("Created new datasource", "datasource", binance.GetName())
 	return &binance, nil
 }
 
@@ -199,7 +199,7 @@ func (b *BinanceClient) SubscribeTickers() error {
 
 	b.wsClient.SendMessageJSON(subMessage)
 
-	log.Info("Subscribed ticker symbols", "datasource", b.GetName(), "symbols", len(subscribedSymbols))
+	log.Debug("Subscribed ticker symbols", "datasource", b.GetName(), "symbols", len(subscribedSymbols))
 	return nil
 }
 

@@ -48,7 +48,7 @@ func NewLbankClient(options interface{}, symbolList symbols.AllSymbols, tickerTo
 	}
 	lbank.wsClient.SetMessageHandler(lbank.onMessage)
 
-	log.Info("Created new datasource", "datasource", lbank.GetName())
+	log.Debug("Created new datasource", "datasource", lbank.GetName())
 	return &lbank, nil
 }
 
@@ -154,7 +154,7 @@ func (b *LbankClient) SubscribeTickers() error {
 		log.Debug("Subscribed ticker symbol", "datasource", b.GetName(), "symbols", v.Symbol)
 	}
 
-	log.Info("Subscribed ticker symbols", "datasource", b.GetName())
+	log.Debug("Subscribed ticker symbols", "datasource", b.GetName())
 
 	return nil
 }

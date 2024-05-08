@@ -42,7 +42,7 @@ func NewHuobiClient(options interface{}, symbolList symbols.AllSymbols, tickerTo
 	}
 	huobi.wsClient.SetMessageHandler(huobi.onMessage)
 
-	log.Info("Created new datasource", "datasource", huobi.GetName())
+	log.Debug("Created new datasource", "datasource", huobi.GetName())
 	return &huobi, nil
 }
 

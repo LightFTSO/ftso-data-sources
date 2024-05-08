@@ -52,7 +52,7 @@ func NewWhitebitClient(options interface{}, symbolList symbols.AllSymbols, ticke
 	}
 	whitebit.wsClient.SetMessageHandler(whitebit.onMessage)
 
-	log.Info("Created new datasource", "datasource", whitebit.GetName())
+	log.Debug("Created new datasource", "datasource", whitebit.GetName())
 	return &whitebit, nil
 }
 
@@ -220,7 +220,7 @@ func (b *WhitebitClient) SubscribeTickers() error {
 		b.wsClient.SendMessageJSON(subMessage)
 	}
 
-	log.Info("Subscribed ticker symbols", "datasource", b.GetName(), "symbols", len(subscribedSymbols))
+	log.Debug("Subscribed ticker symbols", "datasource", b.GetName(), "symbols", len(subscribedSymbols))
 	return nil
 }
 

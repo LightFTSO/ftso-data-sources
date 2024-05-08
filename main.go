@@ -100,7 +100,7 @@ func initDataSources(tickerTopic *broadcast.Broadcaster, config config.ConfigOpt
 	for _, s := range allSymbols.Flatten() {
 		syms = append(syms, strings.ToUpper(s.Symbol))
 	}
-	slog.Info(fmt.Sprintf("list of enabled feeds: %+v", syms))
+	slog.Debug(fmt.Sprintf("list of enabled feeds: %+v", syms))
 
 	dataSourceList := config.Datasources
 	for _, source := range dataSourceList {

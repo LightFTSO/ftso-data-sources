@@ -48,7 +48,7 @@ func NewToobitClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 	}
 	toobit.wsClient.SetMessageHandler(toobit.onMessage)
 
-	log.Info("Created new datasource", "datasource", toobit.GetName())
+	log.Debug("Created new datasource", "datasource", toobit.GetName())
 	return &toobit, nil
 }
 
@@ -158,7 +158,7 @@ func (b *ToobitClient) SubscribeTickers() error {
 		log.Debug("Subscribed ticker symbol", "datasource", b.GetName(), "symbols", v.Symbol)
 	}
 
-	log.Info("Subscribed ticker symbols", "datasource", b.GetName())
+	log.Debug("Subscribed ticker symbols", "datasource", b.GetName())
 
 	return nil
 }

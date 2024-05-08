@@ -50,7 +50,7 @@ func NewBybitClient(options interface{}, symbolList symbols.AllSymbols, tickerTo
 	}
 	bybit.wsClient.SetMessageHandler(bybit.onMessage)
 
-	log.Info("Created new datasource", "datasource", bybit.GetName())
+	log.Debug("Created new datasource", "datasource", bybit.GetName())
 	return &bybit, nil
 }
 
@@ -209,7 +209,7 @@ func (b *BybitClient) SubscribeTickers() error {
 		b.wsClient.SendMessageJSON(subMessage)
 	}
 
-	log.Info("Subscribed ticker symbols", "datasource", b.GetName(), "symbols", len(subscribedSymbols))
+	log.Debug("Subscribed ticker symbols", "datasource", b.GetName(), "symbols", len(subscribedSymbols))
 	return nil
 }
 

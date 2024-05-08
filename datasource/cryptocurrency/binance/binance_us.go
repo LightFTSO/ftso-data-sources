@@ -22,6 +22,6 @@ func NewBinanceUSClient(options interface{}, symbolList symbols.AllSymbols, tick
 		SymbolList:  symbolList.Crypto,
 	}
 	binance.wsClient.SetMessageHandler(binance.onMessage)
-	log.Info("Created new datasource", "datasource", binance.GetName())
+	log.Debug("Created new datasource", "datasource", binance.GetName())
 	return &binance, nil
 }

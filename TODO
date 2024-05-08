@@ -1,10 +1,10 @@
 Add a lot exchanges: 
 
-bitfinex,digifinex,fmfw,kucoin,bitforex,mexc
-lbank,upbit,btcex,bitget,coinex,xt,whitebit,toobit,pionex,btse,gemini,bingx
+bitfinex,digifinex,fmfw,kucoin,bitforex,mexc,xt
+upbit,btcex,bitget,coinex,whitebit,toobit,pionex,btse,gemini,bingx
 p2b,cexio,bitmake,hotcoin,coinw,deepcoin,pointpay,orangex,biconomy,cointr,bitvenus
 tapbit,hashkey,bequant,bigone,ascendex,exmo,cpatex,bydfi,emirex,delta,poloniex
-latoken,bit2me,nonkyctrubit,bluebit,citex,ace,bitso,blofin
+latoken,bit2me,nonkyc,trubit,bluebit,citex,ace,bitso,blofin
 
 Implement dynamic on-the-go datasource and symbol configs
 

@@ -41,7 +41,7 @@ type QuestDbConsumer struct {
 func (q *QuestDbConsumer) setup() error {
 
 	go func() {
-		log.Info("Setting up QuestDB ILP sender", "consumer", "questdb")
+		log.Debug("Setting up QuestDB ILP sender", "consumer", "questdb")
 		q.flushIntervalTicker = time.NewTicker(q.flushInterval)
 		defer q.flushIntervalTicker.Stop()
 
@@ -63,38 +63,36 @@ func (q *QuestDbConsumer) flushILPBuffer() error {
 }
 
 func (q *QuestDbConsumer) processTicker(ticker *model.Ticker) {
+	//fmt.Printf("tickers,%s,%s,%s,%s,%v,%v\n", ticker.Base, ticker.Quote, ticker.Source, ticker.LastPrice, constants.IsStablecoin(ticker.Base), ticker.Timestamp)
 	lastPrice, err := strconv.ParseFloat(ticker.LastPrice, 64)
 	if err != nil {
 		log.Error("Error formatting price as float64 for ILP", "consumer", "questdb", "error", err, "ticker", ticker)
 		return
 	}
+	if ticker.Timestamp.IsZero() {
+		ticker.Timestamp = time.Now()
+	}
 	if q.individualFeedTable {
 		tableName := fmt.Sprintf("%s_tickers", ticker.Base)
-		err := (*q.questdbSender).Table(tableName).
+		err = (*q.questdbSender).Table(tableName).
 			Symbol("exchange", ticker.Source).
 			Symbol("base", ticker.Base).
 			Symbol("quote", ticker.Quote).
 			Float64Column("price", lastPrice).
 			BoolColumn("stablecoin", constants.IsStablecoin(ticker.Base)).
 			At(*q.txContext, ticker.Timestamp)
-		if err != nil {
-			log.Error("Error processing ticker for ILP", "consumer", "questdb", "error", err)
-		}
 	} else {
-		//fmt.Printf("tickers,%s,%s,%s,%s,%v,%v\n", ticker.Base, ticker.Quote, ticker.Source, ticker.LastPrice, constants.IsStablecoin(ticker.Base), ticker.Timestamp)
-		err := (*q.questdbSender).Table("tickers").
+		err = (*q.questdbSender).Table("tickers").
 			Symbol("base", ticker.Base).
 			Symbol("quote", ticker.Quote).
 			Symbol("exchange", ticker.Source).
 			Float64Column("price", lastPrice).
 			BoolColumn("stablecoin", constants.IsStablecoin(ticker.Base)).
 			At(*q.txContext, ticker.Timestamp)
-		if err != nil {
-			log.Error("Error processing ticker for ILP", "consumer", "questdb", "error", err)
-		}
 	}
-	//fmt.Println(ticker)
-
+	if err != nil {
+		log.Error("Error processing ticker for ILP", "consumer", "questdb", "error", err)
+	}
 }
 
 func (q *QuestDbConsumer) StartTickerListener(tickerTopic *broadcast.Broadcaster) {

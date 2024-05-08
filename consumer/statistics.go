@@ -60,7 +60,6 @@ func (s *StatisticsGenerator) MessagesInTheLastMinute() {
 			s.printTickerCount(time.Now().Add(-s.statsInterval))
 		}
 	}()
-
 }
 
 func (s *StatisticsGenerator) printTickerCount(startTime time.Time) {

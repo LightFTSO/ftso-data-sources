@@ -19,6 +19,7 @@ import (
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/kraken"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/lbank"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/okx"
+	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/whitebit"
 	"roselabs.mx/ftso-data-sources/datasource/others/noisy"
 	metalsdev "roselabs.mx/ftso-data-sources/datasource/tradfi/metals.dev"
 	"roselabs.mx/ftso-data-sources/datasource/tradfi/tiingo"
@@ -77,6 +78,8 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 		fallthrough
 	case "okx":
 		return okx.NewOkxClient(source.Options, allSymbols, tickerTopic, w)
+	case "whitebit":
+		return whitebit.NewWhitebitClient(source.Options, allSymbols, tickerTopic, w)
 
 	// non crypto
 	case "tiingo":

@@ -102,15 +102,17 @@ func (b *ToobitClient) onMessage(message internal.WsMessage) error {
 	}
 
 	msg := string(message.Message)
-	fmt.Println(msg)
+	//fmt.Println(msg)
 	if message.Type == websocket.TextMessage {
-		if strings.Contains(msg, "lastprice_update") {
-			ticker, err := b.parseTicker(message.Message)
+		if strings.Contains(msg, "realtimes") {
+			tickers, err := b.parseTicker(message.Message)
 			if err != nil {
 				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
 				return nil
 			}
-			b.TickerTopic.Send(ticker)
+			for _, v := range tickers {
+				b.TickerTopic.Send(v)
+			}
 		}
 	}
 

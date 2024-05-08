@@ -5,7 +5,6 @@ type WsTickerMessage struct {
 	Symbol string `json:"symbol"`
 	Params struct {
 		RealtimeInterval string `json:"realtimeinterval"`
-		Binary           bool   `json:"binary"`
 	} `json:"params"`
 	Data []struct {
 		Timestamp int64  `json:"t"`

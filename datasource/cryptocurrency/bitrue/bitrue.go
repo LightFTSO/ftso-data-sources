@@ -1,11 +1,8 @@
 package bitrue
 
 import (
-	"bytes"
-	"compress/gzip"
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -115,9 +112,10 @@ func (b *BitrueClient) onMessage(message internal.WsMessage) error {
 
 	if message.Type == websocket.BinaryMessage {
 		// decompress
-		compressedData, err := b.decompressGzip(message.Message)
+		compressedData, err := internal.DecompressGzip(message.Message)
 		if err != nil {
-			log.Error("Error parsing binary message", "datasource", b.GetName(), "error", err.Error())
+			log.Error("Error decompressing message", "datasource", b.GetName(), "error", err.Error())
+			return nil
 		}
 		data := string(compressedData)
 		if strings.Contains(data, "_ticker") && strings.Contains(data, "tick") && !strings.Contains(data, "event_rep") {
@@ -175,17 +173,4 @@ func (b *BitrueClient) SubscribeTickers() error {
 
 func (b *BitrueClient) GetName() string {
 	return b.name
-}
-
-func (b *BitrueClient) decompressGzip(compressedData []byte) ([]byte, error) {
-	buf := bytes.NewBuffer(compressedData)
-	r, err := gzip.NewReader(buf)
-	if err != nil {
-		log.Error("Error decompressing message", "datasource", b.GetName(), "error", err.Error())
-		return []byte{}, err
-	}
-	data, _ := io.ReadAll(r)
-	r.Close()
-
-	return data, nil
 }

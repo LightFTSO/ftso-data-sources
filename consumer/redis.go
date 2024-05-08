@@ -76,7 +76,7 @@ func (s *RedisConsumer) processTicker(ticker *model.Ticker) {
 
 func (s *RedisConsumer) StartTickerListener(tickerTopic *broadcast.Broadcaster) {
 	// Listen for tickers in the ch channel and sends them to a io.Writer
-	log.Debug(fmt.Sprintf("Redis ticket listener configured with %d consumer goroutines", s.numThreads), "consumer", "redis", "num_threads", s.numThreads)
+	log.Debug(fmt.Sprintf("Redis ticker listener configured with %d consumer goroutines", s.numThreads), "consumer", "redis", "num_threads", s.numThreads)
 	s.TickerListener = tickerTopic.Listen()
 	for consumerId := 1; consumerId <= s.numThreads; consumerId++ {
 		go func(consumerId int) {
@@ -90,6 +90,7 @@ func (s *RedisConsumer) StartTickerListener(tickerTopic *broadcast.Broadcaster) 
 }
 func (s *RedisConsumer) CloseTickerListener() {
 	s.TickerListener.Discard()
+	s.redisClient.Close()
 }
 
 func NewRedisConsumer(options RedisOptions) *RedisConsumer {

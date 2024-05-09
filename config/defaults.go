@@ -25,10 +25,10 @@ func setDefaults() {
 	viper.SetDefault("file_consumer.enabled", false)
 	viper.SetDefault("file_consumer.filename", "")
 
-	viper.SetDefault("mosquitto.enabled", false)
-	viper.SetDefault("mosquitto.num_threads", 1)
-	viper.SetDefault("mosquitto.use_sbe_encoding", true)
-	viper.SetDefault("mosquitto.qos_level", 0)
+	viper.SetDefault("mqtt.enabled", false)
+	viper.SetDefault("mqtt.num_threads", 1)
+	viper.SetDefault("mqtt.use_sbe_encoding", true)
+	viper.SetDefault("mqtt.qos_level", 0)
 
 	viper.SetDefault("redis.enabled", false)
 	viper.SetDefault("redis.client_options.initaddress", []string{"127.0.0.1:6379"})

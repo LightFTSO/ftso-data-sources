@@ -97,7 +97,7 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 	case "noisy":
 		var options = new(noisy.NoisySourceOptions)
 		mapstructure.Decode(source.Options, options)
-		return noisy.NewNoisySource(options, tickerTopic, w)
+		return noisy.NewNoisySource(options, allSymbols, tickerTopic, w)
 
 	default:
 		return nil, fmt.Errorf("source %s doesn't exist", source)

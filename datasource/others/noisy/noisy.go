@@ -9,6 +9,7 @@ import (
 
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/model"
+	"roselabs.mx/ftso-data-sources/symbols"
 )
 
 type NoisySourceOptions struct {
@@ -17,10 +18,12 @@ type NoisySourceOptions struct {
 }
 
 type NoisySource struct {
-	name        string
-	W           *sync.WaitGroup
-	TickerTopic *broadcast.Broadcaster
-	Interval    time.Duration
+	name         string
+	W            *sync.WaitGroup
+	TickerTopic  *broadcast.Broadcaster
+	Interval     time.Duration
+	SymbolList   []model.Symbol
+	timeInterval time.Ticker
 }
 
 func (n *NoisySource) Connect() error {
@@ -34,16 +37,17 @@ func (n *NoisySource) Reconnect() error {
 
 func (n *NoisySource) SubscribeTickers() error {
 	go func(br *broadcast.Broadcaster) {
-		timeInterval := *time.NewTicker(n.Interval)
+		n.timeInterval = *time.NewTicker(n.Interval)
 
-		defer timeInterval.Stop()
+		defer n.timeInterval.Stop()
 
-		for t := range timeInterval.C {
+		for t := range n.timeInterval.C {
+			randomSymbol := n.SymbolList[rand.Intn(len(n.SymbolList))]
 			fakeTicker := model.Ticker{
 				LastPrice: strconv.FormatFloat(float64(rand.Intn(1000))+rand.Float64(), 'f', 9, 64),
-				Base:      "ABC",
-				Quote:     "XYZ",
-				Symbol:    "ABC/XYZ",
+				Base:      randomSymbol.Base,
+				Quote:     randomSymbol.Quote,
+				Symbol:    randomSymbol.GetSymbol(),
 				Source:    n.GetName(),
 				Timestamp: t,
 			}
@@ -65,7 +69,7 @@ func (n *NoisySource) GetName() string {
 	return n.name
 }
 
-func NewNoisySource(options *NoisySourceOptions, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*NoisySource, error) {
+func NewNoisySource(options *NoisySourceOptions, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*NoisySource, error) {
 	d, err := time.ParseDuration(options.Interval)
 	if err != nil {
 		log.Info("Using default duration", "datasource", "noisy", "name", options.Name)
@@ -79,8 +83,9 @@ func NewNoisySource(options *NoisySourceOptions, tickerTopic *broadcast.Broadcas
 		Interval:    d,
 		W:           w,
 		TickerTopic: tickerTopic,
+		SymbolList:  symbolList.Flatten(),
 	}
 
-	log.Debug("Created new datasource", "datasource", "noisy", "name", options.Name, "interval", d.String())
+	log.Debug("Created new datasource", "datasource", "noisy", "name", noisy.GetName(), "interval", d.String())
 	return &noisy, nil
 }

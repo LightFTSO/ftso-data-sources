@@ -19,3 +19,12 @@ Stocks, Commodities, Forex:
 tiingo,metalsdev
 
 Other:
+
+
+You can count the number of tickers per second enabling the file-output consumer, using /dev/stdout as the output file
+or using the MQTT consumer, in another terminal connect to it using a client program and pipe the output to the program `pv`, e.g.:
+
+`./ftso-data-sources | pv --line-mode --timer --rate > /dev/null`
+Outputs:
+`03:22 [ 496 /s]`
+For more info on `pv`, visit [https://docs.oracle.com/cd/E86824_01/html/E54763/pv-1.html](Oracle's man pages)

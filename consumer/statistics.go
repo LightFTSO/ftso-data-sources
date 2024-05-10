@@ -63,13 +63,11 @@ func (s *StatisticsGenerator) MessagesInTheLastMinute() {
 }
 
 func (s *StatisticsGenerator) printTickerCount(startTime time.Time) {
-	if s.TickerListener != nil {
-		runningTime := time.Since(startTime)
+	runningTime := time.Since(startTime)
 
-		totalTickers := s.tickerCounter.Swap(0)
-		tickersPerSecond := float64(totalTickers) / runningTime.Seconds()
-		log.Info(fmt.Sprintf("Received %d tickers in the last %.0f seconds %.1f tickers/s", totalTickers, runningTime.Seconds(), tickersPerSecond))
-	}
+	totalTickers := s.tickerCounter.Swap(0)
+	tickersPerSecond := float64(totalTickers) / runningTime.Seconds()
+	log.Info(fmt.Sprintf("Received %d tickers in the last %.0f seconds %.1f tickers/s", totalTickers, runningTime.Seconds(), tickersPerSecond))
 }
 
 func (s *StatisticsGenerator) MessagesThisPriceEpoch() {

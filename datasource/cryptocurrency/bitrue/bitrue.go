@@ -101,15 +101,6 @@ func (b *BitrueClient) onMessage(message internal.WsMessage) error {
 		b.Reconnect()
 	}
 
-	if message.Type == websocket.TextMessage {
-		msg := string(message.Message)
-		if strings.Contains(msg, "ping") {
-			log.Debug("Pong received", "datasource", b.GetName())
-			b.wsClient.SendMessage([]byte(strings.ReplaceAll(msg, "ping", "pong")))
-			return nil
-		}
-	}
-
 	if message.Type == websocket.BinaryMessage {
 		// decompress
 		compressedData, err := internal.DecompressGzip(message.Message)
@@ -126,6 +117,14 @@ func (b *BitrueClient) onMessage(message internal.WsMessage) error {
 				return nil
 			}
 			b.TickerTopic.Send(ticker)
+			return nil
+		}
+
+		if strings.Contains(data, "ping") {
+			pong := strings.ReplaceAll(data, "ping", "pong")
+			b.wsClient.SendMessage([]byte(pong))
+			log.Debug("Pong received", "datasource", b.GetName())
+			return nil
 		}
 	}
 

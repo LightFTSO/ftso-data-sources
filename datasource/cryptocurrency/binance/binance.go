@@ -91,7 +91,6 @@ func (b *BinanceClient) onMessage(message internal.WsMessage) error {
 		b.Reconnect()
 	}
 
-	fmt.Println(string(message.Message))
 	if message.Type == websocket.TextMessage {
 
 		if strings.Contains(string(message.Message), "@ticker") {

@@ -101,6 +101,7 @@ func (b *BinanceClient) onMessage(message internal.WsMessage) error {
 				return nil
 			}
 			b.TickerTopic.Send(ticker)
+			return nil
 		}
 	}
 
@@ -189,7 +190,7 @@ func (b *BinanceClient) SubscribeTickers() error {
 	}
 	subMessage := map[string]interface{}{
 		"method": "SUBSCRIBE",
-		"id":     rand.Uint64(),
+		"id":     fmt.Sprintf("%x", rand.Uint32()),
 		"params": s,
 	}
 

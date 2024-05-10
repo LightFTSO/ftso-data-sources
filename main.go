@@ -108,7 +108,7 @@ func initDataSources(tickerTopic *broadcast.Broadcaster, config config.ConfigOpt
 		go func(source datasource.DataSourceOptions) {
 			src, err := datasource.BuilDataSource(source, allSymbols, tickerTopic, &w)
 			if err != nil {
-				slog.Error("Error creating data source", "datasource", source, "error", err.Error())
+				slog.Error("Error creating data source", "datasource", source.Source, "error", err.Error())
 				w.Done()
 				return
 			}

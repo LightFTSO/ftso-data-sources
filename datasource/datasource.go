@@ -100,7 +100,7 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 		return noisy.NewNoisySource(options, allSymbols, tickerTopic, w)
 
 	default:
-		return nil, fmt.Errorf("source %s doesn't exist", source)
+		return nil, fmt.Errorf("source '%s' doesn't exist", source.Source)
 	}
 
 }

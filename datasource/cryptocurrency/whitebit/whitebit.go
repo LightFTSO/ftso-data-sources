@@ -228,10 +228,10 @@ func (b *WhitebitClient) GetName() string {
 func (b *WhitebitClient) SetPing() {
 	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
 	go func() {
-		defer ticker.Stop() // Ensure the ticker is stopped when this goroutine ends
+		defer ticker.Stop()
 		for {
 			select {
-			case <-ticker.C: // Wait until the ticker sends a signal
+			case <-ticker.C:
 				if err := b.wsClient.Connection.WriteJSON(
 					map[string]interface{}{
 						"id":     b.subscriptionId.Add(1),

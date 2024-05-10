@@ -19,6 +19,7 @@ import (
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/hitbtc"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/huobi"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/kraken"
+	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/kucoin"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/lbank"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/okx"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/toobit"
@@ -79,6 +80,8 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 		return huobi.NewHuobiClient(source.Options, allSymbols, tickerTopic, w)
 	case "kraken":
 		return kraken.NewKrakenClient(source.Options, allSymbols, tickerTopic, w)
+	case "kucoin":
+		return kucoin.NewKucoinClient(source.Options, allSymbols, tickerTopic, w)
 	case "lbank":
 		return lbank.NewLbankClient(source.Options, allSymbols, tickerTopic, w)
 	case "okex":

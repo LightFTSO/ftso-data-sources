@@ -243,10 +243,10 @@ func (b *KrakenClient) GetName() string {
 func (b *KrakenClient) SetPing() {
 	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
 	go func() {
-		defer ticker.Stop() // Ensure the ticker is stopped when this goroutine ends
+		defer ticker.Stop()
 		for {
 			select {
-			case <-ticker.C: // Wait until the ticker sends a signal
+			case <-ticker.C:
 				if err := b.wsClient.Connection.WriteMessage(websocket.TextMessage, []byte(`{"event":"ping"}`)); err != nil {
 					log.Warn("Failed to send ping", "error", err, "datasource", b.GetName())
 				}

@@ -2,13 +2,14 @@ package okx
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	log "log/slog"
 

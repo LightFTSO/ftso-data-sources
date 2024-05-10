@@ -16,6 +16,7 @@ require (
 
 require (
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
+	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect

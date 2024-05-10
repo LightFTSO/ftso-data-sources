@@ -11,9 +11,9 @@ import (
 
 	log "log/slog"
 
+	"github.com/goccy/go-json"
 	"github.com/gorilla/websocket"
 	"github.com/hashicorp/go-multierror"
-	json "github.com/json-iterator/go"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"

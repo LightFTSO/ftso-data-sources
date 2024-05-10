@@ -12,7 +12,7 @@ import (
 
 	log "log/slog"
 
-	json "github.com/json-iterator/go"
+	"github.com/goccy/go-json"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"

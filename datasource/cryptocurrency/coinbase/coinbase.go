@@ -1,12 +1,13 @@
 package coinbase
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	log "log/slog"
 

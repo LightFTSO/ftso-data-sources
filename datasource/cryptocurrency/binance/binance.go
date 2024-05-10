@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/goccy/go-json"
 	"github.com/gorilla/websocket"
-	json "github.com/json-iterator/go"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"

@@ -1,9 +1,10 @@
 package consumer
 
 import (
-	"encoding/json"
 	"fmt"
 	log "log/slog"
+
+	"github.com/goccy/go-json"
 
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"

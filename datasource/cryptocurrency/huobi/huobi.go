@@ -3,13 +3,14 @@ package huobi
 import (
 	"bytes"
 	"compress/gzip"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/goccy/go-json"
 
 	log "log/slog"
 

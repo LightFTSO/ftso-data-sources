@@ -19,7 +19,7 @@ COPY --from=build /go/src/ftso-data-sources/ftso-data-sources .
 
 # Add packages
 RUN apk -U upgrade \
-    && apk add --no-cache dumb-init ca-certificates \
+    && apk add --no-cache dumb-init ca-certificates tzdata \
     && chmod +x /app/ftso-data-sources
 
 

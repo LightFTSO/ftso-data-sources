@@ -43,11 +43,11 @@ func (s *MqttConsumer) setup() error {
 
 }
 
-func (s *MqttConsumer) processTicker(ticker *model.Ticker) {
+func (s *MqttConsumer) processTicker(ticker *model.Ticker, sbeMarshaller *internal.SbeMarshaller) {
 	channel := fmt.Sprintf("tickers/%s/%s/%s", ticker.Source, ticker.Base, ticker.Quote)
 
 	if s.useSbeEncoding {
-		payload, err := internal.MarshalSbe(*ticker)
+		payload, err := sbeMarshaller.MarshalSbe(*ticker)
 		if err != nil {
 			log.Error("error encoding ticker", "consumer", "mqtt", "error", err)
 		}
@@ -69,10 +69,10 @@ func (s *MqttConsumer) StartTickerListener(tickerTopic *broadcast.Broadcaster) {
 	s.TickerListener = tickerTopic.Listen()
 	for consumerId := 1; consumerId <= s.numThreads; consumerId++ {
 		go func(consumerId int) {
-
+			sbeMarshaller := internal.NewSbeGoMarshaller()
 			log.Debug(fmt.Sprintf("MQTT ticker consumer %d listening for tickers now", consumerId), "consumer", "mqtt", "consumer_num", consumerId)
 			for ticker := range s.TickerListener.Channel() {
-				s.processTicker(ticker.(*model.Ticker))
+				s.processTicker(ticker.(*model.Ticker), &sbeMarshaller)
 			}
 		}(consumerId)
 	}

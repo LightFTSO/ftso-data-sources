@@ -8,9 +8,19 @@ import (
 	"roselabs.mx/ftso-data-sources/sbe/sbe"
 )
 
-var sbeMarshaller = sbe.NewSbeGoMarshaller()
+type SbeMarshaller struct {
+	sbeMarshaller *sbe.SbeGoMarshaller
+}
 
-func MarshalSbe(ticker model.Ticker) ([]byte, error) {
+func NewSbeGoMarshaller() SbeMarshaller {
+	var marshaller = sbe.NewSbeGoMarshaller()
+
+	return SbeMarshaller{
+		sbeMarshaller: marshaller,
+	}
+}
+
+func (s *SbeMarshaller) MarshalSbe(ticker model.Ticker) ([]byte, error) {
 
 	var base [6]byte
 	copy(base[:], ticker.Base)
@@ -39,8 +49,8 @@ func MarshalSbe(ticker model.Ticker) ([]byte, error) {
 		SchemaId:    sbeTicker.SbeSchemaId(),
 		Version:     sbeTicker.SbeSchemaVersion(),
 	}
-	header.Encode(sbeMarshaller, buf)
-	if err := sbeTicker.Encode(sbeMarshaller, buf, true); err != nil {
+	header.Encode(s.sbeMarshaller, buf)
+	if err := sbeTicker.Encode(s.sbeMarshaller, buf, true); err != nil {
 		return nil, err
 	}
 

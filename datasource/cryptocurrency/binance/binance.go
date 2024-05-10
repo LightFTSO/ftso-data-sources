@@ -91,6 +91,7 @@ func (b *BinanceClient) onMessage(message internal.WsMessage) error {
 		b.Reconnect()
 	}
 
+	fmt.Println(string(message.Message))
 	if message.Type == websocket.TextMessage {
 
 		if strings.Contains(string(message.Message), "@ticker") {
@@ -190,7 +191,7 @@ func (b *BinanceClient) SubscribeTickers() error {
 	}
 	subMessage := map[string]interface{}{
 		"method": "SUBSCRIBE",
-		"id":     fmt.Sprintf("%x", rand.Uint32()),
+		"id":     rand.Uint32() % 999999999,
 		"params": s,
 	}
 

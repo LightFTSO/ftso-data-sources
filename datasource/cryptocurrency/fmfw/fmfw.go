@@ -108,7 +108,6 @@ func (b *FmfwClient) onMessage(message internal.WsMessage) error {
 			}
 
 			for _, v := range tickers {
-				fmt.Println(v)
 				b.TickerTopic.Send(v)
 			}
 		}
@@ -170,7 +169,6 @@ func (b *FmfwClient) SubscribeTickers() error {
 		subMessage["params"] = map[string]interface{}{
 			"symbols": s,
 		}
-		//fmt.Println(subMessage)
 
 		// sleep a bit to avoid rate limits
 		time.Sleep(10 * time.Millisecond)

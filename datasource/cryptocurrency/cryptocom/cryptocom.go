@@ -11,7 +11,7 @@ import (
 
 	log "log/slog"
 
-	"github.com/goccy/go-json"
+	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
@@ -128,7 +128,7 @@ func (b *CryptoComClient) onMessage(message internal.WsMessage) error {
 
 func (b *CryptoComClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	var tickerMessage WsTickerMessage
-	err := json.Unmarshal(message, &tickerMessage)
+	err := sonic.Unmarshal(message, &tickerMessage)
 	if err != nil {
 		log.Error(err.Error(), "datasource", b.GetName())
 		return []*model.Ticker{}, err
@@ -199,7 +199,7 @@ func (b *CryptoComClient) GetName() string {
 func (b *CryptoComClient) pong(pingMessage []byte) {
 	log.Debug("Sending pong message", "datasource", b.GetName())
 	var ping PublicHeartbeat
-	err := json.Unmarshal(pingMessage, &ping)
+	err := sonic.Unmarshal(pingMessage, &ping)
 	if err != nil {
 		log.Error(err.Error(), "datasource", b.GetName())
 		return

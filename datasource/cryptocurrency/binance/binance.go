@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goccy/go-json"
+	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
@@ -109,7 +109,7 @@ func (b *BinanceClient) onMessage(message internal.WsMessage) error {
 
 func (b *BinanceClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var newTickerEvent WsTickerMessage
-	err := json.Unmarshal(message, &newTickerEvent)
+	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
 		return &model.Ticker{}, err
 	}
@@ -141,7 +141,7 @@ func (b *BinanceClient) getAvailableSymbols() ([]BinanceSymbol, error) {
 	}
 
 	var exchangeInfo = new(BinanceExchangeInfoResponse)
-	err = json.Unmarshal(data, exchangeInfo)
+	err = sonic.Unmarshal(data, exchangeInfo)
 	if err != nil {
 		return nil, err
 	}

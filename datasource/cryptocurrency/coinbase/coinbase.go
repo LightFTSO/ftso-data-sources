@@ -7,10 +7,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goccy/go-json"
-
 	log "log/slog"
 
+	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
@@ -113,7 +112,7 @@ func (b *CoinbaseClient) onMessage(message internal.WsMessage) error {
 
 func (b *CoinbaseClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var tickerMessage CoinbaseTicker
-	err := json.Unmarshal(message, &tickerMessage)
+	err := sonic.Unmarshal(message, &tickerMessage)
 	if err != nil {
 		return &model.Ticker{}, err
 	}
@@ -134,7 +133,7 @@ func (b *CoinbaseClient) parseTicker(message []byte) (*model.Ticker, error) {
 
 func (b *CoinbaseClient) parseSubscriptions(message []byte) error {
 	var subscrSuccessMessage CoinbaseSubscriptionSuccessMessage
-	err := json.Unmarshal(message, &subscrSuccessMessage)
+	err := sonic.Unmarshal(message, &subscrSuccessMessage)
 	if err != nil {
 		log.Error(err.Error(), "datasource", b.GetName())
 		return err

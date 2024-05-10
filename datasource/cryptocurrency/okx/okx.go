@@ -9,10 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goccy/go-json"
-
 	log "log/slog"
 
+	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
@@ -123,7 +122,7 @@ func (b *OkxClient) onMessage(message internal.WsMessage) error {
 
 func (b *OkxClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	var tickerMessage OkxTicker
-	err := json.Unmarshal(message, &tickerMessage)
+	err := sonic.Unmarshal(message, &tickerMessage)
 	if err != nil {
 		log.Error(err.Error(), "datasource", b.GetName())
 		return []*model.Ticker{}, err

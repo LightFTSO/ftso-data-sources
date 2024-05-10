@@ -11,7 +11,7 @@ import (
 
 	log "log/slog"
 
-	"github.com/goccy/go-json"
+	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
@@ -116,7 +116,7 @@ func (b *BitstampClient) onMessage(message internal.WsMessage) error {
 
 func (b *BitstampClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var newTickerEvent wsTickerMessage
-	err := json.Unmarshal(message, &newTickerEvent)
+	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
 		log.Error(err.Error(), "datasource", b.GetName())
 		return &model.Ticker{}, err

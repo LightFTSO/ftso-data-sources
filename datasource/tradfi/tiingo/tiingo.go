@@ -11,7 +11,7 @@ import (
 
 	log "log/slog"
 
-	"github.com/goccy/go-json"
+	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
@@ -145,7 +145,7 @@ func (b *TiingoClient) onMessage(message internal.WsMessage) error {
 func (b *TiingoClient) parseTicker(message []byte) (*model.Ticker, error) {
 
 	var newTickerEvent WsFxEvent
-	err := json.Unmarshal(message, &newTickerEvent)
+	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
 		return &model.Ticker{}, err
 	}

@@ -4,8 +4,7 @@ import (
 	"fmt"
 	log "log/slog"
 
-	"github.com/goccy/go-json"
-
+	"github.com/bytedance/sonic"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
@@ -55,7 +54,7 @@ func (s *MqttConsumer) processTicker(ticker *model.Ticker) {
 		token := s.mqttClient.Publish(channel, byte(s.qosLevel), false, payload)
 		token.Wait()
 	} else {
-		payload, err := json.Marshal(ticker)
+		payload, err := sonic.Marshal(ticker)
 		if err != nil {
 			log.Error("error encoding ticker", "consumer", "mqtt", "error", err)
 		}

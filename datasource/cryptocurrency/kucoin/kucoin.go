@@ -9,7 +9,7 @@ import (
 
 	log "log/slog"
 
-	"github.com/goccy/go-json"
+	"github.com/bytedance/sonic"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
@@ -120,7 +120,7 @@ func (b *KucoinClient) getAvailableSymbols() ([]model.Symbol, error) {
 		Data []KucoinSymbol `json:"data"`
 	}
 	kucoinSymbols := symbolsResponse{}
-	err = json.Unmarshal(data, &kucoinSymbols)
+	err = sonic.Unmarshal(data, &kucoinSymbols)
 	if err != nil {
 		return nil, err
 	}
@@ -156,7 +156,7 @@ func (b *KucoinClient) getNewInstanceData() (*InstanceServer, error) {
 	}
 
 	var bullerPublicRes = new(BulletPublicEndpointResponse)
-	err = json.Unmarshal(data, bullerPublicRes)
+	err = sonic.Unmarshal(data, bullerPublicRes)
 	if err != nil {
 		return nil, err
 	}

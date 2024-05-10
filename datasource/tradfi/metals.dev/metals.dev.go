@@ -12,7 +12,7 @@ import (
 
 	log "log/slog"
 
-	"github.com/goccy/go-json"
+	"github.com/bytedance/sonic"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
@@ -84,7 +84,7 @@ func (b *MetalsDevClient) Close() error {
 func (b *MetalsDevClient) getLatest(useSample bool) (*LatestEndpointResponse, error) {
 	if useSample {
 		var latestData = new(LatestEndpointResponse)
-		err := json.Unmarshal(sampleLatest, latestData)
+		err := sonic.Unmarshal(sampleLatest, latestData)
 		if err != nil {
 			return nil, err
 		}
@@ -110,7 +110,7 @@ func (b *MetalsDevClient) getLatest(useSample bool) (*LatestEndpointResponse, er
 	}
 
 	var latestData = new(LatestEndpointResponse)
-	err = json.Unmarshal(data, latestData)
+	err = sonic.Unmarshal(data, latestData)
 	if err != nil {
 		return nil, err
 	}

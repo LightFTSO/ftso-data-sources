@@ -10,7 +10,7 @@ import (
 
 	log "log/slog"
 
-	"github.com/goccy/go-json"
+	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
@@ -115,7 +115,7 @@ func (b *kucoinInstanceClient) onMessage(message internal.WsMessage) error {
 
 func (b *kucoinInstanceClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var newTickerEvent WsTickerMessage
-	err := json.Unmarshal(message, &newTickerEvent)
+	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
 		log.Error(err.Error(), "datasource", b.getName())
 		return &model.Ticker{}, err

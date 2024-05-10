@@ -10,10 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goccy/go-json"
-
 	log "log/slog"
 
+	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
@@ -124,7 +123,7 @@ func (b *HuobiClient) onMessage(message internal.WsMessage) error {
 
 func (b *HuobiClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var tickerMessage HuobiTicker
-	err := json.Unmarshal(message, &tickerMessage)
+	err := sonic.Unmarshal(message, &tickerMessage)
 	if err != nil {
 		return &model.Ticker{}, err
 	}

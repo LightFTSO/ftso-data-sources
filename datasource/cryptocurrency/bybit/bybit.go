@@ -13,7 +13,7 @@ import (
 
 	log "log/slog"
 
-	"github.com/goccy/go-json"
+	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
@@ -121,7 +121,7 @@ func (b *BybitClient) onMessage(message internal.WsMessage) error {
 
 func (b *BybitClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var newTickerEvent WsTickerMessage
-	err := json.Unmarshal(message, &newTickerEvent)
+	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
 		log.Error(err.Error(), "datasource", b.GetName())
 		return &model.Ticker{}, err
@@ -158,7 +158,7 @@ func (b *BybitClient) getAvailableSymbols() ([]BybitSymbol, error) {
 		InstrumentsInfo *InstrumentInfoResponse `json:"result"`
 	}
 	var exchangeInfo = new(instrumentInfoResponse)
-	err = json.Unmarshal(data, exchangeInfo)
+	err = sonic.Unmarshal(data, exchangeInfo)
 	if err != nil {
 		return nil, err
 	}

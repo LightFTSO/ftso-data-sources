@@ -13,7 +13,7 @@ import (
 
 	log "log/slog"
 
-	"github.com/goccy/go-json"
+	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
 	"github.com/hashicorp/go-multierror"
 	"github.com/textileio/go-threads/broadcast"
@@ -128,7 +128,7 @@ func (b *KrakenClient) onMessage(message internal.WsMessage) error {
 
 func (b *KrakenClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var newTickerEvent KrakenSnapshotUpdate
-	err := json.Unmarshal(message, &newTickerEvent)
+	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
 		return &model.Ticker{}, err
 	}
@@ -166,7 +166,7 @@ func (b *KrakenClient) getAvailableSymbols() ([]AssetPairInfo, error) {
 	}
 
 	var exchangeInfo = new(ApiAssetPairResponse)
-	err = json.Unmarshal(data, exchangeInfo)
+	err = sonic.Unmarshal(data, exchangeInfo)
 	if err != nil {
 		return nil, err
 	}

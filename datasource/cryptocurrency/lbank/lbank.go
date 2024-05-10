@@ -12,14 +12,13 @@ import (
 	log "log/slog"
 
 	"github.com/gorilla/websocket"
+	"github.com/hashicorp/go-multierror"
 	json "github.com/json-iterator/go"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
 )
-
-var ShanghaiTimezone, _ = time.LoadLocation("Asia/Shanghai")
 
 type LbankClient struct {
 	name        string
@@ -34,10 +33,16 @@ type LbankClient struct {
 	cancel       context.CancelFunc
 
 	subscriptionId atomic.Uint64
+	tzInfo         *time.Location
 }
 
 func NewLbankClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*LbankClient, error) {
 	wsEndpoint := "wss://www.lbkex.net/ws/V2/"
+
+	shanghaiTimezone, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return nil, multierror.Append(fmt.Errorf("error loading timezone information"), err)
+	}
 
 	lbank := LbankClient{
 		name:         "lbank",
@@ -47,6 +52,7 @@ func NewLbankClient(options interface{}, symbolList symbols.AllSymbols, tickerTo
 		wsEndpoint:   wsEndpoint,
 		SymbolList:   symbolList.Crypto,
 		pingInterval: 30,
+		tzInfo:       shanghaiTimezone,
 	}
 	lbank.wsClient.SetMessageHandler(lbank.onMessage)
 
@@ -113,8 +119,6 @@ func (b *LbankClient) onMessage(message internal.WsMessage) error {
 					"ticker", ticker, "error", err.Error())
 				return nil
 			}
-			fmt.Println(string(message.Message))
-			fmt.Println(ticker)
 			b.TickerTopic.Send(ticker)
 
 		}
@@ -132,7 +136,7 @@ func (b *LbankClient) parseTicker(message []byte) (*model.Ticker, error) {
 	}
 
 	symbol := model.ParseSymbol(newTickerEvent.Pair)
-	ts, err := time.ParseInLocation("2006-01-02T15:04:05.999", newTickerEvent.Timestamp, ShanghaiTimezone)
+	ts, err := time.ParseInLocation("2006-01-02T15:04:05.999", newTickerEvent.Timestamp, b.tzInfo)
 	if err != nil {
 		return nil, err
 	}

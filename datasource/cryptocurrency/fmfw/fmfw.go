@@ -1,4 +1,4 @@
-package hitbtc
+package fmfw
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 	"roselabs.mx/ftso-data-sources/symbols"
 )
 
-type HitbtcClient struct {
+type FmfwClient struct {
 	name        string
 	W           *sync.WaitGroup
 	TickerTopic *broadcast.Broadcaster
@@ -31,25 +31,25 @@ type HitbtcClient struct {
 	cancel       context.CancelFunc
 }
 
-func NewHitbtcClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*HitbtcClient, error) {
-	wsEndpoint := "wss://api.hitbtc.com/api/3/ws/public"
+func NewFmfwClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*FmfwClient, error) {
+	wsEndpoint := "wss://api.fmfw.io/api/3/ws/public"
 
-	hitbtc := HitbtcClient{
-		name:         "hitbtc",
+	fmfw := FmfwClient{
+		name:         "fmfw",
 		W:            w,
 		TickerTopic:  tickerTopic,
 		wsClient:     *internal.NewWebsocketClient(wsEndpoint, true, nil),
 		wsEndpoint:   wsEndpoint,
 		SymbolList:   symbolList.Crypto,
-		pingInterval: 20,
+		pingInterval: 15,
 	}
-	hitbtc.wsClient.SetMessageHandler(hitbtc.onMessage)
+	fmfw.wsClient.SetMessageHandler(fmfw.onMessage)
 
-	log.Debug("Created new datasource", "datasource", hitbtc.GetName())
-	return &hitbtc, nil
+	log.Debug("Created new datasource", "datasource", fmfw.GetName())
+	return &fmfw, nil
 }
 
-func (b *HitbtcClient) Connect() error {
+func (b *FmfwClient) Connect() error {
 	b.W.Add(1)
 	log.Info("Connecting...", "datasource", b.GetName())
 
@@ -61,11 +61,12 @@ func (b *HitbtcClient) Connect() error {
 	}
 
 	go b.wsClient.Listen()
+	b.SetPing()
 
 	return nil
 }
 
-func (b *HitbtcClient) Reconnect() error {
+func (b *FmfwClient) Reconnect() error {
 	log.Info("Reconnecting...")
 
 	_, err := b.wsClient.Connect(http.Header{})
@@ -81,7 +82,7 @@ func (b *HitbtcClient) Reconnect() error {
 	go b.wsClient.Listen()
 	return nil
 }
-func (b *HitbtcClient) Close() error {
+func (b *FmfwClient) Close() error {
 	b.wsClient.Close()
 	b.W.Done()
 	b.ctx.Done()
@@ -89,7 +90,7 @@ func (b *HitbtcClient) Close() error {
 	return nil
 }
 
-func (b *HitbtcClient) onMessage(message internal.WsMessage) error {
+func (b *FmfwClient) onMessage(message internal.WsMessage) error {
 	if message.Err != nil {
 		log.Error("Error reading websocket message",
 			"datasource", b.GetName(), "error", message.Err)
@@ -107,6 +108,7 @@ func (b *HitbtcClient) onMessage(message internal.WsMessage) error {
 			}
 
 			for _, v := range tickers {
+				fmt.Println(v)
 				b.TickerTopic.Send(v)
 			}
 		}
@@ -115,7 +117,7 @@ func (b *HitbtcClient) onMessage(message internal.WsMessage) error {
 	return nil
 }
 
-func (b *HitbtcClient) parseTicker(message []byte) ([]*model.Ticker, error) {
+func (b *FmfwClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	var newTickerEvent wsTickerMessage
 	err := json.Unmarshal(message, &newTickerEvent)
 	if err != nil {
@@ -147,7 +149,7 @@ func (b *HitbtcClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	return tickers, nil
 }
 
-func (b *HitbtcClient) SubscribeTickers() error {
+func (b *FmfwClient) SubscribeTickers() error {
 	// batch subscriptions in packets
 	chunksize := len(b.SymbolList)
 	for i := 0; i < len(b.SymbolList); i += chunksize {
@@ -180,6 +182,23 @@ func (b *HitbtcClient) SubscribeTickers() error {
 	return nil
 }
 
-func (b *HitbtcClient) GetName() string {
+func (b *FmfwClient) GetName() string {
 	return b.name
+}
+
+func (b *FmfwClient) SetPing() {
+	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
+	go func() {
+		defer ticker.Stop() // Ensure the ticker is stopped when this goroutine ends
+		for {
+			select {
+			case <-ticker.C: // Wait until the ticker sends a signal
+				if err := b.wsClient.Connection.WriteMessage(websocket.PingMessage, []byte("ping")); err != nil {
+					log.Warn("Failed to send ping", "error", err, "datasource", b.GetName())
+				}
+			case <-b.ctx.Done():
+				return
+			}
+		}
+	}()
 }

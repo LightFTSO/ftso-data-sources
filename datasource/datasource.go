@@ -14,6 +14,7 @@ import (
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bybit"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/coinbase"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/cryptocom"
+	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/fmfw"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/gateio"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/hitbtc"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/huobi"
@@ -66,6 +67,8 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 		fallthrough
 	case "cryptocom":
 		return cryptocom.NewCryptoComClient(source.Options, allSymbols, tickerTopic, w)
+	case "fmfw":
+		return fmfw.NewFmfwClient(source.Options, allSymbols, tickerTopic, w)
 	case "gate.io":
 		fallthrough
 	case "gateio":

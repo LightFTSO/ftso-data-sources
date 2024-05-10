@@ -19,6 +19,8 @@ import (
 	"roselabs.mx/ftso-data-sources/symbols"
 )
 
+var ShanghaiTimezone, _ = time.LoadLocation("Asia/Shanghai")
+
 type LbankClient struct {
 	name        string
 	W           *sync.WaitGroup
@@ -111,6 +113,8 @@ func (b *LbankClient) onMessage(message internal.WsMessage) error {
 					"ticker", ticker, "error", err.Error())
 				return nil
 			}
+			fmt.Println(string(message.Message))
+			fmt.Println(ticker)
 			b.TickerTopic.Send(ticker)
 
 		}
@@ -128,7 +132,7 @@ func (b *LbankClient) parseTicker(message []byte) (*model.Ticker, error) {
 	}
 
 	symbol := model.ParseSymbol(newTickerEvent.Pair)
-	ts, err := time.Parse("2006-01-02T15:04:05.999", newTickerEvent.Timestamp)
+	ts, err := time.ParseInLocation("2006-01-02T15:04:05.999", newTickerEvent.Timestamp, ShanghaiTimezone)
 	if err != nil {
 		return nil, err
 	}

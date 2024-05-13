@@ -156,7 +156,6 @@ func (b *MexcClient) SubscribeTickers() error {
 			"params": []string{fmt.Sprintf("spot@public.miniTicker.v3.api@%s%s@UTC+8", strings.ToUpper(v.Base), strings.ToUpper(v.Quote))},
 		}
 		b.wsClient.SendMessageJSON(subMessage)
-		fmt.Println(subMessage)
 		log.Debug("Subscribed ticker symbol", "datasource", b.GetName(), "symbols", v.GetSymbol())
 	}
 

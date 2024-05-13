@@ -12,8 +12,8 @@ Flow goes like this:
 Supported exchanges:
 
 Crypto:
-binance,binance.us,bitget,bitmart,bitrue,bitstamp,bybit,coinbase,cryptocom,fmfw,gateio,
-hitbtc,huobi,kraken,kucoin,lbank,okx,whitebit,toobit
+binance,binance.us,bitget,bitmart,bitrue,bitstamp,bybit,coinbase,cryptocom,digifinex,fmfw,gateio,
+hitbtc,huobi,kraken,kucoin,lbank,mexc,okx,whitebit,toobit,
 
 Stocks, Commodities, Forex:
 tiingo,metalsdev

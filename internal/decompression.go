@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
+	"compress/zlib"
 	"io"
 )
 
-func DecompressGzip(compressedData []byte) ([]byte, error) {
-	buf := bytes.NewBuffer(compressedData)
+func DecompressGzip(decompressedData []byte) ([]byte, error) {
+	buf := bytes.NewBuffer(decompressedData)
 	r, err := gzip.NewReader(buf)
 	if err != nil {
 		return []byte{}, err
@@ -19,8 +20,20 @@ func DecompressGzip(compressedData []byte) ([]byte, error) {
 	return data, nil
 }
 
-func DecompressFlate(compressedData []byte) ([]byte, error) {
-	r := flate.NewReader(bytes.NewReader(compressedData))
+func DecompressZlib(decompressedData []byte) ([]byte, error) {
+	buf := bytes.NewBuffer(decompressedData)
+	r, err := zlib.NewReader(buf)
+	if err != nil {
+		return []byte{}, err
+	}
+	defer r.Close()
+	data, _ := io.ReadAll(r)
+
+	return data, nil
+}
+
+func DecompressFlate(decompressedData []byte) ([]byte, error) {
+	r := flate.NewReader(bytes.NewReader(decompressedData))
 	defer r.Close()
 
 	data, err := io.ReadAll(r)

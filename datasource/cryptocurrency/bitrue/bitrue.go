@@ -107,12 +107,12 @@ func (b *BitrueClient) onMessage(message internal.WsMessage) error {
 
 	if message.Type == websocket.BinaryMessage {
 		// decompress
-		compressedData, err := internal.DecompressGzip(message.Message)
+		decompressedData, err := internal.DecompressGzip(message.Message)
 		if err != nil {
 			log.Error("Error decompressing message", "datasource", b.GetName(), "error", err.Error())
 			return nil
 		}
-		data := string(compressedData)
+		data := string(decompressedData)
 		if strings.Contains(data, "_ticker") && strings.Contains(data, "tick") && !strings.Contains(data, "event_rep") {
 			ticker, err := b.parseTicker([]byte(data))
 			if err != nil {

@@ -121,13 +121,13 @@ func (b *BitmartClient) onMessage(message internal.WsMessage) error {
 		}
 
 		// decompress
-		/*compressedData, err := internal.DecompressFlate(message.Message)
+		/*decompressedData, err := internal.DecompressFlate(message.Message)
 				if err != nil {
 					log.Error("Error decompressing message", "datasource", b.GetName(), "error", err.Error())
 					return nil
 				}
-				data := string(compressedData)
-				fmt.Println(compressedData)
+				data := string(decompressedData)
+				fmt.Println(decompressedData)
 				if strings.Contains(data, "_ticker") && strings.Contains(data, "tick") && !strings.Contains(data, "event_rep") {
 					ticker, err := b.parseTicker([]byte(data))
 					if err != nil {

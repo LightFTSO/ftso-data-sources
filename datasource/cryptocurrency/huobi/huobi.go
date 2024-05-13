@@ -168,8 +168,8 @@ func (b *HuobiClient) GetName() string {
 	return b.name
 }
 
-func (b *HuobiClient) decompressGzip(compressedData []byte) ([]byte, error) {
-	buf := bytes.NewBuffer(compressedData)
+func (b *HuobiClient) decompressGzip(decompressedData []byte) ([]byte, error) {
+	buf := bytes.NewBuffer(decompressedData)
 	r, err := gzip.NewReader(buf)
 	if err != nil {
 		log.Error("Error decompressing message", "datasource", b.GetName(), "error", err.Error())

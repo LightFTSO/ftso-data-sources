@@ -26,6 +26,7 @@ import (
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/okx"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/toobit"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/whitebit"
+	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/xt"
 	"roselabs.mx/ftso-data-sources/datasource/others/noisy"
 	metalsdev "roselabs.mx/ftso-data-sources/datasource/tradfi/metals.dev"
 	"roselabs.mx/ftso-data-sources/datasource/tradfi/tiingo"
@@ -98,6 +99,8 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 		return toobit.NewToobitClient(source.Options, allSymbols, tickerTopic, w)
 	case "whitebit":
 		return whitebit.NewWhitebitClient(source.Options, allSymbols, tickerTopic, w)
+	case "xt":
+		return xt.NewXtClient(source.Options, allSymbols, tickerTopic, w)
 
 	// non crypto
 	case "tiingo":

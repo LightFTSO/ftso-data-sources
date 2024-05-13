@@ -70,6 +70,10 @@ func (b *OkxClient) Connect() error {
 
 func (b *OkxClient) Reconnect() error {
 	log.Info("Reconnecting...", "datasource", b.GetName())
+	if b.cancel != nil {
+		b.cancel()
+	}
+	b.ctx, b.cancel = context.WithCancel(context.Background())
 
 	_, err := b.wsClient.Connect(http.Header{})
 	if err != nil {
@@ -82,10 +86,12 @@ func (b *OkxClient) Reconnect() error {
 		return err
 	}
 	go b.wsClient.Listen()
+	b.SetPing()
 	return nil
 }
 
 func (b *OkxClient) Close() error {
+	b.cancel()
 	b.wsClient.Close()
 	b.W.Done()
 

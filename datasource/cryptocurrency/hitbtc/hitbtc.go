@@ -66,7 +66,11 @@ func (b *HitbtcClient) Connect() error {
 }
 
 func (b *HitbtcClient) Reconnect() error {
-	log.Info("Reconnecting...")
+	log.Info("Reconnecting...", "datasource", b.GetName())
+	if b.cancel != nil {
+		b.cancel()
+	}
+	b.ctx, b.cancel = context.WithCancel(context.Background())
 
 	_, err := b.wsClient.Connect(http.Header{})
 	if err != nil {
@@ -82,9 +86,9 @@ func (b *HitbtcClient) Reconnect() error {
 	return nil
 }
 func (b *HitbtcClient) Close() error {
+	b.cancel()
 	b.wsClient.Close()
 	b.W.Done()
-	b.ctx.Done()
 
 	return nil
 }

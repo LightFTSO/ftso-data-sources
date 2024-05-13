@@ -89,8 +89,8 @@ func (b *KucoinClient) Reconnect() error {
 }
 
 func (b *KucoinClient) Close() error {
+	b.cancel()
 	b.W.Done()
-	b.ctx.Done()
 
 	return nil
 }

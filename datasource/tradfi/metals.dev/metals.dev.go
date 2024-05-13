@@ -69,14 +69,17 @@ func (b *MetalsDevClient) Connect() error {
 }
 
 func (b *MetalsDevClient) Reconnect() error {
-	log.Info("Reconnecting...")
+	log.Info("Reconnecting...", "datasource", b.GetName())
+	if b.cancel != nil {
+		b.cancel()
+	}
+	b.ctx, b.cancel = context.WithCancel(context.Background())
 
 	return nil
 }
 
 func (b *MetalsDevClient) Close() error {
 	b.W.Done()
-	b.ctx.Done()
 
 	return nil
 }

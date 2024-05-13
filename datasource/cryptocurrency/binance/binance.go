@@ -1,6 +1,7 @@
 package binance
 
 import (
+	"context"
 	"fmt"
 	"io"
 	log "log/slog"
@@ -26,6 +27,9 @@ type BinanceClient struct {
 	wsEndpoint  string
 	apiEndpoint string
 	SymbolList  []model.Symbol
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func NewBinanceClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BinanceClient, error) {
@@ -50,6 +54,8 @@ func (b *BinanceClient) Connect() error {
 	b.W.Add(1)
 	log.Info("Connecting...", "datasource", b.GetName())
 
+	b.ctx, b.cancel = context.WithCancel(context.Background())
+
 	_, err := b.wsClient.Connect(http.Header{})
 	if err != nil {
 		return err
@@ -62,6 +68,10 @@ func (b *BinanceClient) Connect() error {
 
 func (b *BinanceClient) Reconnect() error {
 	log.Info("Reconnecting...", "datasource", b.GetName())
+	if b.cancel != nil {
+		b.cancel()
+	}
+	b.ctx, b.cancel = context.WithCancel(context.Background())
 
 	_, err := b.wsClient.Connect(http.Header{})
 	if err != nil {
@@ -78,6 +88,7 @@ func (b *BinanceClient) Reconnect() error {
 }
 
 func (b *BinanceClient) Close() error {
+	b.cancel()
 	b.wsClient.Close()
 	b.W.Done()
 

@@ -3,6 +3,7 @@ package huobi
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,6 +28,9 @@ type HuobiClient struct {
 	wsClient    internal.WebsocketClient
 	wsEndpoint  string
 	SymbolList  []model.Symbol
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func NewHuobiClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*HuobiClient, error) {
@@ -49,6 +53,7 @@ func NewHuobiClient(options interface{}, symbolList symbols.AllSymbols, tickerTo
 func (b *HuobiClient) Connect() error {
 	b.W.Add(1)
 	log.Info("Connecting...", "datasource", b.GetName())
+	b.ctx, b.cancel = context.WithCancel(context.Background())
 
 	_, err := b.wsClient.Connect(http.Header{})
 	if err != nil {
@@ -62,6 +67,10 @@ func (b *HuobiClient) Connect() error {
 
 func (b *HuobiClient) Reconnect() error {
 	log.Info("Reconnecting...", "datasource", b.GetName())
+	if b.cancel != nil {
+		b.cancel()
+	}
+	b.ctx, b.cancel = context.WithCancel(context.Background())
 
 	_, err := b.wsClient.Connect(http.Header{})
 	if err != nil {
@@ -78,6 +87,7 @@ func (b *HuobiClient) Reconnect() error {
 }
 
 func (b *HuobiClient) Close() error {
+	b.cancel()
 	b.wsClient.Close()
 	b.W.Done()
 

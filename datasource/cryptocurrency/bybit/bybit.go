@@ -72,7 +72,11 @@ func (b *BybitClient) Connect() error {
 }
 
 func (b *BybitClient) Reconnect() error {
-	log.Info("Reconnecting...")
+	log.Info("Reconnecting...", "datasource", b.GetName())
+	if b.cancel != nil {
+		b.cancel()
+	}
+	b.ctx, b.cancel = context.WithCancel(context.Background())
 
 	_, err := b.wsClient.Connect(http.Header{})
 	if err != nil {
@@ -85,12 +89,13 @@ func (b *BybitClient) Reconnect() error {
 		return err
 	}
 	go b.wsClient.Listen()
+	b.SetPing()
 	return nil
 }
 func (b *BybitClient) Close() error {
+	b.cancel()
 	b.wsClient.Close()
 	b.W.Done()
-	b.ctx.Done()
 
 	return nil
 }

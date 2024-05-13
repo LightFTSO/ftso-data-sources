@@ -70,6 +70,7 @@ func (b *kucoinInstanceClient) connect() error {
 }
 
 func (b *kucoinInstanceClient) close() error {
+	b.cancel()
 	b.wsClient.Close()
 
 	return nil

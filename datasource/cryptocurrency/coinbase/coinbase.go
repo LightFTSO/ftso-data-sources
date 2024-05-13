@@ -1,6 +1,7 @@
 package coinbase
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -24,6 +25,9 @@ type CoinbaseClient struct {
 	wsClient    internal.WebsocketClient
 	wsEndpoint  string
 	SymbolList  []model.Symbol
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func NewCoinbaseClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*CoinbaseClient, error) {
@@ -47,6 +51,8 @@ func (b *CoinbaseClient) Connect() error {
 	b.W.Add(1)
 	log.Info("Connecting...", "datasource", b.GetName())
 
+	b.ctx, b.cancel = context.WithCancel(context.Background())
+
 	_, err := b.wsClient.Connect(http.Header{})
 	if err != nil {
 		return err
@@ -59,6 +65,10 @@ func (b *CoinbaseClient) Connect() error {
 
 func (b *CoinbaseClient) Reconnect() error {
 	log.Info("Reconnecting...", "datasource", b.GetName())
+	if b.cancel != nil {
+		b.cancel()
+	}
+	b.ctx, b.cancel = context.WithCancel(context.Background())
 
 	_, err := b.wsClient.Connect(http.Header{})
 	if err != nil {
@@ -75,6 +85,7 @@ func (b *CoinbaseClient) Reconnect() error {
 }
 
 func (b *CoinbaseClient) Close() error {
+	b.cancel()
 	b.wsClient.Close()
 	b.W.Done()
 

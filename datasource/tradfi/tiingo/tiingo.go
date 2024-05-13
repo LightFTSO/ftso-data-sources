@@ -94,6 +94,10 @@ func (b *TiingoClient) Connect() error {
 
 func (b *TiingoClient) Reconnect() error {
 	log.Info("Reconnecting...", "datasource", b.GetName())
+	if b.cancel != nil {
+		b.cancel()
+	}
+	b.ctx, b.cancel = context.WithCancel(context.Background())
 
 	_, err := b.wsClient.Connect(http.Header{})
 	if err != nil {
@@ -110,9 +114,9 @@ func (b *TiingoClient) Reconnect() error {
 }
 
 func (b *TiingoClient) Close() error {
+	b.cancel()
 	b.wsClient.Close()
 	b.W.Done()
-	b.ctx.Done()
 
 	return nil
 }

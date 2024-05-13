@@ -22,6 +22,7 @@ import (
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/kraken"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/kucoin"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/lbank"
+	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/mexc"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/okx"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/toobit"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/whitebit"
@@ -87,6 +88,8 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 		return kucoin.NewKucoinClient(source.Options, allSymbols, tickerTopic, w)
 	case "lbank":
 		return lbank.NewLbankClient(source.Options, allSymbols, tickerTopic, w)
+	case "mexc":
+		return mexc.NewMexcClient(source.Options, allSymbols, tickerTopic, w)
 	case "okex":
 		fallthrough
 	case "okx":

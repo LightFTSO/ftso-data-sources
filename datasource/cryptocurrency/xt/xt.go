@@ -46,7 +46,7 @@ func NewXtClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://api.xt.com",
 		SymbolList:   symbolList.Crypto,
-		pingInterval: 40,
+		pingInterval: 20,
 	}
 	xt.wsClient.SetMessageHandler(xt.onMessage)
 
@@ -168,7 +168,7 @@ func (b *XtClient) SetPing() {
 		for {
 			select {
 			case <-ticker.C:
-				if err := b.wsClient.Connection.WriteMessage(websocket.PingMessage, []byte(`{"method":"PING"}`)); err != nil {
+				if err := b.wsClient.Connection.WriteMessage(websocket.TextMessage, []byte(`ping`)); err != nil {
 					log.Warn("Failed to send ping", "error", err, "datasource", b.GetName())
 				}
 			case <-b.ctx.Done():

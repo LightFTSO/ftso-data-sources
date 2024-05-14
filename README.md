@@ -27,14 +27,15 @@ Flow goes like this:
 `git clone https://github.com/LightFTSO/ftso-data-sources.git`
 2. cd into it
 `cd ftso-data-sources`
-3a. Run locally with `make run` (you need `make` and `go` installed)
+3. Run it 
+Locally with `make run`:
+You need go 1.22+ installed, see https://go.dev/doc/install
 ```bash
-# you need go 1.22+ installed, see https://go.dev/doc/install
 # if you dont have make installed
 sudo apt install build-essential # if using ubuntu, refer to your distro for more info on installing make and gcc
 make run
 ```
-3b. Run in docker:
+Run in docker:
 `docker compose up -d ftso-data-sources`
 
 Supported go version: 1.22+

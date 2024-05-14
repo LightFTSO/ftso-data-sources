@@ -27,6 +27,8 @@ Flow goes like this:
 `git clone https://github.com/LightFTSO/ftso-data-sources.git`
 2. cd into it
 `cd ftso-data-sources`
+3. Create the config.yaml (see the section below)
+`touch config.yaml`
 3. Run it 
 Locally with `make run`:
 You need go 1.22+ installed, see https://go.dev/doc/install

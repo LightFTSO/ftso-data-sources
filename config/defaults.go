@@ -12,9 +12,9 @@ func setDefaults() {
 	viper.SetDefault("message_buffer_size", 0)
 
 	viper.SetDefault("assets.crypto", constants.BASES_CRYPTO)
-	viper.SetDefault("assets.commodities", constants.BASES_COMMODITIES)
-	viper.SetDefault("assets.forex", constants.BASES_FOREX)
-	viper.SetDefault("assets.stocks", constants.BASES_STOCKS)
+	viper.SetDefault("assets.commodities", constants.AssetList{})
+	viper.SetDefault("assets.forex", constants.AssetList{})
+	viper.SetDefault("assets.stocks", constants.AssetList{})
 
 	viper.SetDefault("stats.enabled", "true")
 	viper.SetDefault("stats.interval", "60s")

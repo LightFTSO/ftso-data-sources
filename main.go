@@ -107,7 +107,20 @@ func initDataSources(tickerTopic *broadcast.Broadcaster, config config.ConfigOpt
 	}
 	slog.Debug(fmt.Sprintf("list of enabled feeds: %+v", syms))
 
+	if len(allSymbols.Flatten()) < 1 && config.Env != "development" {
+		panic("we aren't watching any assets!")
+	} else {
+		slog.Warn("No assets defined, no data will be obtained!")
+	}
+
 	dataSourceList := config.Datasources
+
+	if len(dataSourceList) < 1 && config.Env != "development" {
+		panic("we aren't connecting to any datasources!")
+	} else {
+		slog.Warn("No data sources enabled, where will get the data from?")
+	}
+
 	for _, source := range dataSourceList {
 		w.Add(1)
 		go func(source datasource.DataSourceOptions) {

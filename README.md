@@ -21,6 +21,24 @@ Flow goes like this:
 ### Other:
     dummy data source for testing
 
+# Running the program
+
+1. Clone the repository
+`git clone https://github.com/LightFTSO/ftso-data-sources.git`
+2. cd into it
+`cd ftso-data-sources`
+3a. Run locally with `make run` (you need `make` and `go` installed)
+```bash
+# you need go 1.22+ installed, see https://go.dev/doc/install
+# if you dont have make installed
+sudo apt install build-essential # if using ubuntu, refer to your distro for more info on installing make and gcc
+make run
+```
+3b. Run in docker:
+`docker compose up -d ftso-data-sources`
+
+Supported go version: 1.22+
+
 # Configuration 
 Modify the following sample configuration, by default, the program will look for a file called `config.yaml` in it's root folder or you can specify the file with the `-config <file>` flag
 ```yaml

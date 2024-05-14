@@ -109,6 +109,8 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 		var options = new(metalsdev.MetalsDevOptions)
 		mapstructure.Decode(source.Options, options)
 		return metalsdev.NewMetalsDevClient(options, allSymbols, tickerTopic, w)
+
+	// sample datasource
 	case "noisy":
 		var options = new(noisy.NoisySourceOptions)
 		mapstructure.Decode(source.Options, options)

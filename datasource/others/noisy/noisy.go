@@ -4,6 +4,7 @@ import (
 	log "log/slog"
 	"math/rand"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -45,8 +46,8 @@ func (n *NoisySource) SubscribeTickers() error {
 			randomSymbol := n.SymbolList[rand.Intn(len(n.SymbolList))]
 			fakeTicker := model.Ticker{
 				LastPrice: strconv.FormatFloat(float64(rand.Intn(1000))+rand.Float64(), 'f', 9, 64),
-				Base:      randomSymbol.Base,
-				Quote:     randomSymbol.Quote,
+				Base:      strings.ToUpper(randomSymbol.Base),
+				Quote:     strings.ToUpper(randomSymbol.Quote),
 				Symbol:    randomSymbol.GetSymbol(),
 				Source:    n.GetName(),
 				Timestamp: t,

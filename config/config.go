@@ -26,11 +26,11 @@ type ConfigOptions struct {
 		Stocks      []string `mapstructure:"stocks"`
 	} `mapstructure:"assets"`
 
-	RedisOptions            consumer.RedisOptions                   `mapstructure:"redis_ts"`
-	WebsocketServerOptions  consumer.WebsocketServerConsumerOptions `mapstructure:"websocket_server"`
-	FileFileConsumerOptions consumer.FileConsumerOptions            `mapstructure:"file_output"`
-	MQTTConsumerOptions     consumer.MqttConsumerOptions            `mapstructure:"mqtt"`
-	QuestDBConsumerOptions  consumer.QuestDbConsumerOptions         `mapstructure:"questdb"`
+	RedisOptions             consumer.RedisOptions             `mapstructure:"redis_ts"`
+	WebsocketConsumerOptions consumer.WebsocketConsumerOptions `mapstructure:"websocket_server"`
+	FileFileConsumerOptions  consumer.FileConsumerOptions      `mapstructure:"file_output"`
+	MQTTConsumerOptions      consumer.MqttConsumerOptions      `mapstructure:"mqtt"`
+	QuestDBConsumerOptions   consumer.QuestDbConsumerOptions   `mapstructure:"questdb"`
 }
 
 var Config ConfigOptions

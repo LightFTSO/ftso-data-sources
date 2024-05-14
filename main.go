@@ -54,7 +54,7 @@ func enableConsumer(c consumer.Consumer, tickerTopic *broadcast.Broadcaster) {
 func initConsumers(tickerTopic *broadcast.Broadcaster, config config.ConfigOptions) {
 	if !config.FileFileConsumerOptions.Enabled &&
 		!config.RedisOptions.Enabled &&
-		!config.WebsocketServerOptions.Enabled &&
+		!config.WebsocketConsumerOptions.Enabled &&
 		!config.MQTTConsumerOptions.Enabled &&
 		!config.QuestDBConsumerOptions.Enabled {
 		if config.Env != "development" {
@@ -81,6 +81,11 @@ func initConsumers(tickerTopic *broadcast.Broadcaster, config config.ConfigOptio
 
 	if config.QuestDBConsumerOptions.Enabled {
 		c := consumer.NewQuestDbConsumer(config.QuestDBConsumerOptions)
+		enableConsumer(c, tickerTopic)
+	}
+
+	if config.WebsocketConsumerOptions.Enabled {
+		c := consumer.NewWebsocketConsumer(config.WebsocketConsumerOptions)
 		enableConsumer(c, tickerTopic)
 	}
 

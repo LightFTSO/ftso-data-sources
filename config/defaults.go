@@ -43,11 +43,13 @@ func setDefaults() {
 	viper.SetDefault("websocket_server.use_sbe_encoding", false)
 	viper.SetDefault("websocket_server.host", "127.0.0.1")
 	viper.SetDefault("websocket_server.port", 3000)
-	viper.SetDefault("websocket_server.endpoints.tickers", "/tickers")
-	viper.SetDefault("websocket_server.endpoints.volumes", "/volumes")
+	viper.SetDefault("websocket_server.ticker_endpoint", "/tickers")
+	viper.SetDefault("websocket_server.use_sbe_encoding", false)
+	viper.SetDefault("websocket_server.individual_feed_table", false)
 
 	viper.SetDefault("questdb.enabled", false)
 	viper.SetDefault("questdb.flush_interval", "10s")
 	viper.SetDefault("questdb.client_options.address", "127.0.0.0.1:9000")
 	viper.SetDefault("questdb.client_options.schema", "http")
+	viper.SetDefault("questdb.individual_feed_table", true)
 }

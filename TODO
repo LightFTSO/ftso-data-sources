@@ -12,5 +12,4 @@ Implement dynamic on-the-go datasource and symbol configs
 
 Make meaningful statistics
 Create informational keys on redis consumer
-Add websocket server consumer
 Add kafka consumer

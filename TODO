@@ -6,7 +6,7 @@ btse,bequant,bigone,btcex,bingx,p2b,cexio,poloniex,bitso,
 hotcoin,coinw,deepcoin,pointpay,orangex,biconomy,cointr,
 bitvenus,tapbit,hashkey,ascendex,exmo,cpatex
 bydfi,emirex,delta,latoken,bit2me,nonkyc,trubit
-bluebit,citex,ace,blofin
+bluebit,citex,ace,blofin,bitpanda
 
 Implement dynamic on-the-go datasource and symbol configs
 

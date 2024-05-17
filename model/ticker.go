@@ -10,12 +10,12 @@ import (
 )
 
 type Ticker struct {
-	LastPrice        string    `json:"l"`
-	LastPriceFloat64 float64   `json:"-"`
 	Symbol           string    `json:"s"`
 	Base             string    `json:"b"`
 	Quote            string    `json:"q"`
 	Source           string    `json:"S"`
+	LastPrice        string    `json:"l"`
+	LastPriceFloat64 float64   `json:"-"`
 	Timestamp        time.Time `json:"ts"`
 }
 

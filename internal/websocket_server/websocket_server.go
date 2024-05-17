@@ -32,7 +32,6 @@ func NewWebsocketServer(addr string, port int, wsEndpoint string) *WebsocketServ
 
 func (ws *WebsocketServer) Connect() error {
 	go ws.hub.run()
-	println(ws.wsEndpoint)
 	http.HandleFunc(ws.wsEndpoint, func(w http.ResponseWriter, r *http.Request) {
 		serveWs(&ws.hub, w, r)
 	})
@@ -41,7 +40,6 @@ func (ws *WebsocketServer) Connect() error {
 		err := http.ListenAndServe(ws.Address, nil)
 		err_chan <- err
 	}()
-	println(ws.wsEndpoint)
 	//err := <-err_chan
 	return nil
 }

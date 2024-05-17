@@ -5,7 +5,7 @@
 package internal
 
 import (
-	"log"
+	log "log/slog"
 	"net/http"
 	"time"
 
@@ -64,7 +64,7 @@ func (c *Client) readPump() {
 		_, _, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("error: %v", err)
+				log.Error(err.Error())
 			}
 			break
 		}
@@ -124,7 +124,7 @@ func (c *Client) writePump() {
 func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Println(err)
+		log.Error(err.Error())
 		return
 	}
 	client := &Client{hub: hub, conn: conn, send: make(chan WsMessage, 256)}

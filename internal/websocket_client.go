@@ -55,9 +55,11 @@ func (c *WebsocketClient) readPump() {
 		msgType, msg, err := c.conn.ReadMessage()
 		if err != nil {
 			c.log.Error("Error reading websocket message", "error", err)
+			c.received <- WsMessage{Type: msgType, Message: msg, Err: err}
+			return
 		}
 		select {
-		case c.received <- WsMessage{Type: msgType, Message: msg, Err: err}:
+		case c.received <- WsMessage{Type: msgType, Message: msg, Err: nil}:
 		case <-c.done:
 			return
 		}

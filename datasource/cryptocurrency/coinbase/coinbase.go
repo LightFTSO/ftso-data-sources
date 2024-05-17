@@ -86,7 +86,6 @@ func (b *CoinbaseClient) Close() error {
 
 func (b *CoinbaseClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-
 		b.Reconnect()
 	}
 

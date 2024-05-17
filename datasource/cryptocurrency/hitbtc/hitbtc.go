@@ -90,7 +90,6 @@ func (b *HitbtcClient) Close() error {
 
 func (b *HitbtcClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-
 		b.Reconnect()
 	}
 
@@ -110,8 +109,6 @@ func (b *HitbtcClient) onMessage(message internal.WsMessage) {
 			}
 		}
 	}
-
-	return
 }
 
 func (b *HitbtcClient) parseTicker(message []byte) ([]*model.Ticker, error) {
@@ -206,12 +203,8 @@ func (b *HitbtcClient) SetPing() {
 	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
 	go func() {
 		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				b.wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte("ping")})
-
-			}
+		for range ticker.C {
+			b.wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte("ping")})
 		}
 	}()
 }

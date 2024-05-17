@@ -98,7 +98,6 @@ func (b *WhitebitClient) Close() error {
 
 func (b *WhitebitClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-
 		b.Reconnect()
 	}
 

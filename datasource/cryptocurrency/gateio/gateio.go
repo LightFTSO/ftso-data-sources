@@ -94,7 +94,6 @@ func (b *GateIoClient) Close() error {
 
 func (b *GateIoClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-
 		b.Reconnect()
 	}
 
@@ -111,8 +110,6 @@ func (b *GateIoClient) onMessage(message internal.WsMessage) {
 			b.TickerTopic.Send(ticker)
 		}
 	}
-
-	return
 }
 
 func (b *GateIoClient) parseTicker(message []byte) (*model.Ticker, error) {
@@ -230,12 +227,8 @@ func (b *GateIoClient) SetPing() {
 	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
 	go func() {
 		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				b.wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte(`{"method":"server.ping"}`)})
-
-			}
+		for range ticker.C {
+			b.wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte(`{"method":"server.ping"}`)})
 		}
 	}()
 }

@@ -89,7 +89,6 @@ func (b *HuobiClient) Close() error {
 
 func (b *HuobiClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-
 		b.Reconnect()
 	}
 

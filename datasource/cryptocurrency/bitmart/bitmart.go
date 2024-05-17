@@ -89,7 +89,6 @@ func (b *BitmartClient) Close() error {
 
 func (b *BitmartClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-
 		b.Reconnect()
 	}
 
@@ -131,8 +130,6 @@ func (b *BitmartClient) onMessage(message internal.WsMessage) {
 		b.TickerTopic.Send(ticker)
 						}*/
 	}
-
-	return
 }
 
 func (b *BitmartClient) parseTicker(message []byte) ([]*model.Ticker, error) {
@@ -217,11 +214,8 @@ func (b *BitmartClient) SetPing() {
 	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
 	go func() {
 		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				b.wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte("ping")})
-			}
+		for range ticker.C {
+			b.wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte("ping")})
 		}
 	}()
 }

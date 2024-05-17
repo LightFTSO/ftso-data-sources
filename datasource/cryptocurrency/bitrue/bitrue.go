@@ -92,7 +92,6 @@ func (b *BitrueClient) Close() error {
 
 func (b *BitrueClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-
 		b.Reconnect()
 	}
 
@@ -123,8 +122,6 @@ func (b *BitrueClient) onMessage(message internal.WsMessage) {
 			return
 		}
 	}
-
-	return
 }
 
 func (b *BitrueClient) parseTicker(message []byte) (*model.Ticker, error) {

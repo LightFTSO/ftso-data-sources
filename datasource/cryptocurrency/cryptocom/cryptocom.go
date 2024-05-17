@@ -93,7 +93,6 @@ func (b *CryptoComClient) Close() error {
 
 func (b *CryptoComClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-
 		b.Reconnect()
 	}
 

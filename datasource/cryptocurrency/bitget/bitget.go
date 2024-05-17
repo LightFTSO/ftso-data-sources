@@ -90,7 +90,6 @@ func (b *BitgetClient) Close() error {
 
 func (b *BitgetClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-
 		b.Reconnect()
 	}
 
@@ -110,8 +109,6 @@ func (b *BitgetClient) onMessage(message internal.WsMessage) {
 			}
 		}
 	}
-
-	return
 }
 
 func (b *BitgetClient) parseTicker(message []byte) ([]*model.Ticker, error) {
@@ -199,11 +196,8 @@ func (b *BitgetClient) SetPing() {
 	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
 	go func() {
 		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				b.wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte("ping")})
-			}
+		for range ticker.C {
+			b.wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte("ping")})
 		}
 	}()
 }

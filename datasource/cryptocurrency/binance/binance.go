@@ -90,7 +90,6 @@ func (b *BinanceClient) Close() error {
 
 func (b *BinanceClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-
 		b.Reconnect()
 	}
 

@@ -94,7 +94,6 @@ func (b *DigifinexClient) Close() error {
 
 func (b *DigifinexClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-
 		b.Reconnect()
 	}
 
@@ -131,8 +130,6 @@ func (b *DigifinexClient) onMessage(message internal.WsMessage) {
 			}
 		}
 	}
-
-	return
 }
 
 func (b *DigifinexClient) parseTicker(message []byte) ([]*model.Ticker, error) {
@@ -263,18 +260,14 @@ func (b *DigifinexClient) SetPing() {
 	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
 	go func() {
 		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				msg := map[string]interface{}{
-					"ping":   fmt.Sprint(rand.Uint32() % 999999),
-					"method": "ping",
-					"params": []string{},
-				}
-				if err := b.wsClient.SendMessageJSON(websocket.TextMessage, msg); err != nil {
-					b.log.Warn("Failed to send ping", "error", err)
-				}
-
+		for range ticker.C {
+			msg := map[string]interface{}{
+				"ping":   fmt.Sprint(rand.Uint32() % 999999),
+				"method": "ping",
+				"params": []string{},
+			}
+			if err := b.wsClient.SendMessageJSON(websocket.TextMessage, msg); err != nil {
+				b.log.Warn("Failed to send ping", "error", err)
 			}
 		}
 	}()

@@ -93,7 +93,6 @@ func (b *OkxClient) Close() error {
 
 func (b *OkxClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-
 		b.Reconnect()
 	}
 

@@ -93,7 +93,6 @@ func (b *ToobitClient) Close() error {
 
 func (b *ToobitClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-
 		b.Reconnect()
 	}
 
@@ -113,8 +112,6 @@ func (b *ToobitClient) onMessage(message internal.WsMessage) {
 			}
 		}
 	}
-
-	return
 }
 
 func (b *ToobitClient) parseTicker(message []byte) ([]*model.Ticker, error) {

@@ -90,7 +90,6 @@ func (b *FmfwClient) Close() error {
 
 func (b *FmfwClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-
 		b.Reconnect()
 	}
 

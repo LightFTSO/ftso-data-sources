@@ -101,7 +101,6 @@ func (b *LbankClient) Close() error {
 
 func (b *LbankClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-
 		b.Reconnect()
 	}
 
@@ -120,8 +119,6 @@ func (b *LbankClient) onMessage(message internal.WsMessage) {
 
 		}
 	}
-
-	return
 }
 
 func (b *LbankClient) parseTicker(message []byte) (*model.Ticker, error) {

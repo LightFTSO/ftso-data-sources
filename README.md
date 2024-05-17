@@ -13,7 +13,7 @@ Flow goes like this:
 # Supported data sources:
 ### Crypto:
     binance,binance.us,bitget,bitmart,bitrue,bitstamp,bybit,coinbase,cryptocom,digifinex,fmfw,gateio,
-    hitbtc,huobi,kraken,kucoin,lbank,mexc,okx,toobit,whitebit,xt
+    hitbtc,huobi,kraken,kucoin,lbank,mexc,okx,pionex,toobit,whitebit,xt
 
 ### Stocks, Commodities, Forex:
     tiingo,metalsdev

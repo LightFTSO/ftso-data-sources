@@ -69,7 +69,6 @@ func (b *BitrueClient) Connect() error {
 }
 
 func (b *BitrueClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -93,6 +92,7 @@ func (b *BitrueClient) Close() error {
 func (b *BitrueClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	if message.Type == websocket.BinaryMessage {

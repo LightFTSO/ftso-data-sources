@@ -70,7 +70,6 @@ func (b *GateIoClient) Connect() error {
 }
 
 func (b *GateIoClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -95,6 +94,7 @@ func (b *GateIoClient) Close() error {
 func (b *GateIoClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	if message.Type == websocket.TextMessage {

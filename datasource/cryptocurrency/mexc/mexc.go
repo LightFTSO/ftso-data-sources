@@ -79,7 +79,6 @@ func (b *MexcClient) Connect() error {
 }
 
 func (b *MexcClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -104,6 +103,7 @@ func (b *MexcClient) Close() error {
 func (b *MexcClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	if message.Type == websocket.TextMessage {

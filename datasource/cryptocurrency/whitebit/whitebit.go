@@ -74,7 +74,6 @@ func (b *WhitebitClient) Connect() error {
 }
 
 func (b *WhitebitClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -99,6 +98,7 @@ func (b *WhitebitClient) Close() error {
 func (b *WhitebitClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	msg := string(message.Message)

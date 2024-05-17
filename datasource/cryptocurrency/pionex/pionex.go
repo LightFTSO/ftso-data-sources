@@ -70,7 +70,6 @@ func (b *PionexClient) Connect() error {
 }
 
 func (b *PionexClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -95,6 +94,7 @@ func (b *PionexClient) onMessage(message internal.WsMessage) {
 	//fmt.Println(string(message.Message))
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 	if message.Type == websocket.BinaryMessage {
 		msg := string(message.Message)

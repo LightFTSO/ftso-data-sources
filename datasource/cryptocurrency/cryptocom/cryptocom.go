@@ -69,7 +69,6 @@ func (b *CryptoComClient) Connect() error {
 }
 
 func (b *CryptoComClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -94,6 +93,7 @@ func (b *CryptoComClient) Close() error {
 func (b *CryptoComClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	if message.Type == websocket.TextMessage {

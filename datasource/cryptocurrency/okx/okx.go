@@ -68,7 +68,6 @@ func (b *OkxClient) Connect() error {
 }
 
 func (b *OkxClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -94,6 +93,7 @@ func (b *OkxClient) Close() error {
 func (b *OkxClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	if message.Type == websocket.TextMessage {

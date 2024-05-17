@@ -66,7 +66,6 @@ func (b *FmfwClient) Connect() error {
 }
 
 func (b *FmfwClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -91,6 +90,7 @@ func (b *FmfwClient) Close() error {
 func (b *FmfwClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	if message.Type == websocket.TextMessage {

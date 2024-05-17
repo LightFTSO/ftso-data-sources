@@ -66,7 +66,6 @@ func (b *BinanceClient) Connect() error {
 }
 
 func (b *BinanceClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -91,6 +90,7 @@ func (b *BinanceClient) Close() error {
 func (b *BinanceClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	if message.Type == websocket.TextMessage {

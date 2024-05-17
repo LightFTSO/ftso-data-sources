@@ -65,7 +65,6 @@ func (b *HuobiClient) Connect() error {
 }
 
 func (b *HuobiClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -90,6 +89,7 @@ func (b *HuobiClient) Close() error {
 func (b *HuobiClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	if message.Type == websocket.BinaryMessage {

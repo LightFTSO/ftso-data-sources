@@ -71,7 +71,6 @@ func (b *DigifinexClient) Connect() error {
 }
 
 func (b *DigifinexClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -95,6 +94,7 @@ func (b *DigifinexClient) Close() error {
 func (b *DigifinexClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	if message.Type == websocket.BinaryMessage {

@@ -66,7 +66,6 @@ func (b *BitgetClient) Connect() error {
 }
 
 func (b *BitgetClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -91,6 +90,7 @@ func (b *BitgetClient) Close() error {
 func (b *BitgetClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	msg := string(message.Message)

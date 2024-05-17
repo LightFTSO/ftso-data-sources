@@ -77,7 +77,6 @@ func (b *LbankClient) Connect() error {
 }
 
 func (b *LbankClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -102,6 +101,7 @@ func (b *LbankClient) Close() error {
 func (b *LbankClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	msg := string(message.Message)

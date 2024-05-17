@@ -119,6 +119,7 @@ func (b *TiingoClient) Close() error {
 func (b *TiingoClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	if message.Type == websocket.TextMessage {

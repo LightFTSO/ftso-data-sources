@@ -69,7 +69,6 @@ func (b *ToobitClient) Connect() error {
 }
 
 func (b *ToobitClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -94,6 +93,7 @@ func (b *ToobitClient) Close() error {
 func (b *ToobitClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	msg := string(message.Message)

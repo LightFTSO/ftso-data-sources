@@ -72,7 +72,6 @@ func (b *BybitClient) Connect() error {
 }
 
 func (b *BybitClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -97,6 +96,7 @@ func (b *BybitClient) Close() error {
 func (b *BybitClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	if message.Type == websocket.TextMessage {

@@ -74,7 +74,6 @@ func (b *KrakenClient) Connect() error {
 }
 
 func (b *KrakenClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -99,6 +98,7 @@ func (b *KrakenClient) Close() error {
 func (b *KrakenClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	if message.Type == websocket.TextMessage {

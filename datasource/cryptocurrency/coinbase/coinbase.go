@@ -62,7 +62,6 @@ func (b *CoinbaseClient) Connect() error {
 }
 
 func (b *CoinbaseClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -87,6 +86,7 @@ func (b *CoinbaseClient) Close() error {
 func (b *CoinbaseClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	if message.Type == websocket.TextMessage {

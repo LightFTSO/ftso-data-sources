@@ -71,7 +71,6 @@ func (b *XtClient) Connect() error {
 }
 
 func (b *XtClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -96,6 +95,7 @@ func (b *XtClient) Close() error {
 func (b *XtClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	if message.Type == websocket.TextMessage {

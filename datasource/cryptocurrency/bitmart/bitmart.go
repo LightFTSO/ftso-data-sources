@@ -66,7 +66,6 @@ func (b *BitmartClient) Connect() error {
 }
 
 func (b *BitmartClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -90,6 +89,7 @@ func (b *BitmartClient) Close() error {
 func (b *BitmartClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	if message.Type == websocket.TextMessage {

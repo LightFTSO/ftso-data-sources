@@ -67,7 +67,6 @@ func (b *BitstampClient) Connect() error {
 }
 
 func (b *BitstampClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -93,6 +92,7 @@ func (b *BitstampClient) Close() error {
 func (b *BitstampClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	if message.Type == websocket.TextMessage {

@@ -66,7 +66,6 @@ func (b *HitbtcClient) Connect() error {
 }
 
 func (b *HitbtcClient) Reconnect() error {
-
 	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
@@ -91,6 +90,7 @@ func (b *HitbtcClient) Close() error {
 func (b *HitbtcClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
 		b.Reconnect()
+		return
 	}
 
 	if message.Type == websocket.TextMessage {

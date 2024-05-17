@@ -141,11 +141,6 @@ func initDataSources(tickerTopic *broadcast.Broadcaster, config config.ConfigOpt
 				return
 			}
 
-			if err := src.SubscribeTickers(); err != nil {
-				slog.Error("Error subscribing to tickers", "datasource", src.GetName())
-				w.Done()
-				return
-			}
 			w.Done()
 		}(source)
 	}

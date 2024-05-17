@@ -89,8 +89,8 @@ func (b *kucoinInstanceClient) onWelcomeMessage() error {
 
 func (b *kucoinInstanceClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-
-		b.cancel()
+		b.close()
+		return
 	}
 
 	if message.Type == websocket.TextMessage {

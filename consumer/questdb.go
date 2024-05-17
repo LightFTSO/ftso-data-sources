@@ -110,7 +110,6 @@ func NewQuestDbConsumer(options QuestDbConsumerOptions) *QuestDbConsumer {
 			options.FlushInterval))
 	}
 
-	fmt.Println(configString)
 	ctx := context.TODO()
 	log.Info(fmt.Sprintf("Connecting to QuestDB at %s", options.ClientOptions.Address), "consumer", "questdb")
 	log.Debug(configString, "consumer", "questdb")

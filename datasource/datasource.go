@@ -24,6 +24,7 @@ import (
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/lbank"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/mexc"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/okx"
+	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/pionex"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/toobit"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/whitebit"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/xt"
@@ -95,6 +96,8 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 		fallthrough
 	case "okx":
 		return okx.NewOkxClient(source.Options, allSymbols, tickerTopic, w)
+	case "pionex":
+		return pionex.NewPionexClient(source.Options, allSymbols, tickerTopic, w)
 	case "toobit":
 		return toobit.NewToobitClient(source.Options, allSymbols, tickerTopic, w)
 	case "whitebit":

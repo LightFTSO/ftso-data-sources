@@ -216,7 +216,7 @@ func (b *PionexClient) SubscribeTickers() error {
 			"symbol": fmt.Sprintf("%s_%s", strings.ToUpper(v.Base), strings.ToUpper(v.Quote)),
 		}
 		b.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
-		b.log.Info("Subscribed ticker symbol", "symbols", v.GetSymbol())
+		b.log.Debug("Subscribed ticker symbol", "symbols", v.GetSymbol())
 		time.Sleep(100 * time.Millisecond)
 	}
 

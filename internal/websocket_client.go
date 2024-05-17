@@ -137,7 +137,7 @@ func (c *WebsocketClient) Connect() error {
 		if err == nil {
 			break
 		}
-		c.log.Error("Error reconnecting. Retrying in 1 second...", "err", err)
+		c.log.Error("Error connecting. Retrying in 1 second...", "err", err)
 		time.Sleep(time.Second)
 	}
 	newConn.SetReadLimit(655350)

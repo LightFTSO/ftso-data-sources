@@ -1,7 +1,7 @@
 package noisy
 
 import (
-	log "log/slog"
+	"log/slog"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -25,6 +25,7 @@ type NoisySource struct {
 	Interval     time.Duration
 	SymbolList   []model.Symbol
 	timeInterval time.Ticker
+	log          *slog.Logger
 }
 
 func (n *NoisySource) Connect() error {
@@ -73,7 +74,7 @@ func (n *NoisySource) GetName() string {
 func NewNoisySource(options *NoisySourceOptions, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*NoisySource, error) {
 	d, err := time.ParseDuration(options.Interval)
 	if err != nil {
-		log.Info("Using default duration", "datasource", "noisy", "name", options.Name)
+		slog.Warn("Using default duration", "datasource", "noisy", "name", options.Name)
 		d = time.Second
 	}
 	if options.Name == "" {
@@ -81,12 +82,13 @@ func NewNoisySource(options *NoisySourceOptions, symbolList symbols.AllSymbols, 
 	}
 	noisy := NoisySource{
 		name:        options.Name,
+		log:         slog.Default().With(slog.String("datasource", "noisy"), slog.String("name", options.Name)),
 		Interval:    d,
 		W:           w,
 		TickerTopic: tickerTopic,
 		SymbolList:  symbolList.Flatten(),
 	}
 
-	log.Debug("Created new datasource", "datasource", "noisy", "name", noisy.GetName(), "interval", d.String())
+	noisy.log.Debug("Created new datasource", "name", noisy.GetName(), "interval", d.String())
 	return &noisy, nil
 }

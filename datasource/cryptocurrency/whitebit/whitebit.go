@@ -1,7 +1,6 @@
 package whitebit
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	log "log/slog"
+	"log/slog"
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
@@ -22,17 +21,17 @@ import (
 )
 
 type WhitebitClient struct {
-	name        string
-	W           *sync.WaitGroup
-	TickerTopic *broadcast.Broadcaster
-	wsClient    internal.WebsocketClient
-	wsEndpoint  string
-	apiEndpoint string
-	SymbolList  []model.Symbol
+	name          string
+	W             *sync.WaitGroup
+	TickerTopic   *broadcast.Broadcaster
+	wsClient      internal.WebsocketClient
+	wsEndpoint    string
+	apiEndpoint   string
+	SymbolList    []model.Symbol
+	lastTimestamp time.Time
+	log           *slog.Logger
 
 	pingInterval int
-	ctx          context.Context
-	cancel       context.CancelFunc
 
 	subscriptionId atomic.Uint64
 }
@@ -42,9 +41,10 @@ func NewWhitebitClient(options interface{}, symbolList symbols.AllSymbols, ticke
 
 	whitebit := WhitebitClient{
 		name:         "whitebit",
+		log:          slog.Default().With(slog.String("datasource", "whitebit")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebsocketClient(wsEndpoint, true, nil),
+		wsClient:     *internal.NewWebsocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://whitebit.com/api/v4/",
 		SymbolList:   symbolList.Crypto,
@@ -52,61 +52,52 @@ func NewWhitebitClient(options interface{}, symbolList symbols.AllSymbols, ticke
 	}
 	whitebit.wsClient.SetMessageHandler(whitebit.onMessage)
 
-	log.Debug("Created new datasource", "datasource", whitebit.GetName())
+	whitebit.wsClient.SetLogger(whitebit.log)
+	whitebit.log.Debug("Created new datasource")
 	return &whitebit, nil
 }
 
 func (b *WhitebitClient) Connect() error {
 	b.W.Add(1)
-	log.Info("Connecting...", "datasource", b.GetName())
 
-	b.ctx, b.cancel = context.WithCancel(context.Background())
-
-	_, err := b.wsClient.Connect(http.Header{})
+	b.wsClient.Connect()
+	err := b.SubscribeTickers()
 	if err != nil {
+		b.log.Error("Error subscribing to tickers")
 		return err
 	}
 
-	go b.wsClient.Listen()
 	b.SetPing()
+	b.setLastTickerWatcher()
 
 	return nil
 }
 
 func (b *WhitebitClient) Reconnect() error {
-	log.Info("Reconnecting...", "datasource", b.GetName())
-	if b.cancel != nil {
-		b.cancel()
-	}
-	b.ctx, b.cancel = context.WithCancel(context.Background())
 
-	_, err := b.wsClient.Connect(http.Header{})
+	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
 	}
-	log.Info("Reconnected", "datasource", b.GetName())
+
 	err = b.SubscribeTickers()
 	if err != nil {
-		log.Error("Error subscribing to tickers", "datasource", b.GetName())
+		b.log.Error("Error subscribing to tickers")
 		return err
 	}
-	go b.wsClient.Listen()
 
 	b.SetPing()
 	return nil
 }
 func (b *WhitebitClient) Close() error {
-	b.cancel()
-	b.wsClient.Close()
+	b.wsClient.Disconnect()
 	b.W.Done()
 
 	return nil
 }
 
-func (b *WhitebitClient) onMessage(message internal.WsMessage) error {
+func (b *WhitebitClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-		log.Error("Error reading websocket message",
-			"datasource", b.GetName(), "error", message.Err)
 
 		b.Reconnect()
 	}
@@ -116,22 +107,21 @@ func (b *WhitebitClient) onMessage(message internal.WsMessage) error {
 		if strings.Contains(msg, "lastprice_update") {
 			ticker, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(),
+				b.log.Error("Error parsing ticker",
 					"ticker", ticker, "error", err.Error())
-				return nil
+				return
 			}
+			b.lastTimestamp = time.Now()
 			b.TickerTopic.Send(ticker)
 		}
 	}
-
-	return nil
 }
 
 func (b *WhitebitClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var newTickerEvent WsTickerMessage
 	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
-		log.Error(err.Error(), "datasource", b.GetName())
+		b.log.Error(err.Error())
 		return &model.Ticker{}, err
 	}
 
@@ -185,7 +175,7 @@ func (b *WhitebitClient) SubscribeTickers() error {
 	availableSymbols, err := b.getAvailableSymbols()
 	if err != nil {
 		b.W.Done()
-		log.Error("error obtaining available symbols. Closing whitebit datasource", "error", err.Error())
+		b.log.Error("error obtaining available symbols. Closing whitebit datasource", "error", err.Error())
 		return err
 	}
 
@@ -220,15 +210,35 @@ func (b *WhitebitClient) SubscribeTickers() error {
 			s = append(s, fmt.Sprintf("%s_%s", strings.ToUpper(v.Base), strings.ToUpper(v.Quote)))
 		}
 		subMessage["params"] = s
-		b.wsClient.SendMessageJSON(subMessage)
+		b.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 	}
 
-	log.Debug("Subscribed ticker symbols", "datasource", b.GetName(), "symbols", len(subscribedSymbols))
+	b.log.Debug("Subscribed ticker symbols", "symbols", len(subscribedSymbols))
 	return nil
 }
 
 func (b *WhitebitClient) GetName() string {
 	return b.name
+}
+
+func (b *WhitebitClient) setLastTickerWatcher() {
+	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
+	b.lastTimestamp = time.Now()
+	timeout := (30 * time.Second)
+	go func() {
+		defer lastTickerIntervalTimer.Stop()
+		for range lastTickerIntervalTimer.C {
+			now := time.Now()
+			diff := now.Sub(b.lastTimestamp)
+			if diff > timeout {
+				// no tickers received in a while, attempt to reconnect
+				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				b.lastTimestamp = time.Now()
+				b.Reconnect()
+				return
+			}
+		}
+	}()
 }
 
 func (b *WhitebitClient) SetPing() {
@@ -238,17 +248,16 @@ func (b *WhitebitClient) SetPing() {
 		for {
 			select {
 			case <-ticker.C:
-				if err := b.wsClient.Connection.WriteJSON(
+				if err := b.wsClient.SendMessageJSON(websocket.TextMessage,
 					map[string]interface{}{
 						"id":     b.subscriptionId.Add(1),
 						"method": "ping",
 						"params": []string{},
 					},
 				); err != nil {
-					log.Warn("Failed to send ping", "error", err, "datasource", b.GetName())
+					b.log.Warn("Failed to send ping", "error", err)
 				}
-			case <-b.ctx.Done():
-				return
+
 			}
 		}
 	}()

@@ -1,14 +1,12 @@
 package coinbase
 
 import (
-	"context"
 	"fmt"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
 
-	log "log/slog"
+	"log/slog"
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
@@ -19,15 +17,14 @@ import (
 )
 
 type CoinbaseClient struct {
-	name        string
-	W           *sync.WaitGroup
-	TickerTopic *broadcast.Broadcaster
-	wsClient    internal.WebsocketClient
-	wsEndpoint  string
-	SymbolList  []model.Symbol
-
-	ctx    context.Context
-	cancel context.CancelFunc
+	name          string
+	W             *sync.WaitGroup
+	TickerTopic   *broadcast.Broadcaster
+	wsClient      internal.WebsocketClient
+	wsEndpoint    string
+	SymbolList    []model.Symbol
+	lastTimestamp time.Time
+	log           *slog.Logger
 }
 
 func NewCoinbaseClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*CoinbaseClient, error) {
@@ -35,67 +32,60 @@ func NewCoinbaseClient(options interface{}, symbolList symbols.AllSymbols, ticke
 
 	coinbase := CoinbaseClient{
 		name:        "coinbase",
+		log:         slog.Default().With(slog.String("datasource", "coinbase")),
 		W:           w,
 		TickerTopic: tickerTopic,
-		wsClient:    *internal.NewWebsocketClient(wsEndpoint, true, nil),
+		wsClient:    *internal.NewWebsocketClient(wsEndpoint),
 		wsEndpoint:  wsEndpoint,
 		SymbolList:  symbolList.Crypto,
 	}
 	coinbase.wsClient.SetMessageHandler(coinbase.onMessage)
 
-	log.Debug("Created new datasource", "datasource", coinbase.GetName())
+	coinbase.wsClient.SetLogger(coinbase.log)
+	coinbase.log.Debug("Created new datasource")
 	return &coinbase, nil
 }
 
 func (b *CoinbaseClient) Connect() error {
 	b.W.Add(1)
-	log.Info("Connecting...", "datasource", b.GetName())
 
-	b.ctx, b.cancel = context.WithCancel(context.Background())
-
-	_, err := b.wsClient.Connect(http.Header{})
+	b.wsClient.Connect()
+	err := b.SubscribeTickers()
 	if err != nil {
+		b.log.Error("Error subscribing to tickers")
 		return err
 	}
 
-	go b.wsClient.Listen()
+	b.setLastTickerWatcher()
 
 	return nil
 }
 
 func (b *CoinbaseClient) Reconnect() error {
-	log.Info("Reconnecting...", "datasource", b.GetName())
-	if b.cancel != nil {
-		b.cancel()
-	}
-	b.ctx, b.cancel = context.WithCancel(context.Background())
 
-	_, err := b.wsClient.Connect(http.Header{})
+	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
 	}
-	log.Info("Reconnected", "datasource", b.GetName())
+
 	err = b.SubscribeTickers()
 	if err != nil {
-		log.Error("Error subscribing to tickers", "datasource", b.GetName())
+		b.log.Error("Error subscribing to tickers")
 		return err
 	}
-	go b.wsClient.Listen()
+
 	return nil
 }
 
 func (b *CoinbaseClient) Close() error {
-	b.cancel()
-	b.wsClient.Close()
+	b.wsClient.Disconnect()
 	b.W.Done()
 
 	return nil
 }
 
-func (b *CoinbaseClient) onMessage(message internal.WsMessage) error {
+func (b *CoinbaseClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-		log.Error("Error reading websocket message",
-			"datasource", b.GetName(), "error", message.Err)
 
 		b.Reconnect()
 	}
@@ -104,21 +94,21 @@ func (b *CoinbaseClient) onMessage(message internal.WsMessage) error {
 		msg := string(message.Message)
 
 		if strings.Contains(msg, `"type":"subscriptions"`) {
-			return b.parseSubscriptions(message.Message)
+			b.parseSubscriptions(message.Message)
+			return
 		}
 
 		if strings.Contains(msg, `"type":"ticker"`) {
 			ticker, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(),
+				b.log.Error("Error parsing ticker",
 					"ticker", ticker, "error", err.Error())
-				return nil
+				return
 			}
+			b.lastTimestamp = time.Now()
 			b.TickerTopic.Send(ticker)
 		}
 	}
-
-	return nil
 }
 
 func (b *CoinbaseClient) parseTicker(message []byte) (*model.Ticker, error) {
@@ -142,18 +132,16 @@ func (b *CoinbaseClient) parseTicker(message []byte) (*model.Ticker, error) {
 	return ticker, err
 }
 
-func (b *CoinbaseClient) parseSubscriptions(message []byte) error {
+func (b *CoinbaseClient) parseSubscriptions(message []byte) {
 	var subscrSuccessMessage CoinbaseSubscriptionSuccessMessage
 	err := sonic.Unmarshal(message, &subscrSuccessMessage)
 	if err != nil {
-		log.Error(err.Error(), "datasource", b.GetName())
-		return err
+		b.log.Error(err.Error())
+		return
 	}
 
-	log.Debug("Subscribed ticker symbols", "datasource", b.GetName(),
+	b.log.Debug("Subscribed ticker symbols",
 		"symbols", len(subscrSuccessMessage.Channels[0].ProductIds))
-
-	return nil
 }
 
 func (b *CoinbaseClient) SubscribeTickers() error {
@@ -167,11 +155,31 @@ func (b *CoinbaseClient) SubscribeTickers() error {
 		"channels":    []string{"ticker"},
 	}
 
-	b.wsClient.SendMessageJSON(subMessage)
+	b.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 
 	return nil
 }
 
 func (b *CoinbaseClient) GetName() string {
 	return b.name
+}
+
+func (b *CoinbaseClient) setLastTickerWatcher() {
+	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
+	b.lastTimestamp = time.Now()
+	timeout := (30 * time.Second)
+	go func() {
+		defer lastTickerIntervalTimer.Stop()
+		for range lastTickerIntervalTimer.C {
+			now := time.Now()
+			diff := now.Sub(b.lastTimestamp)
+			if diff > timeout {
+				// no tickers received in a while, attempt to reconnect
+				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				b.lastTimestamp = time.Now()
+				b.Reconnect()
+				return
+			}
+		}
+	}()
 }

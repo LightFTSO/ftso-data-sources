@@ -1,7 +1,6 @@
 package digifinex
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"math/rand"
@@ -10,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	log "log/slog"
+	"log/slog"
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
@@ -21,17 +20,17 @@ import (
 )
 
 type DigifinexClient struct {
-	name        string
-	W           *sync.WaitGroup
-	TickerTopic *broadcast.Broadcaster
-	wsClient    internal.WebsocketClient
-	wsEndpoint  string
-	apiEndpoint string
-	SymbolList  []model.Symbol
+	name          string
+	W             *sync.WaitGroup
+	TickerTopic   *broadcast.Broadcaster
+	wsClient      internal.WebsocketClient
+	wsEndpoint    string
+	apiEndpoint   string
+	SymbolList    []model.Symbol
+	lastTimestamp time.Time
+	log           *slog.Logger
 
 	pingInterval int
-	ctx          context.Context
-	cancel       context.CancelFunc
 }
 
 func NewDigifinexClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*DigifinexClient, error) {
@@ -39,9 +38,10 @@ func NewDigifinexClient(options interface{}, symbolList symbols.AllSymbols, tick
 
 	digifinex := DigifinexClient{
 		name:         "digifinex",
+		log:          slog.Default().With(slog.String("datasource", "digifinex")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebsocketClient(wsEndpoint, true, nil),
+		wsClient:     *internal.NewWebsocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://openapi.digifinex.com",
 		SymbolList:   symbolList.Crypto,
@@ -49,103 +49,97 @@ func NewDigifinexClient(options interface{}, symbolList symbols.AllSymbols, tick
 	}
 	digifinex.wsClient.SetMessageHandler(digifinex.onMessage)
 
-	log.Debug("Created new datasource", "datasource", digifinex.GetName())
+	digifinex.wsClient.SetLogger(digifinex.log)
+	digifinex.log.Debug("Created new datasource")
 	return &digifinex, nil
 }
 
 func (b *DigifinexClient) Connect() error {
 	b.W.Add(1)
-	log.Info("Connecting...", "datasource", b.GetName())
 
-	b.ctx, b.cancel = context.WithCancel(context.Background())
-
-	_, err := b.wsClient.Connect(http.Header{})
+	b.wsClient.Connect()
+	err := b.SubscribeTickers()
 	if err != nil {
+		b.log.Error("Error subscribing to tickers")
 		return err
 	}
 
-	go b.wsClient.Listen()
 	b.SetPing()
+	b.setLastTickerWatcher()
 
 	return nil
 }
 
 func (b *DigifinexClient) Reconnect() error {
-	log.Info("Reconnecting...", "datasource", b.GetName())
-	if b.cancel != nil {
-		b.cancel()
-	}
-	b.ctx, b.cancel = context.WithCancel(context.Background())
 
-	_, err := b.wsClient.Connect(http.Header{})
+	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
 	}
-	log.Info("Reconnected", "datasource", b.GetName())
+
 	err = b.SubscribeTickers()
 	if err != nil {
-		log.Error("Error subscribing to tickers", "datasource", b.GetName())
+		b.log.Error("Error subscribing to tickers")
 		return err
 	}
-	go b.wsClient.Listen()
+
 	return nil
 }
 func (b *DigifinexClient) Close() error {
-	b.cancel()
-	b.wsClient.Close()
+	b.wsClient.Disconnect()
 	b.W.Done()
 
 	return nil
 }
 
-func (b *DigifinexClient) onMessage(message internal.WsMessage) error {
+func (b *DigifinexClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-		log.Error("Error reading websocket message",
-			"datasource", b.GetName(), "error", message.Err)
 
 		b.Reconnect()
 	}
 
 	if message.Type == websocket.BinaryMessage {
 		/*if strings.Contains(msg, `"table":"spot/ticker"`) {
-			tickers, err := b.parseTicker(message.Message)
-			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(),
-					"error", err.Error())
-				return err
-			}
-			for _, v := range tickers {
-				b.TickerTopic.Send(v)
-			}
+		tickers, err := b.parseTicker(message.Message)
+		if err != nil {
+			b.log.Error("Error parsing ticker",
+				"error", err.Error())
+			return err
+		}
+
+		for _, v := range tickers {
+			b.TickerTopic.Send(v)
+		}
 		}*/
 
 		// decompress
 		decompressedData, err := internal.DecompressZlib(message.Message)
 		if err != nil {
-			log.Error("Error decompressing message", "datasource", b.GetName(), "error", err.Error())
-			return nil
+			b.log.Error("Error decompressing message", "error", err.Error())
+			return
 		}
 		data := string(decompressedData)
 		if strings.Contains(data, "ticker.update") && strings.Contains(data, "tick") && !strings.Contains(data, "event_rep") {
 			tickers, err := b.parseTicker([]byte(data))
 			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(), "error", err.Error())
-				return nil
+				b.log.Error("Error parsing ticker", "error", err.Error())
+				return
 			}
+			b.lastTimestamp = time.Now()
 			for _, t := range tickers {
 				b.TickerTopic.Send(t)
 			}
 		}
 	}
 
-	return nil
+	return
 }
 
 func (b *DigifinexClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	var newTickerEvent wsTickerMessage
 	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
-		log.Error(err.Error(), "datasource", b.GetName())
+		b.log.Error(err.Error())
 		return []*model.Ticker{}, err
 	}
 
@@ -157,7 +151,7 @@ func (b *DigifinexClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 			b.GetName(),
 			time.UnixMilli(t.Timestamp))
 		if err != nil {
-			log.Error("Error parsing ticker", "datasource", b.GetName(),
+			b.log.Error("Error parsing ticker",
 				"ticker", newTicker, "error", err.Error())
 			continue
 		}
@@ -203,7 +197,7 @@ func (b *DigifinexClient) SubscribeTickers() error {
 	availableSymbols, err := b.getAvailableSymbols()
 	if err != nil {
 		b.W.Done()
-		log.Error("error obtaining available symbols. Closing kraken datasource", "datasource", b.GetName(), "error", err.Error())
+		b.log.Error("error obtaining available symbols. Closing kraken datasource", "error", err.Error())
 		return err
 	}
 
@@ -234,15 +228,35 @@ func (b *DigifinexClient) SubscribeTickers() error {
 			s = append(s, v)
 		}
 		subMessage["params"] = s
-		b.wsClient.SendMessageJSON(subMessage)
+		b.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 	}
 
-	log.Debug("Subscribed ticker symbols", "datasource", b.GetName(), "symbols", len(subscribedSymbols))
+	b.log.Debug("Subscribed ticker symbols", "symbols", len(subscribedSymbols))
 	return nil
 }
 
 func (b *DigifinexClient) GetName() string {
 	return b.name
+}
+
+func (b *DigifinexClient) setLastTickerWatcher() {
+	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
+	b.lastTimestamp = time.Now()
+	timeout := (30 * time.Second)
+	go func() {
+		defer lastTickerIntervalTimer.Stop()
+		for range lastTickerIntervalTimer.C {
+			now := time.Now()
+			diff := now.Sub(b.lastTimestamp)
+			if diff > timeout {
+				// no tickers received in a while, attempt to reconnect
+				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				b.lastTimestamp = time.Now()
+				b.Reconnect()
+				return
+			}
+		}
+	}()
 }
 
 func (b *DigifinexClient) SetPing() {
@@ -257,11 +271,10 @@ func (b *DigifinexClient) SetPing() {
 					"method": "ping",
 					"params": []string{},
 				}
-				if err := b.wsClient.Connection.WriteJSON(msg); err != nil {
-					log.Warn("Failed to send ping", "error", err, "datasource", b.GetName())
+				if err := b.wsClient.SendMessageJSON(websocket.TextMessage, msg); err != nil {
+					b.log.Warn("Failed to send ping", "error", err)
 				}
-			case <-b.ctx.Done():
-				return
+
 			}
 		}
 	}()

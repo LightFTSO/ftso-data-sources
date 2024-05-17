@@ -1,15 +1,13 @@
 package lbank
 
 import (
-	"context"
 	"fmt"
-	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	log "log/slog"
+	"log/slog"
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
@@ -21,16 +19,16 @@ import (
 )
 
 type LbankClient struct {
-	name        string
-	W           *sync.WaitGroup
-	TickerTopic *broadcast.Broadcaster
-	wsClient    internal.WebsocketClient
-	wsEndpoint  string
-	SymbolList  []model.Symbol
+	name          string
+	W             *sync.WaitGroup
+	TickerTopic   *broadcast.Broadcaster
+	wsClient      internal.WebsocketClient
+	wsEndpoint    string
+	SymbolList    []model.Symbol
+	lastTimestamp time.Time
+	log           *slog.Logger
 
 	pingInterval int
-	ctx          context.Context
-	cancel       context.CancelFunc
 
 	subscriptionId atomic.Uint64
 	tzInfo         *time.Location
@@ -46,9 +44,10 @@ func NewLbankClient(options interface{}, symbolList symbols.AllSymbols, tickerTo
 
 	lbank := LbankClient{
 		name:         "lbank",
+		log:          slog.Default().With(slog.String("datasource", "lbank")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebsocketClient(wsEndpoint, true, nil),
+		wsClient:     *internal.NewWebsocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		SymbolList:   symbolList.Crypto,
 		pingInterval: 30,
@@ -56,60 +55,52 @@ func NewLbankClient(options interface{}, symbolList symbols.AllSymbols, tickerTo
 	}
 	lbank.wsClient.SetMessageHandler(lbank.onMessage)
 
-	log.Debug("Created new datasource", "datasource", lbank.GetName())
+	lbank.wsClient.SetLogger(lbank.log)
+	lbank.log.Debug("Created new datasource")
 	return &lbank, nil
 }
 
 func (b *LbankClient) Connect() error {
 	b.W.Add(1)
-	log.Info("Connecting...", "datasource", b.GetName())
 
-	b.ctx, b.cancel = context.WithCancel(context.Background())
-
-	_, err := b.wsClient.Connect(http.Header{})
+	b.wsClient.Connect()
+	err := b.SubscribeTickers()
 	if err != nil {
+		b.log.Error("Error subscribing to tickers")
 		return err
 	}
 
-	go b.wsClient.Listen()
 	b.SetPing()
+	b.setLastTickerWatcher()
 
 	return nil
 }
 
 func (b *LbankClient) Reconnect() error {
-	log.Info("Reconnecting...", "datasource", b.GetName())
-	if b.cancel != nil {
-		b.cancel()
-	}
-	b.ctx, b.cancel = context.WithCancel(context.Background())
 
-	_, err := b.wsClient.Connect(http.Header{})
+	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
 	}
-	log.Info("Reconnected", "datasource", b.GetName())
+
 	err = b.SubscribeTickers()
 	if err != nil {
-		log.Error("Error subscribing to tickers", "datasource", b.GetName())
+		b.log.Error("Error subscribing to tickers")
 		return err
 	}
-	go b.wsClient.Listen()
+
 	b.SetPing()
 	return nil
 }
 func (b *LbankClient) Close() error {
-	b.cancel()
-	b.wsClient.Close()
+	b.wsClient.Disconnect()
 	b.W.Done()
 
 	return nil
 }
 
-func (b *LbankClient) onMessage(message internal.WsMessage) error {
+func (b *LbankClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-		log.Error("Error reading websocket message",
-			"datasource", b.GetName(), "error", message.Err)
 
 		b.Reconnect()
 	}
@@ -120,23 +111,24 @@ func (b *LbankClient) onMessage(message internal.WsMessage) error {
 		if strings.Contains(msg, `"type":"tick"`) {
 			ticker, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(),
+				b.log.Error("Error parsing ticker",
 					"ticker", ticker, "error", err.Error())
-				return nil
+				return
 			}
+			b.lastTimestamp = time.Now()
 			b.TickerTopic.Send(ticker)
 
 		}
 	}
 
-	return nil
+	return
 }
 
 func (b *LbankClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var newTickerEvent wsTickerMessage
 	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
-		log.Error(err.Error(), "datasource", b.GetName())
+		b.log.Error(err.Error())
 		return &model.Ticker{}, err
 	}
 
@@ -161,17 +153,37 @@ func (b *LbankClient) SubscribeTickers() error {
 			"subscribe": "tick",
 			"pair":      fmt.Sprintf("%s_%s", strings.ToUpper(v.Base), strings.ToUpper(v.Quote)),
 		}
-		b.wsClient.SendMessageJSON(subMessage)
-		log.Debug("Subscribed ticker symbol", "datasource", b.GetName(), "symbols", v.GetSymbol())
+		b.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+		b.log.Debug("Subscribed ticker symbol", "symbols", v.GetSymbol())
 	}
 
-	log.Debug("Subscribed ticker symbols", "datasource", b.GetName())
+	b.log.Debug("Subscribed ticker symbols")
 
 	return nil
 }
 
 func (b *LbankClient) GetName() string {
 	return b.name
+}
+
+func (b *LbankClient) setLastTickerWatcher() {
+	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
+	b.lastTimestamp = time.Now()
+	timeout := (30 * time.Second)
+	go func() {
+		defer lastTickerIntervalTimer.Stop()
+		for range lastTickerIntervalTimer.C {
+			now := time.Now()
+			diff := now.Sub(b.lastTimestamp)
+			if diff > timeout {
+				// no tickers received in a while, attempt to reconnect
+				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				b.lastTimestamp = time.Now()
+				b.Reconnect()
+				return
+			}
+		}
+	}()
 }
 func (b *LbankClient) SetPing() {
 	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
@@ -185,11 +197,10 @@ func (b *LbankClient) SetPing() {
 					"ping":   fmt.Sprintf("%d", id),
 					"action": "ping",
 				}
-				if err := b.wsClient.Connection.WriteJSON(msg); err != nil {
-					log.Warn("Failed to send ping", "error", err, "datasource", b.GetName())
+				if err := b.wsClient.SendMessageJSON(websocket.TextMessage, msg); err != nil {
+					b.log.Warn("Failed to send ping", "error", err)
 				}
-			case <-b.ctx.Done():
-				return
+
 			}
 		}
 	}()

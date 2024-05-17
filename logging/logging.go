@@ -30,3 +30,9 @@ func SetupLogging(Config config.ConfigOptions) {
 
 	slog.SetDefault(defaultLogger)
 }
+
+func NewDatasourceLogger(datasourceName string) *slog.Logger {
+	dataSourceLogger := slog.Default().With(slog.String("datasource", datasourceName))
+
+	return dataSourceLogger
+}

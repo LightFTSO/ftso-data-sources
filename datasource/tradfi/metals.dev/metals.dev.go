@@ -1,16 +1,14 @@
 package metalsdev
 
 import (
-	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
-
-	log "log/slog"
 
 	"github.com/bytedance/sonic"
 	"github.com/textileio/go-threads/broadcast"
@@ -32,22 +30,20 @@ type MetalsDevClient struct {
 	ForexSymbols     []model.Symbol
 	apiEndpoint      string
 	apiToken         string
-
-	ctx    context.Context
-	cancel context.CancelFunc
+	log              *slog.Logger
 }
 
 func NewMetalsDevClient(options *MetalsDevOptions, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*MetalsDevClient, error) {
-	log.Info("Created new metalsdev datasource", "datasource", "metalsdev")
 
 	d, err := time.ParseDuration(options.Interval)
 	if err != nil {
-		log.Info("Using default duration", "datasource", "metalsdev")
+		slog.Warn("Using default duration", "datasource", "metalsdev")
 		d = time.Second
 	}
 
 	metalsdev := MetalsDevClient{
 		name:             "metalsdev",
+		log:              slog.Default().With(slog.String("datasource", "metalsdev")),
 		W:                w,
 		TickerTopic:      tickerTopic,
 		CommoditySymbols: symbolList.Commodities,
@@ -56,24 +52,26 @@ func NewMetalsDevClient(options *MetalsDevOptions, symbolList symbols.AllSymbols
 		apiToken:         options.ApiToken,
 		Interval:         d,
 	}
+	metalsdev.log.Debug("Created new datasource")
 
 	return &metalsdev, nil
 }
 
 func (b *MetalsDevClient) Connect() error {
 	b.W.Add(1)
-	log.Info("Connecting...")
+	b.log.Info("Connecting...")
 
-	b.ctx, b.cancel = context.WithCancel(context.Background())
+	err := b.SubscribeTickers()
+	if err != nil {
+		b.log.Error("Error subscribing to tickers")
+		return err
+	}
+
 	return nil
 }
 
 func (b *MetalsDevClient) Reconnect() error {
-	log.Info("Reconnecting...", "datasource", b.GetName())
-	if b.cancel != nil {
-		b.cancel()
-	}
-	b.ctx, b.cancel = context.WithCancel(context.Background())
+	b.log.Info("Reconnecting...")
 
 	return nil
 }
@@ -131,7 +129,7 @@ func (b *MetalsDevClient) SubscribeTickers() error {
 		for t := range timeInterval.C {
 			data, err := b.getLatest(false)
 			if err != nil {
-				log.Error("error obtaining latest data", "datasource", b.GetName(), "error", err.Error())
+				b.log.Error("error obtaining latest data", "error", err.Error())
 				continue
 			}
 			for _, s := range b.CommoditySymbols {
@@ -147,7 +145,7 @@ func (b *MetalsDevClient) SubscribeTickers() error {
 					Source:    b.GetName(),
 					Timestamp: t,
 				}
-				log.Info(fmt.Sprintf("metalsdev: symbol=%s price=%s", ticker.Symbol, ticker.LastPrice))
+				b.log.Info(fmt.Sprintf("metalsdev: symbol=%s price=%s", ticker.Symbol, ticker.LastPrice))
 				br.Send(&ticker)
 			}
 			for _, s := range b.ForexSymbols {
@@ -164,7 +162,7 @@ func (b *MetalsDevClient) SubscribeTickers() error {
 					Source:    b.GetName(),
 					Timestamp: t,
 				}
-				log.Info(fmt.Sprintf("metalsdev: symbol=%s price=%s", ticker.Symbol, ticker.LastPrice))
+				b.log.Info(fmt.Sprintf("metalsdev: symbol=%s price=%s", ticker.Symbol, ticker.LastPrice))
 				br.Send(&ticker)
 			}
 

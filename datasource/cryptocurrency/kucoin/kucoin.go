@@ -4,10 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sync"
-
-	log "log/slog"
 
 	"github.com/bytedance/sonic"
 	"github.com/textileio/go-threads/broadcast"
@@ -21,33 +20,29 @@ type KucoinClient struct {
 	TickerTopic *broadcast.Broadcaster
 	apiEndpoint string
 	SymbolList  []model.Symbol
-
-	ctx    context.Context
-	cancel context.CancelFunc
+	log         *slog.Logger
 }
 
 func NewKucoinClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*KucoinClient, error) {
 	kucoin := KucoinClient{
 		name:        "kucoin",
+		log:         slog.Default().With(slog.String("datasource", "kucoin")),
 		W:           w,
 		TickerTopic: tickerTopic,
 		apiEndpoint: "https://api.kucoin.com",
 		SymbolList:  symbolList.Crypto,
 	}
 
-	log.Debug("Created new datasource", "datasource", kucoin.GetName())
+	kucoin.log.Debug("Created new datasource")
 	return &kucoin, nil
 }
 
 func (b *KucoinClient) Connect() error {
-
 	b.W.Add(1)
-
-	b.ctx, b.cancel = context.WithCancel(context.Background())
 
 	availableSymbols, err := b.getAvailableSymbols()
 	if err != nil {
-		log.Error("Error obtaining available symbols", "datasource", b.GetName(), "error", err)
+		b.log.Error("Error obtaining available symbols", "error", err)
 		b.W.Done()
 		return err
 	}
@@ -57,26 +52,20 @@ func (b *KucoinClient) Connect() error {
 
 		// create new instance servers indefinitely as they're closed, until we get the close signal from the main function
 		for {
-			log.Info("Creating kucoin instance client...", "datasource", b.GetName())
+			b.log.Info("Creating kucoin instance client...")
 			instanceContext, instanceCancelContext := context.WithCancel(context.Background())
 			instanceData, err := b.getNewInstanceData()
 			if err != nil {
-				log.Error("", "datasource", b.GetName(), "error", err)
+				b.log.Error("", "error", err)
 			}
 			instanceClient := newKucoinInstanceClient(*instanceData, availableSymbols, b.SymbolList, b.TickerTopic, instanceContext, instanceCancelContext)
 
 			err = instanceClient.connect()
 			if err != nil {
-				log.Error("", "datasource", b.GetName(), "error", err)
+				b.log.Error("", "error", err)
 			}
 
-			select {
-			case <-instanceContext.Done():
-				continue
-			case <-b.ctx.Done():
-				instanceClient.close()
-				return
-			}
+			<-instanceContext.Done()
 		}
 
 	}()
@@ -89,7 +78,7 @@ func (b *KucoinClient) Reconnect() error {
 }
 
 func (b *KucoinClient) Close() error {
-	b.cancel()
+
 	b.W.Done()
 
 	return nil

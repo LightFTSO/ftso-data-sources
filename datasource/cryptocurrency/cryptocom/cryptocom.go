@@ -1,15 +1,12 @@
 package cryptocom
 
 import (
-	"context"
 	"fmt"
-	"net/http"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	log "log/slog"
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
@@ -20,17 +17,17 @@ import (
 )
 
 type CryptoComClient struct {
-	name        string
-	W           *sync.WaitGroup
-	TickerTopic *broadcast.Broadcaster
-	wsClient    internal.WebsocketClient
-	wsEndpoint  string
-	apiEndpoint string
-	SymbolList  []model.Symbol
+	name          string
+	W             *sync.WaitGroup
+	TickerTopic   *broadcast.Broadcaster
+	wsClient      internal.WebsocketClient
+	wsEndpoint    string
+	apiEndpoint   string
+	SymbolList    []model.Symbol
+	lastTimestamp time.Time
+	log           *slog.Logger
 
 	pingInterval int
-	ctx          context.Context
-	cancel       context.CancelFunc
 
 	subscriptionId atomic.Uint64
 }
@@ -40,9 +37,10 @@ func NewCryptoComClient(options interface{}, symbolList symbols.AllSymbols, tick
 
 	cryptocom := CryptoComClient{
 		name:         "cryptocom",
+		log:          slog.Default().With(slog.String("datasource", "cryptocom")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebsocketClient(wsEndpoint, true, nil),
+		wsClient:     *internal.NewWebsocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://api.crypto.com/v2",
 		SymbolList:   symbolList.Crypto,
@@ -50,58 +48,51 @@ func NewCryptoComClient(options interface{}, symbolList symbols.AllSymbols, tick
 	}
 	cryptocom.wsClient.SetMessageHandler(cryptocom.onMessage)
 
-	log.Debug("Created new datasource", "datasource", cryptocom.GetName())
+	cryptocom.wsClient.SetLogger(cryptocom.log)
+	cryptocom.log.Debug("Created new datasource")
 	return &cryptocom, nil
 }
 
 func (b *CryptoComClient) Connect() error {
 	b.W.Add(1)
-	log.Info("Connecting...", "datasource", b.GetName())
 
-	b.ctx, b.cancel = context.WithCancel(context.Background())
-
-	_, err := b.wsClient.Connect(http.Header{})
+	b.wsClient.Connect()
+	err := b.SubscribeTickers()
 	if err != nil {
+		b.log.Error("Error subscribing to tickers")
 		return err
 	}
 
-	go b.wsClient.Listen()
+	b.setLastTickerWatcher()
 
 	return nil
 }
 
 func (b *CryptoComClient) Reconnect() error {
-	log.Info("Reconnecting...", "datasource", b.GetName())
-	if b.cancel != nil {
-		b.cancel()
-	}
-	b.ctx, b.cancel = context.WithCancel(context.Background())
 
-	_, err := b.wsClient.Connect(http.Header{})
+	err := b.wsClient.Reconnect()
 	if err != nil {
 		return err
 	}
-	log.Info("Reconnected", "datasource", b.GetName())
+	b.log.Info("Reconnected")
+
 	err = b.SubscribeTickers()
 	if err != nil {
-		log.Error("Error subscribing to tickers", "datasource", b.GetName())
+		b.log.Error("Error subscribing to tickers")
 		return err
 	}
-	go b.wsClient.Listen()
+
 	return nil
 }
 func (b *CryptoComClient) Close() error {
-	b.cancel()
-	b.wsClient.Close()
+	b.wsClient.Disconnect()
 	b.W.Done()
 
 	return nil
 }
 
-func (b *CryptoComClient) onMessage(message internal.WsMessage) error {
+func (b *CryptoComClient) onMessage(message internal.WsMessage) {
 	if message.Err != nil {
-		log.Error("Error reading websocket message",
-			"datasource", b.GetName(), "error", message.Err)
 
 		b.Reconnect()
 	}
@@ -110,36 +101,34 @@ func (b *CryptoComClient) onMessage(message internal.WsMessage) error {
 		msg := string(message.Message)
 		if strings.Contains(msg, "public/heartbeat") {
 			b.pong(message.Message)
-			return nil
+			return
 		}
 
 		if strings.Contains(msg, "\"channel\":\"ticker\"") && strings.Contains(msg, "\"subscription\":\"ticker.") {
 			tickers, err := b.parseTicker(message.Message)
 			if err != nil {
-				log.Error("Error parsing ticker", "datasource", b.GetName(),
+				b.log.Error("Error parsing ticker",
 					"error", err.Error())
-				return nil
+				return
 			}
 
-			for _, t := range tickers {
-				b.TickerTopic.Send(t)
+			b.lastTimestamp = time.Now()
+			for _, v := range tickers {
+				b.TickerTopic.Send(v)
 			}
 		}
 	}
-
-	return nil
 }
 
 func (b *CryptoComClient) parseTicker(message []byte) ([]*model.Ticker, error) {
+
 	var tickerMessage WsTickerMessage
 	err := sonic.Unmarshal(message, &tickerMessage)
 	if err != nil {
-		log.Error(err.Error(), "datasource", b.GetName())
+		b.log.Error(err.Error())
 		return []*model.Ticker{}, err
 	}
 
-	//fmt.Println(string(message))
-	//fmt.Println(tickerMessage)
 	symbol := model.ParseSymbol(tickerMessage.Result.IntrumentName)
 	tickers := []*model.Ticker{}
 	for _, v := range tickerMessage.Result.Data {
@@ -153,7 +142,7 @@ func (b *CryptoComClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 			b.GetName(),
 			time.UnixMilli(v.Timestamp))
 		if err != nil {
-			log.Error("Error parsing ticker", "datasource", b.GetName(),
+			b.log.Error("Error parsing ticker",
 				"ticker", newTicker, "error", err.Error())
 			continue
 		}
@@ -184,14 +173,13 @@ func (b *CryptoComClient) SubscribeTickers() error {
 		subMessage["params"] = map[string]interface{}{
 			"channels": s,
 		}
-		//fmt.Println(subMessage)
 
 		// sleep a bit to avoid rate limits
 		time.Sleep(20 * time.Millisecond)
-		b.wsClient.SendMessageJSON(subMessage)
+		b.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 	}
 
-	log.Debug("Subscribed ticker symbols", "datasource", b.GetName())
+	b.log.Debug("Subscribed ticker symbols")
 
 	return nil
 }
@@ -200,20 +188,40 @@ func (b *CryptoComClient) GetName() string {
 	return b.name
 }
 
+func (b *CryptoComClient) setLastTickerWatcher() {
+	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
+	b.lastTimestamp = time.Now()
+	timeout := (30 * time.Second)
+	go func() {
+		defer lastTickerIntervalTimer.Stop()
+		for range lastTickerIntervalTimer.C {
+			now := time.Now()
+			diff := now.Sub(b.lastTimestamp)
+			if diff > timeout {
+				// no tickers received in a while, attempt to reconnect
+				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				b.lastTimestamp = time.Now()
+				b.Reconnect()
+				return
+			}
+		}
+	}()
+}
+
 func (b *CryptoComClient) pong(pingMessage []byte) {
-	log.Debug("Sending pong message", "datasource", b.GetName())
+	b.log.Debug("Sending pong message")
 	var ping PublicHeartbeat
 	err := sonic.Unmarshal(pingMessage, &ping)
 	if err != nil {
-		log.Error(err.Error(), "datasource", b.GetName())
+		b.log.Error(err.Error())
 		return
 	}
 
 	pong := ping
 	pong.Method = "public/respond-heartbeat"
 
-	if err := b.wsClient.Connection.WriteJSON(pong); err != nil {
-		log.Warn("Failed to send ping", "error", err, "datasource", b.GetName())
+	if err := b.wsClient.SendMessageJSON(websocket.TextMessage, pong); err != nil {
+		b.log.Warn("Failed to send ping", "error", err)
 		return
 	}
 }

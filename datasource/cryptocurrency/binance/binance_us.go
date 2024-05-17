@@ -1,7 +1,7 @@
 package binance
 
 import (
-	log "log/slog"
+	"log/slog"
 	"sync"
 
 	"github.com/textileio/go-threads/broadcast"
@@ -14,14 +14,16 @@ func NewBinanceUSClient(options interface{}, symbolList symbols.AllSymbols, tick
 
 	binance := BinanceClient{
 		name:        "binance.us",
+		log:         slog.Default().With(slog.String("datasource", "binance.us")),
 		W:           w,
 		TickerTopic: tickerTopic,
-		wsClient:    *internal.NewWebsocketClient(wsEndpoint, true, nil),
+		wsClient:    *internal.NewWebsocketClient(wsEndpoint),
 		wsEndpoint:  wsEndpoint,
 		apiEndpoint: "https://api.binance.us",
 		SymbolList:  symbolList.Crypto,
 	}
 	binance.wsClient.SetMessageHandler(binance.onMessage)
-	log.Debug("Created new datasource", "datasource", binance.GetName())
+	binance.wsClient.SetLogger(binance.log)
+	binance.log.Debug("Created new datasource")
 	return &binance, nil
 }

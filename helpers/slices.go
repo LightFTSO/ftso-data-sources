@@ -14,3 +14,12 @@ func AreAllFieldsEqual[T any, F comparable](slice []T, fieldExtractor func(T) F)
 	}
 	return true
 }
+
+func ItemInSlice[K comparable](k K, list []K) bool {
+	for _, v := range list {
+		if v == k {
+			return true
+		}
+	}
+	return false
+}

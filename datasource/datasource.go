@@ -13,6 +13,7 @@ import (
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bitstamp"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bybit"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/coinbase"
+	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/coinex"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/cryptocom"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/digifinex"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/fmfw"
@@ -68,6 +69,8 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 		return bybit.NewBybitClient(source.Options, allSymbols, tickerTopic, w)
 	case "coinbase":
 		return coinbase.NewCoinbaseClient(source.Options, allSymbols, tickerTopic, w)
+	case "coinex":
+		return coinex.NewCoinexClient(source.Options, allSymbols, tickerTopic, w)
 	case "crypto":
 		fallthrough
 	case "cryptocom":

@@ -170,7 +170,6 @@ func (b *BitfinexClient) parseTicker(message []byte) (*model.Ticker, error) {
 				"ticker", newTicker, "error", err.Error())
 		}
 
-		fmt.Println(newTicker)
 		return newTicker, nil
 	}
 

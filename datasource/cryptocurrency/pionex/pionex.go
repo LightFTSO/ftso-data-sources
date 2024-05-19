@@ -125,6 +125,8 @@ func (b *PionexClient) onMessage(message internal.WsMessage) {
 	}
 }
 
+func (b *PionexClient) comparePrices(s *model.Ticker) string { return s.LastPrice }
+
 func (b *PionexClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	var newTickerEvent wsTickerMessage
 	err := sonic.Unmarshal(message, &newTickerEvent)
@@ -148,9 +150,8 @@ func (b *PionexClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 		tickers = append(tickers, newTicker)
 	}
 
-	comparePrices := func(s *model.Ticker) string { return s.LastPrice }
 	//compareSymbols := func(s *model.Ticker) string { return s.Symbol }
-	if helpers.AreAllFieldsEqual(tickers, comparePrices) {
+	if helpers.AreAllFieldsEqual(tickers, b.comparePrices) {
 		return []*model.Ticker{tickers[0]}, nil
 	}
 	return tickers, nil

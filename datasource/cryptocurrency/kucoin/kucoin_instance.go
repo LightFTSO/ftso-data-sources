@@ -108,7 +108,7 @@ func (b *kucoinInstanceClient) onMessage(message internal.WsMessage) {
 					"ticker", ticker, "error", err.Error())
 				return
 			}
-			//b.lastTimestamp = time.Now()
+			b.lastTimestamp = time.Now()
 			b.TickerTopic.Send(ticker)
 		}
 	}

@@ -32,9 +32,8 @@ func main() {
 
 	logging.SetupLogging(config)
 
-	slog.Info("--- FTSO Data Sources v1.0 ---")
+	fmt.Println("=========  FTSO Data Sources  =========")
 	slog.Info("Created with <3 by RoseLabs.Mx (LightFTSO)")
-	slog.Info("Get in contact at x.com @lightftso or @roselabs.mx")
 
 	run(config)
 

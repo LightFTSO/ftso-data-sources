@@ -74,6 +74,7 @@ func (b *kucoinInstanceClient) connect() error {
 }
 
 func (b *kucoinInstanceClient) close() {
+	b.log.Warn("Closing kucoin instance client")
 	b.wsClient.Disconnect()
 	b.cancel()
 }

@@ -44,6 +44,9 @@ Supported go version: 1.22+
 
 # Configuration 
 Modify the following sample configuration, by default, the program will look for a file called `config.yaml` in it's root folder or you can specify the file with the `-config <file>` flag
+
+If using the WebSocket consumer on Docker, change the host from `127.0.0.1` to `0.0.0.0` so that the container is capable of listenning from external connections (e.g. from the host or from other containers)
+
 ```yaml
 # set to anything other than 'production' to not panic when this configuration wont produce any data
 env: production
@@ -104,14 +107,14 @@ mqtt:
 questdb:
   enabled: false
   flush_interval: 10s
-  individual_feed_table: true
+  individual_feed_table: false
   client_options:
     address: localhost:9000
     
 # See https://redis.io/docs/latest/develop/data-types/timeseries/
 redis_ts:
   enabled: false
-  include_stdout: False
+  include_stdout: false
   num_threads: 12
   ts:
     retention: 1h

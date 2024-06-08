@@ -42,7 +42,7 @@ func setDefaults() {
 	viper.SetDefault("websocket_server.enabled", false)
 	viper.SetDefault("websocket_server.use_sbe_encoding", false)
 	viper.SetDefault("websocket_server.host", "127.0.0.1")
-	viper.SetDefault("websocket_server.port", 3000)
+	viper.SetDefault("websocket_server.port", 9999)
 	viper.SetDefault("websocket_server.ticker_endpoint", "/tickers")
 	viper.SetDefault("websocket_server.use_sbe_encoding", false)
 	viper.SetDefault("websocket_server.individual_feed_table", false)

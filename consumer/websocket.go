@@ -31,7 +31,7 @@ func (s *WebsocketServerConsumer) setup() error {
 	if err := s.wsServer.Connect(); err != nil {
 		panic(err)
 	}
-	log.Info("Websocket Consumer started")
+	log.Info("Websocket Consumer started.", "host", s.config.Host, "port", s.config.Port, "sbe_encoding", s.config.UseSbeEncoding)
 
 	return nil
 }

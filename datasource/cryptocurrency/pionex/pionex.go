@@ -23,7 +23,7 @@ type PionexClient struct {
 	name          string
 	W             *sync.WaitGroup
 	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebsocketClient
+	wsClient      internal.WebSocketClient
 	wsEndpoint    string
 	SymbolList    []model.Symbol
 	lastTimestamp time.Time
@@ -41,13 +41,14 @@ func NewPionexClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 		log:          slog.Default().With(slog.String("datasource", "pionex")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebsocketClient(wsEndpoint),
+		wsClient:     *internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		SymbolList:   symbolList.Crypto,
 		pingInterval: 15,
 		apiEndpoint:  "https://api.pionex.com/api/v1",
 	}
 	pionex.wsClient.SetMessageHandler(pionex.onMessage)
+	pionex.wsClient.SetOnConnect(pionex.onConnect)
 
 	pionex.wsClient.SetLogger(pionex.log)
 	pionex.log.Debug("Created new datasource")
@@ -57,25 +58,15 @@ func NewPionexClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 func (b *PionexClient) Connect() error {
 	b.W.Add(1)
 
-	b.wsClient.Connect()
-	err := b.SubscribeTickers()
-	if err != nil {
-		b.log.Error("Error subscribing to tickers")
-		return err
-	}
+	b.wsClient.Start()
 
 	b.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *PionexClient) Reconnect() error {
-	err := b.wsClient.Reconnect()
-	if err != nil {
-		return err
-	}
-
-	err = b.SubscribeTickers()
+func (b *PionexClient) onConnect() error {
+	err := b.SubscribeTickers()
 	if err != nil {
 		b.log.Error("Error subscribing to tickers")
 		return err
@@ -84,18 +75,13 @@ func (b *PionexClient) Reconnect() error {
 	return nil
 }
 func (b *PionexClient) Close() error {
-	b.wsClient.Disconnect()
+	b.wsClient.Close()
 	b.W.Done()
 
 	return nil
 }
 
 func (b *PionexClient) onMessage(message internal.WsMessage) {
-	//fmt.Println(string(message.Message))
-	if message.Err != nil {
-		b.Reconnect()
-		return
-	}
 	if message.Type == websocket.BinaryMessage {
 		msg := string(message.Message)
 		if strings.Contains(msg, `"event":"subscribe"`) {
@@ -243,8 +229,7 @@ func (b *PionexClient) setLastTickerWatcher() {
 				// no tickers received in a while, attempt to reconnect
 				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 				b.lastTimestamp = time.Now()
-				b.Reconnect()
-				return
+				b.wsClient.Reconnect()
 			}
 		}
 	}()

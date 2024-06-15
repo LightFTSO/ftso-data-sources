@@ -24,7 +24,7 @@ type CoinexClient struct {
 	name           string
 	W              *sync.WaitGroup
 	TickerTopic    *broadcast.Broadcaster
-	wsClient       internal.WebsocketClient
+	wsClient       internal.WebSocketClient
 	wsEndpoint     string
 	apiEndpoint    string
 	SymbolList     []model.Symbol
@@ -42,13 +42,14 @@ func NewCoinexClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 		log:          slog.Default().With(slog.String("datasource", "coinex")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebsocketClient(wsEndpoint),
+		wsClient:     *internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://api.coinex.com/v2",
 		SymbolList:   symbolList.Crypto,
 		pingInterval: 35,
 	}
 	coinex.wsClient.SetMessageHandler(coinex.onMessage)
+	coinex.wsClient.SetOnConnect(coinex.onConnect)
 
 	coinex.wsClient.SetLogger(coinex.log)
 	coinex.log.Debug("Created new datasource")
@@ -58,46 +59,32 @@ func NewCoinexClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 func (b *CoinexClient) Connect() error {
 	b.W.Add(1)
 
-	b.wsClient.Connect()
-	err := b.SubscribeTickers()
-	if err != nil {
-		b.log.Error("Error subscribing to tickers")
-		return err
-	}
+	b.wsClient.Start()
 
-	b.SetPing()
+	b.setPing()
 	b.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *CoinexClient) Reconnect() error {
-	err := b.wsClient.Reconnect()
-	if err != nil {
-		return err
-	}
-
-	err = b.SubscribeTickers()
+func (b *CoinexClient) onConnect() error {
+	err := b.SubscribeTickers()
 	if err != nil {
 		b.log.Error("Error subscribing to tickers")
 		return err
 	}
-	b.SetPing()
+	b.setPing()
 
 	return nil
 }
 func (b *CoinexClient) Close() error {
-	b.wsClient.Disconnect()
+	b.wsClient.Close()
 	b.W.Done()
 
 	return nil
 }
 
 func (b *CoinexClient) onMessage(message internal.WsMessage) {
-	if message.Err != nil {
-		b.Reconnect()
-		return
-	}
 	decompressedData, err := internal.DecompressGzip(message.Message)
 	if err != nil {
 		b.log.Error("Error decompressing message", "error", err.Error())
@@ -249,14 +236,13 @@ func (b *CoinexClient) setLastTickerWatcher() {
 				// no tickers received in a while, attempt to reconnect
 				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 				b.lastTimestamp = time.Now()
-				b.Reconnect()
-				return
+				b.wsClient.Reconnect()
 			}
 		}
 	}()
 }
 
-func (b *CoinexClient) SetPing() {
+func (b *CoinexClient) setPing() {
 	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
 	go func() {
 		defer ticker.Stop()

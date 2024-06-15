@@ -20,7 +20,7 @@ type FmfwClient struct {
 	name          string
 	W             *sync.WaitGroup
 	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebsocketClient
+	wsClient      internal.WebSocketClient
 	wsEndpoint    string
 	SymbolList    []model.Symbol
 	lastTimestamp time.Time
@@ -37,12 +37,13 @@ func NewFmfwClient(options interface{}, symbolList symbols.AllSymbols, tickerTop
 		log:          slog.Default().With(slog.String("datasource", "fmfw")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebsocketClient(wsEndpoint),
+		wsClient:     *internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		SymbolList:   symbolList.Crypto,
 		pingInterval: 15,
 	}
 	fmfw.wsClient.SetMessageHandler(fmfw.onMessage)
+	fmfw.wsClient.SetOnConnect(fmfw.onConnect)
 
 	fmfw.wsClient.SetLogger(fmfw.log)
 	fmfw.log.Debug("Created new datasource")
@@ -52,47 +53,30 @@ func NewFmfwClient(options interface{}, symbolList symbols.AllSymbols, tickerTop
 func (b *FmfwClient) Connect() error {
 	b.W.Add(1)
 
-	b.wsClient.Connect()
-	err := b.SubscribeTickers()
-	if err != nil {
-		b.log.Error("Error subscribing to tickers")
-		return err
-	}
+	b.wsClient.Start()
 
-	b.SetPing()
+	b.setPing()
 	b.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *FmfwClient) Reconnect() error {
-	err := b.wsClient.Reconnect()
-	if err != nil {
-		return err
-	}
-
-	err = b.SubscribeTickers()
+func (b *FmfwClient) onConnect() error {
+	err := b.SubscribeTickers()
 	if err != nil {
 		b.log.Error("Error subscribing to tickers")
 		return err
 	}
-
-	b.SetPing()
 	return nil
 }
 func (b *FmfwClient) Close() error {
-	b.wsClient.Disconnect()
+	b.wsClient.Close()
 	b.W.Done()
 
 	return nil
 }
 
 func (b *FmfwClient) onMessage(message internal.WsMessage) {
-	if message.Err != nil {
-		b.Reconnect()
-		return
-	}
-
 	if message.Type == websocket.TextMessage {
 		if strings.Contains(string(message.Message), "ticker/price/1s") && strings.Contains(string(message.Message), "data") {
 			tickers, err := b.parseTicker(message.Message)
@@ -192,14 +176,13 @@ func (b *FmfwClient) setLastTickerWatcher() {
 				// no tickers received in a while, attempt to reconnect
 				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 				b.lastTimestamp = time.Now()
-				b.Reconnect()
-				return
+				b.wsClient.Reconnect()
 			}
 		}
 	}()
 }
 
-func (b *FmfwClient) SetPing() {
+func (b *FmfwClient) setPing() {
 	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
 	go func() {
 		defer ticker.Stop()

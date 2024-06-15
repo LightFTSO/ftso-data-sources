@@ -26,7 +26,7 @@ type KrakenClient struct {
 	name          string
 	W             *sync.WaitGroup
 	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebsocketClient
+	wsClient      internal.WebSocketClient
 	wsEndpoint    string
 	apiEndpoint   string
 	SymbolList    []model.Symbol
@@ -44,7 +44,7 @@ func NewKrakenClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 		log:          slog.Default().With(slog.String("datasource", "kraken")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebsocketClient(wsEndpoint),
+		wsClient:     *internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://api.kraken.com/0",
 		SymbolList:   symbolList.Crypto,
@@ -52,6 +52,7 @@ func NewKrakenClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 	}
 
 	kraken.wsClient.SetMessageHandler(kraken.onMessage)
+	kraken.wsClient.SetOnConnect(kraken.onConnect)
 	kraken.wsClient.SetLogger(kraken.log)
 	kraken.log.Debug("Created new datasource")
 	return &kraken, nil
@@ -60,47 +61,30 @@ func NewKrakenClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 func (b *KrakenClient) Connect() error {
 	b.W.Add(1)
 
-	b.wsClient.Connect()
-	err := b.SubscribeTickers()
-	if err != nil {
-		b.log.Error("Error subscribing to tickers")
-		return err
-	}
+	b.wsClient.Start()
 
-	b.SetPing()
+	b.setPing()
 	b.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *KrakenClient) Reconnect() error {
-	err := b.wsClient.Reconnect()
-	if err != nil {
-		return err
-	}
-
-	err = b.SubscribeTickers()
+func (b *KrakenClient) onConnect() error {
+	err := b.SubscribeTickers()
 	if err != nil {
 		b.log.Error("Error subscribing to tickers")
 		return err
 	}
-
-	b.SetPing()
 	return nil
 }
 func (b *KrakenClient) Close() error {
-	b.wsClient.Disconnect()
+	b.wsClient.Close()
 	b.W.Done()
 
 	return nil
 }
 
 func (b *KrakenClient) onMessage(message internal.WsMessage) {
-	if message.Err != nil {
-		b.Reconnect()
-		return
-	}
-
 	if message.Type == websocket.TextMessage {
 		if strings.Contains(string(message.Message), "pong") {
 			b.PongHandler(message.Message)
@@ -248,14 +232,13 @@ func (b *KrakenClient) setLastTickerWatcher() {
 				// no tickers received in a while, attempt to reconnect
 				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 				b.lastTimestamp = time.Now()
-				b.Reconnect()
-				return
+				b.wsClient.Reconnect()
 			}
 		}
 	}()
 }
 
-func (b *KrakenClient) SetPing() {
+func (b *KrakenClient) setPing() {
 	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
 	go func() {
 		defer ticker.Stop()

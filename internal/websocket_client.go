@@ -1,11 +1,19 @@
 package internal
 
 import (
+	"fmt"
 	"log/slog"
+	"net/url"
+	"sync"
 	"time"
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
+)
+
+const (
+	reconnectDelay = 1 * time.Second
+	writeWait      = 10 * time.Second
 )
 
 type WsMessage struct {
@@ -15,174 +23,223 @@ type WsMessage struct {
 }
 type WsMessageHandler func(message WsMessage)
 
-type WebsocketClient struct {
-	conn      *websocket.Conn
-	send      chan WsMessage
-	received  chan WsMessage
-	done      chan struct{}
-	onMessage func(WsMessage)
-	url       string
-	log       *slog.Logger
+type WebSocketClient struct {
+	url          string
+	conn         *websocket.Conn
+	send         chan WsMessage
+	receive      chan WsMessage
+	close        chan struct{}
+	reconnect    chan struct{}
+	done         chan struct{}
+	mu           sync.Mutex
+	once         sync.Once
+	reconnecting bool
+	closed       bool
+	onConnect    func() error
+	onDisconnect func() error
+	onMessage    func(WsMessage)
+	log          *slog.Logger
 }
 
-func NewWebsocketClient(url string) *WebsocketClient {
-	client := &WebsocketClient{
-		conn:      nil,
-		send:      make(chan WsMessage),
-		received:  make(chan WsMessage),
-		done:      make(chan struct{}),
-		onMessage: nil,
+func NewWebSocketClient(url string) *WebSocketClient {
+	return &WebSocketClient{
 		url:       url,
-		log:       slog.Default(),
-	}
-	return client
-}
-
-func (ws *WebsocketClient) SetMessageHandler(handler WsMessageHandler) {
-	ws.onMessage = handler
-}
-func (ws *WebsocketClient) SetLogger(logger *slog.Logger) {
-	ws.log = logger
-}
-
-func (c *WebsocketClient) readPump() {
-	defer func() {
-		c.conn.Close()
-		close(c.received)
-	}()
-
-	for {
-		msgType, msg, err := c.conn.ReadMessage()
-		if err != nil {
-			c.log.Error("Error reading websocket message", "error", err)
-			c.received <- WsMessage{Type: msgType, Message: msg, Err: err}
-			return
-		}
-		select {
-		case c.received <- WsMessage{Type: msgType, Message: msg, Err: nil}:
-		case <-c.done:
-			return
-		}
+		send:      make(chan WsMessage, 256), // Buffered channel
+		receive:   make(chan WsMessage, 256), // Buffered channel
+		close:     make(chan struct{}),
+		reconnect: make(chan struct{}),
+		done:      make(chan struct{}),
 	}
 }
 
-func (c *WebsocketClient) writePump() {
-	defer func() {
-		c.conn.Close()
-	}()
-
-	for {
-		select {
-		case msg := <-c.send:
-			err := c.conn.WriteMessage(msg.Type, msg.Message)
-			if err != nil {
-				c.log.Error("Error writing message", "err", err)
-				c.Disconnect()
-				return
-			}
-		case <-c.done:
-			c.log.Debug("Closing connection...")
-			return
-		}
+func (c *WebSocketClient) SendMessage(message WsMessage) {
+	if c.closed {
+		return
 	}
+
+	c.send <- message
 }
 
-func (c *WebsocketClient) SendMessage(msg WsMessage) {
-	select {
-	case c.send <- msg:
-	case <-c.done:
-	}
-}
-
-func (c *WebsocketClient) SendMessageJSON(msgType int, message interface{}) error {
+func (c *WebSocketClient) SendMessageJSON(msgType int, message interface{}) error {
 	data, err := sonic.Marshal(message)
 	if err != nil {
 		return err
 	}
 
-	select {
-	case c.send <- WsMessage{Type: msgType, Message: data}:
-	case <-c.done:
-	}
+	c.SendMessage(WsMessage{Type: msgType, Message: data})
+
 	return nil
 }
 
-func (c *WebsocketClient) StartListening() {
-	for {
-		select {
-		case msg := <-c.received:
-			c.onMessage(msg)
-		case <-c.done:
-			c.log.Debug("Closing message receiving...")
-			return
+func (c *WebSocketClient) Start() {
+	go func() {
+		for {
+			if err := c.connect(); err != nil {
+				c.log.Error("connection error:", "error", err)
+				continue
+			}
+
+			select {
+			case <-c.close:
+				c.log.Info("Closing WebSocket client")
+				return
+			case <-c.reconnect:
+				<-c.done
+				time.Sleep(reconnectDelay)
+				c.log.Info("Reconnecting...")
+				continue
+			}
 		}
-	}
+	}()
 }
 
-func (c *WebsocketClient) Disconnect() {
-	select {
-	case <-c.done:
-		// Already closed
-	default:
-		close(c.done)
-	}
-
+func (c *WebSocketClient) Close() {
+	c.once.Do(func() {
+		c.closed = true
+		close(c.close)
+	})
 }
 
-func (c *WebsocketClient) Connect() error {
-	c.log.Info("Connecting...")
-	var newConn *websocket.Conn
-	var err error
+func (c *WebSocketClient) Reconnect() {
+	c.handleDisconnect()
+	c.handleReconnection()
+}
+
+func (c *WebSocketClient) connect() error {
+	u, err := url.Parse(c.url)
+	if err != nil {
+		return err
+	}
 
 	for {
-		newConn, _, err = websocket.DefaultDialer.Dial(c.url, nil)
+		conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 		if err == nil {
+			conn.SetReadLimit(655350)
+			c.mu.Lock()
+			c.conn = conn
+			c.reconnecting = false
+			c.mu.Unlock()
 			break
 		}
 		c.log.Error("Error connecting. Retrying in 1 second...", "err", err)
 		time.Sleep(time.Second)
 	}
-	newConn.SetReadLimit(655350)
 
-	c.conn = newConn
-	c.received = make(chan WsMessage)
-	c.send = make(chan WsMessage)
-	c.done = make(chan struct{})
+	if c.onMessage != nil {
+		go c.startListening()
+	} else {
+		return fmt.Errorf("onMessage handler not set")
+	}
 
-	go c.readPump()
 	go c.writePump()
+	go c.readPump()
 
-	go c.StartListening()
+	c.log.Info("Connected")
+
+	if c.onConnect != nil {
+		c.onConnect()
+	}
+
 	return nil
 }
 
-func (c *WebsocketClient) Reconnect() error {
-	c.log.Info("Reconnecting...")
-	if c.conn != nil {
-		c.Disconnect()
-	}
-
-	var newConn *websocket.Conn
-	var err error
+func (c *WebSocketClient) readPump() {
+	defer c.handleReconnection()
 
 	for {
-		newConn, _, err = websocket.DefaultDialer.Dial(c.url, nil)
-		if err == nil {
-			break
+		msgType, message, err := c.conn.ReadMessage()
+		if err != nil {
+			if c.closed {
+				return
+			}
+			c.log.Error(err.Error())
+			c.handleDisconnect()
+			return
 		}
-		c.log.Error("Error reconnecting. Retrying in 1 second...", "err", err)
-		time.Sleep(time.Second)
+		c.receive <- WsMessage{Type: msgType, Message: message}
 	}
-	newConn.SetReadLimit(655350)
+}
 
-	c.conn = newConn
-	c.received = make(chan WsMessage)
-	c.send = make(chan WsMessage)
+func (c *WebSocketClient) writePump() {
+	defer c.handleReconnection()
+
+	for message := range c.send {
+		if err := c.write(message.Type, message.Message); err != nil {
+			if c.closed {
+				return
+			}
+			c.log.Error("write error", "error", err)
+			c.handleDisconnect()
+			return
+
+		}
+	}
+}
+
+func (c *WebSocketClient) write(messageType int, data []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.conn == nil {
+		return fmt.Errorf("connection is nil")
+	}
+	c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+	return c.conn.WriteMessage(messageType, data)
+}
+
+func (c *WebSocketClient) handleReconnection() {
+	if c.closed {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.reconnecting && !c.closed {
+		c.reconnecting = true
+		c.reconnect <- struct{}{}
+	}
+}
+
+func (c *WebSocketClient) handleDisconnect() {
+	if c.closed {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.conn != nil {
+		c.conn.Close()
+		c.conn = nil
+	}
+	if c.onDisconnect != nil {
+		c.onDisconnect()
+	}
+
+	close(c.done)
 	c.done = make(chan struct{})
+}
 
-	go c.readPump()
-	go c.writePump()
+func (c *WebSocketClient) SetOnConnect(handler func() error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onConnect = handler
+}
 
-	go c.StartListening()
-	return nil
+func (c *WebSocketClient) SetOnDisconnect(handler func() error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onDisconnect = handler
+}
+
+func (ws *WebSocketClient) SetLogger(logger *slog.Logger) {
+	ws.log = logger
+}
+
+func (ws *WebSocketClient) SetMessageHandler(handler WsMessageHandler) {
+	ws.onMessage = handler
+}
+
+func (c *WebSocketClient) startListening() {
+	for msg := range c.receive {
+		c.onMessage(msg)
+	}
 }

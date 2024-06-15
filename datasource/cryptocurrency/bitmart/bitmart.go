@@ -20,7 +20,7 @@ type BitmartClient struct {
 	name          string
 	W             *sync.WaitGroup
 	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebsocketClient
+	wsClient      internal.WebSocketClient
 	wsEndpoint    string
 	SymbolList    []model.Symbol
 	lastTimestamp time.Time
@@ -37,12 +37,13 @@ func NewBitmartClient(options interface{}, symbolList symbols.AllSymbols, ticker
 		log:          slog.Default().With(slog.String("datasource", "bitmart")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebsocketClient(wsEndpoint),
+		wsClient:     *internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		SymbolList:   symbolList.Crypto,
 		pingInterval: 15,
 	}
 	bitmart.wsClient.SetMessageHandler(bitmart.onMessage)
+	bitmart.wsClient.SetOnConnect(bitmart.onConnect)
 
 	bitmart.wsClient.SetLogger(bitmart.log)
 	bitmart.log.Debug("Created new datasource")
@@ -52,26 +53,16 @@ func NewBitmartClient(options interface{}, symbolList symbols.AllSymbols, ticker
 func (b *BitmartClient) Connect() error {
 	b.W.Add(1)
 
-	b.wsClient.Connect()
-	err := b.SubscribeTickers()
-	if err != nil {
-		b.log.Error("Error subscribing to tickers")
-		return err
-	}
+	b.wsClient.Start()
 
-	b.SetPing()
+	b.setPing()
 	b.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *BitmartClient) Reconnect() error {
-	err := b.wsClient.Reconnect()
-	if err != nil {
-		return err
-	}
-
-	err = b.SubscribeTickers()
+func (b *BitmartClient) onConnect() error {
+	err := b.SubscribeTickers()
 	if err != nil {
 		b.log.Error("Error subscribing to tickers")
 		return err
@@ -80,18 +71,13 @@ func (b *BitmartClient) Reconnect() error {
 	return nil
 }
 func (b *BitmartClient) Close() error {
-	b.wsClient.Disconnect()
+	b.wsClient.Close()
 	b.W.Done()
 
 	return nil
 }
 
 func (b *BitmartClient) onMessage(message internal.WsMessage) {
-	if message.Err != nil {
-		b.Reconnect()
-		return
-	}
-
 	if message.Type == websocket.TextMessage {
 		msg := string(message.Message)
 		if strings.Contains(msg, `"event":"subscribe"`) {
@@ -203,14 +189,13 @@ func (b *BitmartClient) setLastTickerWatcher() {
 				// no tickers received in a while, attempt to reconnect
 				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 				b.lastTimestamp = time.Now()
-				b.Reconnect()
-				return
+				b.wsClient.Reconnect()
 			}
 		}
 	}()
 }
 
-func (b *BitmartClient) SetPing() {
+func (b *BitmartClient) setPing() {
 	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
 	go func() {
 		defer ticker.Stop()

@@ -17,12 +17,14 @@ func NewBinanceUSClient(options interface{}, symbolList symbols.AllSymbols, tick
 		log:         slog.Default().With(slog.String("datasource", "binance.us")),
 		W:           w,
 		TickerTopic: tickerTopic,
-		wsClient:    *internal.NewWebsocketClient(wsEndpoint),
+		wsClient:    *internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:  wsEndpoint,
 		apiEndpoint: "https://api.binance.us",
 		SymbolList:  symbolList.Crypto,
 	}
 	binance.wsClient.SetMessageHandler(binance.onMessage)
+	binance.wsClient.SetOnConnect(binance.onConnect)
+	binance.wsClient.SetOnConnect(binance.onConnect)
 	binance.wsClient.SetLogger(binance.log)
 	binance.log.Debug("Created new datasource")
 	return &binance, nil

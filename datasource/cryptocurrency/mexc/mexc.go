@@ -22,7 +22,7 @@ type MexcClient struct {
 	name          string
 	W             *sync.WaitGroup
 	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebsocketClient
+	wsClient      internal.WebSocketClient
 	wsEndpoint    string
 	apiEndpoint   string
 	SymbolList    []model.Symbol
@@ -48,7 +48,7 @@ func NewMexcClient(options interface{}, symbolList symbols.AllSymbols, tickerTop
 		log:          slog.Default().With(slog.String("datasource", "mexc")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebsocketClient(wsEndpoint),
+		wsClient:     *internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://api.mexc.com",
 		SymbolList:   symbolList.Crypto,
@@ -56,6 +56,7 @@ func NewMexcClient(options interface{}, symbolList symbols.AllSymbols, tickerTop
 		tzInfo:       shanghaiTimezone,
 	}
 	mexc.wsClient.SetMessageHandler(mexc.onMessage)
+	mexc.wsClient.SetOnConnect(mexc.onConnect)
 
 	mexc.wsClient.SetLogger(mexc.log)
 	mexc.log.Debug("Created new datasource")
@@ -65,47 +66,30 @@ func NewMexcClient(options interface{}, symbolList symbols.AllSymbols, tickerTop
 func (b *MexcClient) Connect() error {
 	b.W.Add(1)
 
-	b.wsClient.Connect()
-	err := b.SubscribeTickers()
-	if err != nil {
-		b.log.Error("Error subscribing to tickers")
-		return err
-	}
+	b.wsClient.Start()
 
-	b.SetPing()
+	b.setPing()
 	b.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *MexcClient) Reconnect() error {
-	err := b.wsClient.Reconnect()
-	if err != nil {
-		return err
-	}
-
-	err = b.SubscribeTickers()
+func (b *MexcClient) onConnect() error {
+	err := b.SubscribeTickers()
 	if err != nil {
 		b.log.Error("Error subscribing to tickers")
 		return err
 	}
-
-	b.SetPing()
 	return nil
 }
 func (b *MexcClient) Close() error {
-	b.wsClient.Disconnect()
+	b.wsClient.Close()
 	b.W.Done()
 
 	return nil
 }
 
 func (b *MexcClient) onMessage(message internal.WsMessage) {
-	if message.Err != nil {
-		b.Reconnect()
-		return
-	}
-
 	if message.Type == websocket.TextMessage {
 		if strings.Contains(string(message.Message), `"c":"spot@public.miniTicker`) {
 			ticker, err := b.parseTicker(message.Message)
@@ -170,14 +154,13 @@ func (b *MexcClient) setLastTickerWatcher() {
 				// no tickers received in a while, attempt to reconnect
 				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 				b.lastTimestamp = time.Now()
-				b.Reconnect()
-				return
+				b.wsClient.Reconnect()
 			}
 		}
 	}()
 }
 
-func (b *MexcClient) SetPing() {
+func (b *MexcClient) setPing() {
 	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
 	go func() {
 		defer ticker.Stop()

@@ -23,7 +23,7 @@ type HuobiClient struct {
 	name          string
 	W             *sync.WaitGroup
 	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebsocketClient
+	wsClient      internal.WebSocketClient
 	wsEndpoint    string
 	SymbolList    []model.Symbol
 	lastTimestamp time.Time
@@ -38,11 +38,12 @@ func NewHuobiClient(options interface{}, symbolList symbols.AllSymbols, tickerTo
 		log:         slog.Default().With(slog.String("datasource", "huobi")),
 		W:           w,
 		TickerTopic: tickerTopic,
-		wsClient:    *internal.NewWebsocketClient(wsEndpoint),
+		wsClient:    *internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:  wsEndpoint,
 		SymbolList:  symbolList.Crypto,
 	}
 	huobi.wsClient.SetMessageHandler(huobi.onMessage)
+	huobi.wsClient.SetOnConnect(huobi.onConnect)
 
 	huobi.wsClient.SetLogger(huobi.log)
 	huobi.log.Debug("Created new datasource")
@@ -52,25 +53,15 @@ func NewHuobiClient(options interface{}, symbolList symbols.AllSymbols, tickerTo
 func (b *HuobiClient) Connect() error {
 	b.W.Add(1)
 
-	b.wsClient.Connect()
-	err := b.SubscribeTickers()
-	if err != nil {
-		b.log.Error("Error subscribing to tickers")
-		return err
-	}
+	b.wsClient.Start()
 
 	b.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *HuobiClient) Reconnect() error {
-	err := b.wsClient.Reconnect()
-	if err != nil {
-		return err
-	}
-
-	err = b.SubscribeTickers()
+func (b *HuobiClient) onConnect() error {
+	err := b.SubscribeTickers()
 	if err != nil {
 		b.log.Error("Error subscribing to tickers")
 		return err
@@ -80,18 +71,13 @@ func (b *HuobiClient) Reconnect() error {
 }
 
 func (b *HuobiClient) Close() error {
-	b.wsClient.Disconnect()
+	b.wsClient.Close()
 	b.W.Done()
 
 	return nil
 }
 
 func (b *HuobiClient) onMessage(message internal.WsMessage) {
-	if message.Err != nil {
-		b.Reconnect()
-		return
-	}
-
 	if message.Type == websocket.BinaryMessage {
 		// decompress
 		data, err := b.decompressGzip(message.Message)
@@ -170,8 +156,7 @@ func (b *HuobiClient) setLastTickerWatcher() {
 				// no tickers received in a while, attempt to reconnect
 				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 				b.lastTimestamp = time.Now()
-				b.Reconnect()
-				return
+				b.wsClient.Reconnect()
 			}
 		}
 	}()

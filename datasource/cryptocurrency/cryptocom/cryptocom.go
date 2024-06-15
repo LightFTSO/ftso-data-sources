@@ -20,7 +20,7 @@ type CryptoComClient struct {
 	name          string
 	W             *sync.WaitGroup
 	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebsocketClient
+	wsClient      internal.WebSocketClient
 	wsEndpoint    string
 	apiEndpoint   string
 	SymbolList    []model.Symbol
@@ -40,13 +40,14 @@ func NewCryptoComClient(options interface{}, symbolList symbols.AllSymbols, tick
 		log:          slog.Default().With(slog.String("datasource", "cryptocom")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebsocketClient(wsEndpoint),
+		wsClient:     *internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://api.crypto.com/v2",
 		SymbolList:   symbolList.Crypto,
 		pingInterval: 20,
 	}
 	cryptocom.wsClient.SetMessageHandler(cryptocom.onMessage)
+	cryptocom.wsClient.SetOnConnect(cryptocom.onConnect)
 
 	cryptocom.wsClient.SetLogger(cryptocom.log)
 	cryptocom.log.Debug("Created new datasource")
@@ -56,46 +57,29 @@ func NewCryptoComClient(options interface{}, symbolList symbols.AllSymbols, tick
 func (b *CryptoComClient) Connect() error {
 	b.W.Add(1)
 
-	b.wsClient.Connect()
+	b.wsClient.Start()
+
+	return nil
+}
+
+func (b *CryptoComClient) onConnect() error {
 	err := b.SubscribeTickers()
 	if err != nil {
 		b.log.Error("Error subscribing to tickers")
 		return err
 	}
-
 	b.setLastTickerWatcher()
 
 	return nil
 }
-
-func (b *CryptoComClient) Reconnect() error {
-	err := b.wsClient.Reconnect()
-	if err != nil {
-		return err
-	}
-	b.log.Info("Reconnected")
-
-	err = b.SubscribeTickers()
-	if err != nil {
-		b.log.Error("Error subscribing to tickers")
-		return err
-	}
-
-	return nil
-}
 func (b *CryptoComClient) Close() error {
-	b.wsClient.Disconnect()
+	b.wsClient.Close()
 	b.W.Done()
 
 	return nil
 }
 
 func (b *CryptoComClient) onMessage(message internal.WsMessage) {
-	if message.Err != nil {
-		b.Reconnect()
-		return
-	}
-
 	if message.Type == websocket.TextMessage {
 		msg := string(message.Message)
 		if strings.Contains(msg, "public/heartbeat") {
@@ -200,8 +184,7 @@ func (b *CryptoComClient) setLastTickerWatcher() {
 				// no tickers received in a while, attempt to reconnect
 				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 				b.lastTimestamp = time.Now()
-				b.Reconnect()
-				return
+				b.wsClient.Reconnect()
 			}
 		}
 	}()

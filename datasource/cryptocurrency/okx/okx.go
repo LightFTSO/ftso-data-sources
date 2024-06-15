@@ -21,7 +21,7 @@ type OkxClient struct {
 	name          string
 	W             *sync.WaitGroup
 	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebsocketClient
+	wsClient      internal.WebSocketClient
 	wsEndpoint    string
 	SymbolList    []model.Symbol
 	lastTimestamp time.Time
@@ -38,13 +38,14 @@ func NewOkxClient(options interface{}, symbolList symbols.AllSymbols, tickerTopi
 		log:         slog.Default().With(slog.String("datasource", "okx")),
 		W:           w,
 		TickerTopic: tickerTopic,
-		wsClient:    *internal.NewWebsocketClient(wsEndpoint),
+		wsClient:    *internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:  wsEndpoint,
 		SymbolList:  symbolList.Crypto,
 
 		pingInterval: 29,
 	}
 	okx.wsClient.SetMessageHandler(okx.onMessage)
+	okx.wsClient.SetOnConnect(okx.onConnect)
 
 	okx.wsClient.SetLogger(okx.log)
 	okx.log.Debug("Created new datasource")
@@ -53,49 +54,30 @@ func NewOkxClient(options interface{}, symbolList symbols.AllSymbols, tickerTopi
 
 func (b *OkxClient) Connect() error {
 	b.W.Add(1)
-
-	b.wsClient.Connect()
-	err := b.SubscribeTickers()
-	if err != nil {
-		b.log.Error("Error subscribing to tickers")
-		return err
-	}
-
-	b.SetPing()
+	b.wsClient.Start()
+	b.setPing()
 	b.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *OkxClient) Reconnect() error {
-	err := b.wsClient.Reconnect()
-	if err != nil {
-		return err
-	}
-
-	err = b.SubscribeTickers()
+func (b *OkxClient) onConnect() error {
+	err := b.SubscribeTickers()
 	if err != nil {
 		b.log.Error("Error subscribing to tickers")
 		return err
 	}
-
-	b.SetPing()
 	return nil
 }
 
 func (b *OkxClient) Close() error {
-	b.wsClient.Disconnect()
+	b.wsClient.Close()
 	b.W.Done()
 
 	return nil
 }
 
 func (b *OkxClient) onMessage(message internal.WsMessage) {
-	if message.Err != nil {
-		b.Reconnect()
-		return
-	}
-
 	if message.Type == websocket.TextMessage {
 		msg := string(message.Message)
 
@@ -167,7 +149,7 @@ func (b *OkxClient) SubscribeTickers() error {
 	return nil
 }
 
-func (b *OkxClient) SetPing() {
+func (b *OkxClient) setPing() {
 	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
 	go func() {
 		defer ticker.Stop()
@@ -194,8 +176,7 @@ func (b *OkxClient) setLastTickerWatcher() {
 				// no tickers received in a while, attempt to reconnect
 				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 				b.lastTimestamp = time.Now()
-				b.Reconnect()
-				return
+				b.wsClient.Reconnect()
 			}
 		}
 	}()

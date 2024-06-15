@@ -24,7 +24,7 @@ type BitfinexClient struct {
 	name           string
 	W              *sync.WaitGroup
 	TickerTopic    *broadcast.Broadcaster
-	wsClient       internal.WebsocketClient
+	wsClient       internal.WebSocketClient
 	wsEndpoint     string
 	apiEndpoint    string
 	SymbolList     []model.Symbol
@@ -45,13 +45,14 @@ func NewBitfinexClient(options interface{}, symbolList symbols.AllSymbols, ticke
 		log:          slog.Default().With(slog.String("datasource", "bitfinex")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebsocketClient(wsEndpoint),
+		wsClient:     *internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://api-pub.bitfinex.com",
 		SymbolList:   symbolList.Crypto,
 		pingInterval: 35,
 	}
 	bitfinex.wsClient.SetMessageHandler(bitfinex.onMessage)
+	bitfinex.wsClient.SetOnConnect(bitfinex.onConnect)
 
 	bitfinex.wsClient.SetLogger(bitfinex.log)
 	bitfinex.fetchApiSymbolMap()
@@ -63,46 +64,32 @@ func NewBitfinexClient(options interface{}, symbolList symbols.AllSymbols, ticke
 func (b *BitfinexClient) Connect() error {
 	b.W.Add(1)
 
-	b.wsClient.Connect()
+	b.wsClient.Start()
+
+	b.setPing()
+	b.setLastTickerWatcher()
+
+	return nil
+}
+
+func (b *BitfinexClient) onConnect() error {
 	err := b.SubscribeTickers()
 	if err != nil {
 		b.log.Error("Error subscribing to tickers")
 		return err
 	}
 
-	b.SetPing()
-	b.setLastTickerWatcher()
-
 	return nil
 }
 
-func (b *BitfinexClient) Reconnect() error {
-	err := b.wsClient.Reconnect()
-	if err != nil {
-		return err
-	}
-
-	err = b.SubscribeTickers()
-	if err != nil {
-		b.log.Error("Error subscribing to tickers")
-		return err
-	}
-	b.SetPing()
-
-	return nil
-}
 func (b *BitfinexClient) Close() error {
-	b.wsClient.Disconnect()
+	b.wsClient.Close()
 	b.W.Done()
 
 	return nil
 }
 
 func (b *BitfinexClient) onMessage(message internal.WsMessage) {
-	if message.Err != nil {
-		b.Reconnect()
-		return
-	}
 	data := string(message.Message)
 	if strings.Contains(data, `info`) {
 		return
@@ -263,14 +250,13 @@ func (b *BitfinexClient) setLastTickerWatcher() {
 				// no tickers received in a while, attempt to reconnect
 				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 				b.lastTimestamp = time.Now()
-				b.Reconnect()
-				return
+				b.wsClient.Reconnect()
 			}
 		}
 	}()
 }
 
-func (b *BitfinexClient) SetPing() {
+func (b *BitfinexClient) setPing() {
 	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
 	go func() {
 		defer ticker.Stop()

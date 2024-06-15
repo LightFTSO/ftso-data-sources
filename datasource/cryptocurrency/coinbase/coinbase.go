@@ -20,7 +20,7 @@ type CoinbaseClient struct {
 	name          string
 	W             *sync.WaitGroup
 	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebsocketClient
+	wsClient      internal.WebSocketClient
 	wsEndpoint    string
 	SymbolList    []model.Symbol
 	lastTimestamp time.Time
@@ -35,11 +35,12 @@ func NewCoinbaseClient(options interface{}, symbolList symbols.AllSymbols, ticke
 		log:         slog.Default().With(slog.String("datasource", "coinbase")),
 		W:           w,
 		TickerTopic: tickerTopic,
-		wsClient:    *internal.NewWebsocketClient(wsEndpoint),
+		wsClient:    *internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:  wsEndpoint,
 		SymbolList:  symbolList.Crypto,
 	}
 	coinbase.wsClient.SetMessageHandler(coinbase.onMessage)
+	coinbase.wsClient.SetOnConnect(coinbase.onConnect)
 
 	coinbase.wsClient.SetLogger(coinbase.log)
 	coinbase.log.Debug("Created new datasource")
@@ -49,25 +50,15 @@ func NewCoinbaseClient(options interface{}, symbolList symbols.AllSymbols, ticke
 func (b *CoinbaseClient) Connect() error {
 	b.W.Add(1)
 
-	b.wsClient.Connect()
-	err := b.SubscribeTickers()
-	if err != nil {
-		b.log.Error("Error subscribing to tickers")
-		return err
-	}
+	b.wsClient.Start()
 
 	b.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *CoinbaseClient) Reconnect() error {
-	err := b.wsClient.Reconnect()
-	if err != nil {
-		return err
-	}
-
-	err = b.SubscribeTickers()
+func (b *CoinbaseClient) onConnect() error {
+	err := b.SubscribeTickers()
 	if err != nil {
 		b.log.Error("Error subscribing to tickers")
 		return err
@@ -77,18 +68,13 @@ func (b *CoinbaseClient) Reconnect() error {
 }
 
 func (b *CoinbaseClient) Close() error {
-	b.wsClient.Disconnect()
+	b.wsClient.Close()
 	b.W.Done()
 
 	return nil
 }
 
 func (b *CoinbaseClient) onMessage(message internal.WsMessage) {
-	if message.Err != nil {
-		b.Reconnect()
-		return
-	}
-
 	if message.Type == websocket.TextMessage {
 		msg := string(message.Message)
 
@@ -176,8 +162,7 @@ func (b *CoinbaseClient) setLastTickerWatcher() {
 				// no tickers received in a while, attempt to reconnect
 				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 				b.lastTimestamp = time.Now()
-				b.Reconnect()
-				return
+				b.wsClient.Reconnect()
 			}
 		}
 	}()

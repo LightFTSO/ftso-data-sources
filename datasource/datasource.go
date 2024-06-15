@@ -39,7 +39,6 @@ import (
 type FtsoDataSource interface {
 	SubscribeTickers() error
 	Connect() error
-	Reconnect() error
 	Close() error
 	GetName() string
 }

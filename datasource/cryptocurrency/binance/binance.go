@@ -22,7 +22,7 @@ type BinanceClient struct {
 	name          string
 	W             *sync.WaitGroup
 	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebsocketClient
+	wsClient      internal.WebSocketClient
 	wsEndpoint    string
 	apiEndpoint   string
 	SymbolList    []model.Symbol
@@ -38,12 +38,13 @@ func NewBinanceClient(options interface{}, symbolList symbols.AllSymbols, ticker
 		log:         slog.Default().With(slog.String("datasource", "binance")),
 		W:           w,
 		TickerTopic: tickerTopic,
-		wsClient:    *internal.NewWebsocketClient(wsEndpoint),
+		wsClient:    *internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:  wsEndpoint,
 		apiEndpoint: "https://api.binance.com",
 		SymbolList:  symbolList.Crypto,
 	}
 	binance.wsClient.SetMessageHandler(binance.onMessage)
+	binance.wsClient.SetOnConnect(binance.onConnect)
 
 	binance.wsClient.SetLogger(binance.log)
 	binance.log.Debug("Created new datasource")
@@ -52,26 +53,14 @@ func NewBinanceClient(options interface{}, symbolList symbols.AllSymbols, ticker
 
 func (b *BinanceClient) Connect() error {
 	b.W.Add(1)
-
-	b.wsClient.Connect()
-	err := b.SubscribeTickers()
-	if err != nil {
-		b.log.Error("Error subscribing to tickers")
-		return err
-	}
-
+	b.wsClient.Start()
 	b.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *BinanceClient) Reconnect() error {
-	err := b.wsClient.Reconnect()
-	if err != nil {
-		return err
-	}
-
-	err = b.SubscribeTickers()
+func (b *BinanceClient) onConnect() error {
+	err := b.SubscribeTickers()
 	if err != nil {
 		b.log.Error("Error subscribing to tickers")
 		return err
@@ -81,18 +70,13 @@ func (b *BinanceClient) Reconnect() error {
 }
 
 func (b *BinanceClient) Close() error {
-	b.wsClient.Disconnect()
+	b.wsClient.Close()
 	b.W.Done()
 
 	return nil
 }
 
 func (b *BinanceClient) onMessage(message internal.WsMessage) {
-	if message.Err != nil {
-		b.Reconnect()
-		return
-	}
-
 	if message.Type == websocket.TextMessage {
 
 		if strings.Contains(string(message.Message), "@ticker") {
@@ -218,8 +202,7 @@ func (b *BinanceClient) setLastTickerWatcher() {
 				// no tickers received in a while, attempt to reconnect
 				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 				b.lastTimestamp = time.Now()
-				b.Reconnect()
-				return
+				b.wsClient.Reconnect()
 			}
 		}
 	}()

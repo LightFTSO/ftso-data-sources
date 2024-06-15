@@ -21,7 +21,7 @@ type BitrueClient struct {
 	name          string
 	W             *sync.WaitGroup
 	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebsocketClient
+	wsClient      internal.WebSocketClient
 	wsEndpoint    string
 	apiEndpoint   string
 	SymbolList    []model.Symbol
@@ -40,13 +40,14 @@ func NewBitrueClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 		log:          slog.Default().With(slog.String("datasource", "bitrue")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebsocketClient(wsEndpoint),
+		wsClient:     *internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://api.bitrue.com",
 		SymbolList:   symbolList.Crypto,
 		pingInterval: 20,
 	}
 	bitrue.wsClient.SetMessageHandler(bitrue.onMessage)
+	bitrue.wsClient.SetOnConnect(bitrue.onConnect)
 
 	bitrue.wsClient.SetLogger(bitrue.log)
 	bitrue.log.Debug("Created new datasource")
@@ -56,25 +57,15 @@ func NewBitrueClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 func (b *BitrueClient) Connect() error {
 	b.W.Add(1)
 
-	b.wsClient.Connect()
-	err := b.SubscribeTickers()
-	if err != nil {
-		b.log.Error("Error subscribing to tickers")
-		return err
-	}
+	b.wsClient.Start()
 
 	b.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *BitrueClient) Reconnect() error {
-	err := b.wsClient.Reconnect()
-	if err != nil {
-		return err
-	}
-
-	err = b.SubscribeTickers()
+func (b *BitrueClient) onConnect() error {
+	err := b.SubscribeTickers()
 	if err != nil {
 		b.log.Error("Error subscribing to tickers")
 		return err
@@ -83,18 +74,13 @@ func (b *BitrueClient) Reconnect() error {
 	return nil
 }
 func (b *BitrueClient) Close() error {
-	b.wsClient.Disconnect()
+	b.wsClient.Close()
 	b.W.Done()
 
 	return nil
 }
 
 func (b *BitrueClient) onMessage(message internal.WsMessage) {
-	if message.Err != nil {
-		b.Reconnect()
-		return
-	}
-
 	if message.Type == websocket.BinaryMessage {
 		// decompress
 		decompressedData, err := internal.DecompressGzip(message.Message)
@@ -178,8 +164,7 @@ func (b *BitrueClient) setLastTickerWatcher() {
 				// no tickers received in a while, attempt to reconnect
 				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 				b.lastTimestamp = time.Now()
-				b.Reconnect()
-				return
+				b.wsClient.Reconnect()
 			}
 		}
 	}()

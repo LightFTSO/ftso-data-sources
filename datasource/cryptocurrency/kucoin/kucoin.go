@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/bytedance/sonic"
 	"github.com/textileio/go-threads/broadcast"
@@ -56,7 +57,9 @@ func (b *KucoinClient) Connect() error {
 			instanceContext, instanceCancelContext := context.WithCancel(context.Background())
 			instanceData, err := b.getNewInstanceData()
 			if err != nil {
-				b.log.Error("", "error", err)
+				b.log.Error("Error obtaining Kucoin instance client data", "error", err)
+				time.Sleep(5 * time.Second)
+				continue
 			}
 			instanceClient := newKucoinInstanceClient(*instanceData, availableSymbols, b.SymbolList, b.TickerTopic, instanceContext, instanceCancelContext)
 

@@ -3,6 +3,7 @@ package consumer
 import (
 	"fmt"
 	log "log/slog"
+	"time"
 
 	"github.com/bytedance/sonic"
 	"github.com/textileio/go-threads/broadcast"
@@ -19,8 +20,9 @@ type MqttConsumer struct {
 
 	useSbeEncoding bool
 
-	mqttClient mqtt.Client
-	qosLevel   int
+	mqttClient           mqtt.Client
+	qosLevel             int
+	useExchangeTimestamp bool
 }
 
 type MqttConsumerOptions struct {
@@ -44,6 +46,10 @@ func (s *MqttConsumer) setup() error {
 }
 
 func (s *MqttConsumer) processTicker(ticker *model.Ticker, sbeMarshaller *internal.SbeMarshaller) {
+	if !s.useExchangeTimestamp {
+		ticker.Timestamp = time.Now().UTC()
+	}
+
 	channel := fmt.Sprintf("tickers/%s/%s/%s", ticker.Source, ticker.Base, ticker.Quote)
 
 	if s.useSbeEncoding {
@@ -83,7 +89,7 @@ func (s *MqttConsumer) CloseTickerListener() {
 	s.TickerListener.Discard()
 }
 
-func NewMqttConsumer(options MqttConsumerOptions) *MqttConsumer {
+func NewMqttConsumer(options MqttConsumerOptions, useExchangeTimestamp bool) *MqttConsumer {
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(options.Url)
 	opts.SetCleanSession(false)
@@ -94,10 +100,11 @@ func NewMqttConsumer(options MqttConsumerOptions) *MqttConsumer {
 	opts.SetClientID("ftso-data-sources")
 
 	newConsumer := &MqttConsumer{
-		mqttClient:     mqtt.NewClient(opts),
-		numThreads:     options.NumThreads,
-		useSbeEncoding: options.UseSbeEncoding,
-		qosLevel:       options.QOSLevel,
+		mqttClient:           mqtt.NewClient(opts),
+		numThreads:           options.NumThreads,
+		useSbeEncoding:       options.UseSbeEncoding,
+		qosLevel:             options.QOSLevel,
+		useExchangeTimestamp: useExchangeTimestamp,
 	}
 	newConsumer.setup()
 

@@ -27,15 +27,21 @@ type QuestDbConsumerOptions struct {
 }
 
 type QuestDbConsumer struct {
-	questdbSender       *questdb.LineSender
-	TickerListener      *broadcast.Listener
-	individualFeedTable bool
-	flushInterval       time.Duration
-	txContext           *context.Context
+	questdbSender        *questdb.LineSender
+	TickerListener       *broadcast.Listener
+	individualFeedTable  bool
+	flushInterval        time.Duration
+	txContext            *context.Context
+	useExchangeTimestamp bool
 }
 
 func (q *QuestDbConsumer) processTicker(ticker *model.Ticker) {
 	//fmt.Printf("tickers,%s,%s,%s,%s,%v,%v\n", ticker.Base, ticker.Quote, ticker.Source, ticker.LastPrice, constants.IsStablecoin(ticker.Base), ticker.Timestamp)
+
+	if !q.useExchangeTimestamp {
+		ticker.Timestamp = time.Now().UTC()
+	}
+
 	var err error
 	if q.individualFeedTable {
 		tableName := fmt.Sprintf("%s_tickers", ticker.Base)
@@ -74,7 +80,7 @@ func (q *QuestDbConsumer) CloseTickerListener() {
 	q.TickerListener.Discard()
 }
 
-func NewQuestDbConsumer(options QuestDbConsumerOptions) *QuestDbConsumer {
+func NewQuestDbConsumer(options QuestDbConsumerOptions, useExchangeTimestamp bool) *QuestDbConsumer {
 	schema := options.ClientOptions.Schema
 	if schema != "http" && schema != "https" && schema != "tcp" && schema != "tcps" {
 		panic("QuestDB schema must be one of http,https,tcp,tcps")
@@ -119,10 +125,11 @@ func NewQuestDbConsumer(options QuestDbConsumerOptions) *QuestDbConsumer {
 	}
 
 	newConsumer := &QuestDbConsumer{
-		questdbSender:       &sender,
-		individualFeedTable: options.IndividualFeedTable,
-		flushInterval:       options.FlushInterval,
-		txContext:           &ctx,
+		questdbSender:        &sender,
+		individualFeedTable:  options.IndividualFeedTable,
+		flushInterval:        options.FlushInterval,
+		txContext:            &ctx,
+		useExchangeTimestamp: useExchangeTimestamp,
 	}
 	return newConsumer
 }

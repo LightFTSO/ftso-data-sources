@@ -41,7 +41,14 @@ func main() {
 }
 
 func run(globalConfig config.ConfigOptions) {
+	if globalConfig.UseExchangeTimestamp {
+		slog.Info("Using exchange timestamp as ticker timestamp")
+	} else {
+		slog.Info("Using local timestamp as ticker timestamp")
+	}
+
 	tickerTopic := broadcast.NewBroadcaster(config.Config.MessageBufferSize)
+
 	initConsumers(tickerTopic, globalConfig)
 	initDataSources(tickerTopic, globalConfig)
 }
@@ -64,27 +71,27 @@ func initConsumers(tickerTopic *broadcast.Broadcaster, config config.ConfigOptio
 	}
 
 	if config.RedisOptions.Enabled {
-		c := consumer.NewRedisConsumer(config.RedisOptions)
+		c := consumer.NewRedisConsumer(config.RedisOptions, config.UseExchangeTimestamp)
 		enableConsumer(c, tickerTopic)
 	}
 
 	if config.FileFileConsumerOptions.Enabled {
-		c := consumer.NewFileConsumer(config.FileFileConsumerOptions.OutputFilename)
+		c := consumer.NewFileConsumer(config.FileFileConsumerOptions.OutputFilename, config.UseExchangeTimestamp)
 		enableConsumer(c, tickerTopic)
 	}
 
 	if config.MQTTConsumerOptions.Enabled {
-		c := consumer.NewMqttConsumer(config.MQTTConsumerOptions)
+		c := consumer.NewMqttConsumer(config.MQTTConsumerOptions, config.UseExchangeTimestamp)
 		enableConsumer(c, tickerTopic)
 	}
 
 	if config.QuestDBConsumerOptions.Enabled {
-		c := consumer.NewQuestDbConsumer(config.QuestDBConsumerOptions)
+		c := consumer.NewQuestDbConsumer(config.QuestDBConsumerOptions, config.UseExchangeTimestamp)
 		enableConsumer(c, tickerTopic)
 	}
 
 	if config.WebsocketConsumerOptions.Enabled {
-		c := consumer.NewWebsocketConsumer(config.WebsocketConsumerOptions)
+		c := consumer.NewWebsocketConsumer(config.WebsocketConsumerOptions, config.UseExchangeTimestamp)
 		enableConsumer(c, tickerTopic)
 	}
 

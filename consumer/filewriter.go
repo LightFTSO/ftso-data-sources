@@ -19,10 +19,15 @@ type FileConsumerOptions struct {
 type FileConsumer struct {
 	TickerListener *broadcast.Listener
 
-	W *os.File
+	W                    *os.File
+	useExchangeTimestamp bool
 }
 
 func (s *FileConsumer) processTicker(ticker *model.Ticker) {
+	if !s.useExchangeTimestamp {
+		ticker.Timestamp = time.Now().UTC()
+	}
+
 	s.W.Write([]byte(fmt.Sprintf(
 		"%s source=%s symbol=%s last_price=%s ts=%d\n",
 		time.Now().Format(constants.TS_FORMAT), ticker.Source, ticker.Symbol, ticker.LastPrice, ticker.Timestamp.UTC().UnixMilli())))
@@ -45,14 +50,15 @@ func (s *FileConsumer) CloseTickerListener() {
 
 }
 
-func NewFileConsumer(filename string) *FileConsumer {
+func NewFileConsumer(filename string, useExchangeTimestamp bool) *FileConsumer {
 	file, err := os.OpenFile(filename, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0755)
 	if err != nil {
 		panic(err)
 	}
 
 	newConsumer := &FileConsumer{
-		W: file,
+		W:                    file,
+		useExchangeTimestamp: useExchangeTimestamp,
 	}
 	return newConsumer
 }

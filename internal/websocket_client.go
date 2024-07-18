@@ -13,7 +13,7 @@ import (
 
 const (
 	reconnectDelay = 1 * time.Second
-	writeWait      = 10 * time.Second
+	writeWait      = 1 * time.Second
 )
 
 type WsMessage struct {
@@ -84,7 +84,7 @@ func (c *WebSocketClient) Start() {
 				c.log.Info("Closing WebSocket client")
 				return
 			case <-c.reconnect:
-				<-c.done
+				//<-c.done
 				time.Sleep(reconnectDelay)
 				c.log.Info("Reconnecting...")
 				continue
@@ -103,6 +103,26 @@ func (c *WebSocketClient) Close() {
 func (c *WebSocketClient) Reconnect() {
 	c.handleDisconnect()
 	c.handleReconnection()
+}
+
+func (c *WebSocketClient) SetOnConnect(handler func() error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onConnect = handler
+}
+
+func (c *WebSocketClient) SetOnDisconnect(handler func() error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onDisconnect = handler
+}
+
+func (ws *WebSocketClient) SetLogger(logger *slog.Logger) {
+	ws.log = logger
+}
+
+func (ws *WebSocketClient) SetMessageHandler(handler WsMessageHandler) {
+	ws.onMessage = handler
 }
 
 func (c *WebSocketClient) connect() error {
@@ -149,10 +169,7 @@ func (c *WebSocketClient) readPump() {
 	for {
 		msgType, message, err := c.conn.ReadMessage()
 		if err != nil {
-			if c.closed {
-				return
-			}
-			c.log.Error(err.Error())
+			c.log.Error("read error", "error", err.Error())
 			c.handleDisconnect()
 			return
 		}
@@ -165,13 +182,9 @@ func (c *WebSocketClient) writePump() {
 
 	for message := range c.send {
 		if err := c.write(message.Type, message.Message); err != nil {
-			if c.closed {
-				return
-			}
 			c.log.Error("write error", "error", err)
 			c.handleDisconnect()
 			return
-
 		}
 	}
 }
@@ -214,28 +227,8 @@ func (c *WebSocketClient) handleDisconnect() {
 		c.onDisconnect()
 	}
 
-	close(c.done)
-	c.done = make(chan struct{})
-}
-
-func (c *WebSocketClient) SetOnConnect(handler func() error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.onConnect = handler
-}
-
-func (c *WebSocketClient) SetOnDisconnect(handler func() error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.onDisconnect = handler
-}
-
-func (ws *WebSocketClient) SetLogger(logger *slog.Logger) {
-	ws.log = logger
-}
-
-func (ws *WebSocketClient) SetMessageHandler(handler WsMessageHandler) {
-	ws.onMessage = handler
+	//close(c.done)
+	//c.done = make(chan struct{})
 }
 
 func (c *WebSocketClient) startListening() {

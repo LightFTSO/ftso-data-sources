@@ -44,7 +44,7 @@ func (s *StatisticsGenerator) CloseTickerListener() {
 
 }
 
-func (s *StatisticsGenerator) MessagesInTheLastMinute() {
+func (s *StatisticsGenerator) MessagesInTheLastInterval() {
 	go func() {
 		startTs := time.Now()
 		// wait enough time to be aligned with the start of the next minute
@@ -79,6 +79,6 @@ func NewStatisticsGenerator(options StatisticsGeneratorOptions) *StatisticsGener
 		numThreads:    options.NumThreads,
 		statsInterval: options.Interval, //10 * time.Second,
 	}
-	newConsumer.MessagesInTheLastMinute()
+	newConsumer.MessagesInTheLastInterval()
 	return newConsumer
 }

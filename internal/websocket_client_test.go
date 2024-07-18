@@ -84,7 +84,7 @@ func TestWebSocketClient(t *testing.T) {
 	assert.True(t, disconnectCalled, "onDisconnect should be called")
 	assert.True(t, connectCalled, "onConnect should be called after reconnect")
 
-	client.Disconnect()
+	client.Close()
 }
 
 func TestWebSocketClient_Close(t *testing.T) {
@@ -114,7 +114,7 @@ func TestWebSocketClient_Close(t *testing.T) {
 	time.Sleep(1 * time.Second)
 	assert.True(t, connectCalled, "onConnect should be called")
 
-	client.Disconnect()
+	client.Close()
 
 	// Wait for disconnection
 	time.Sleep(1 * time.Second)

@@ -11,6 +11,8 @@ func setDefaults() {
 
 	viper.SetDefault("message_buffer_size", 0)
 
+	viper.SetDefault("use_exchange_timestamp", true)
+
 	viper.SetDefault("assets.crypto", constants.BASES_CRYPTO)
 	viper.SetDefault("assets.commodities", constants.AssetList{})
 	viper.SetDefault("assets.forex", constants.AssetList{})

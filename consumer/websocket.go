@@ -2,6 +2,7 @@ package consumer
 
 import (
 	log "log/slog"
+	"time"
 
 	"github.com/bytedance/sonic"
 	"github.com/textileio/go-threads/broadcast"
@@ -24,7 +25,8 @@ type WebsocketServerConsumer struct {
 	wsServer       websocket_server.WebsocketServer
 	TickerListener *broadcast.Listener
 
-	config WebsocketConsumerOptions
+	config               WebsocketConsumerOptions
+	useExchangeTimestamp bool
 }
 
 func (s *WebsocketServerConsumer) setup() error {
@@ -37,6 +39,10 @@ func (s *WebsocketServerConsumer) setup() error {
 }
 
 func (s *WebsocketServerConsumer) processTicker(ticker *model.Ticker) {
+	if !s.useExchangeTimestamp {
+		ticker.Timestamp = time.Now().UTC()
+	}
+
 	payload, err := sonic.Marshal(ticker)
 	if err != nil {
 		log.Error("error encoding ticker", "consumer", "websocket", "error", err)
@@ -84,12 +90,14 @@ func (s *WebsocketServerConsumer) CloseTickerListener() {
 
 }
 
-func NewWebsocketConsumer(options WebsocketConsumerOptions) *WebsocketServerConsumer {
+func NewWebsocketConsumer(options WebsocketConsumerOptions, useExchangeTimestamp bool) *WebsocketServerConsumer {
 	server := websocket_server.NewWebsocketServer(options.Host, options.Port, options.TickersEndpoint)
 
 	newConsumer := &WebsocketServerConsumer{
-		wsServer: *server,
-		config:   options}
+		wsServer:             *server,
+		config:               options,
+		useExchangeTimestamp: useExchangeTimestamp,
+	}
 	newConsumer.setup()
 
 	return newConsumer

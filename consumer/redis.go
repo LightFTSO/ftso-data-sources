@@ -22,8 +22,9 @@ type RedisConsumer struct {
 
 	redisClient rueidis.Client
 
-	tsRetention time.Duration
-	tsChunkSize int64
+	tsRetention          time.Duration
+	tsChunkSize          int64
+	useExchangeTimestamp bool
 }
 
 type RedisOptions struct {
@@ -58,6 +59,10 @@ func (s *RedisConsumer) setup() error {
 }
 
 func (s *RedisConsumer) processTicker(ticker *model.Ticker) {
+	if !s.useExchangeTimestamp {
+		ticker.Timestamp = time.Now().UTC()
+	}
+
 	if s.toStdout {
 		fmt.Printf(
 			"%s source=%s symbol=%s last_price=%s ts=%d\n",
@@ -93,18 +98,19 @@ func (s *RedisConsumer) CloseTickerListener() {
 	s.redisClient.Close()
 }
 
-func NewRedisConsumer(options RedisOptions) *RedisConsumer {
+func NewRedisConsumer(options RedisOptions, useExchangeTimestamp bool) *RedisConsumer {
 	r, err := rueidis.NewClient(options.ClientOptions)
 	if err != nil {
 		panic(err)
 	}
 
 	newConsumer := &RedisConsumer{
-		redisClient: r,
-		numThreads:  options.NumThreads,
-		toStdout:    options.IncludeStdout,
-		tsRetention: options.TsOptions.Retention,
-		tsChunkSize: options.TsOptions.ChunkSize,
+		redisClient:          r,
+		numThreads:           options.NumThreads,
+		toStdout:             options.IncludeStdout,
+		tsRetention:          options.TsOptions.Retention,
+		tsChunkSize:          options.TsOptions.ChunkSize,
+		useExchangeTimestamp: useExchangeTimestamp,
 	}
 	newConsumer.setup()
 

@@ -1,15 +1,13 @@
 Add a lot exchanges: 
 
-upbit,gemini,bitmake,cexio
-btse,bequant,bigone,btcex,bingx,p2b,poloniex,bitso,
+upbit,gemini,bitmake,cexio,btse,ascendex
+bigone,btcex,bingx,p2b,poloniex,bitso,
 
 hotcoin,coinw,deepcoin,pointpay,orangex,biconomy,cointr,
-bitvenus,tapbit,hashkey,ascendex,exmo,cpatex
+bitvenus,tapbit,hashkey,bequant,exmo,cpatex
 bydfi,emirex,delta,latoken,bit2me,nonkyc,trubit
 bluebit,citex,ace,blofin,bitpanda
 
 Implement dynamic on-the-go datasource and symbol configs
 
 Make meaningful statistics
-Create informational keys on redis consumer
-Add kafka consumer

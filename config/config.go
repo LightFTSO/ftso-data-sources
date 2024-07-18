@@ -13,11 +13,11 @@ type ConfigOptions struct {
 
 	LogLevel string `mapstructure:"log_level"`
 
-	Datasources []datasource.DataSourceOptions `mapstructure:"datasources"`
-
-	Stats consumer.StatisticsGeneratorOptions `mapstructure:"stats"`
-
 	MessageBufferSize int `mapstructure:"message_buffer_size"`
+
+	UseExchangeTimestamp bool `mapstructure:"use_exchange_timestamp"`
+
+	Datasources []datasource.DataSourceOptions `mapstructure:"datasources"`
 
 	Assets struct {
 		Crypto      []string `mapstructure:"crypto"`
@@ -25,6 +25,8 @@ type ConfigOptions struct {
 		Forex       []string `mapstructure:"forex"`
 		Stocks      []string `mapstructure:"stocks"`
 	} `mapstructure:"assets"`
+
+	Stats consumer.StatisticsGeneratorOptions `mapstructure:"stats"`
 
 	RedisOptions             consumer.RedisOptions             `mapstructure:"redis_ts"`
 	WebsocketConsumerOptions consumer.WebsocketConsumerOptions `mapstructure:"websocket_server"`

@@ -35,7 +35,7 @@ func cleanRemotePair(s string) string {
 }
 
 func getBaseCurrency(pair string) string {
-	for _, stablecoin := range constants.USDT_USDC_BUSD_DAI {
+	for _, stablecoin := range constants.USDT_USDC_DAI {
 		upperSc := strings.ToUpper(stablecoin)
 		if strings.HasPrefix(pair, upperSc) {
 			return upperSc

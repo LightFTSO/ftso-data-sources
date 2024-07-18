@@ -49,7 +49,7 @@ func getBaseCurrency(pair string) string {
 
 	var quote = substr(pair, len(pair)-4, 6)
 
-	if !strings.HasPrefix(quote, "U") && !strings.HasPrefix(quote, "B") {
+	if !strings.HasPrefix(quote, "U") /*&& !strings.HasPrefix(quote, "B") */ {
 		quote = "USD"
 	}
 

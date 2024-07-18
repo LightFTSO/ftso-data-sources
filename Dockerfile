@@ -11,7 +11,7 @@ RUN go mod download
 RUN GOOS=linux go build -o ftso-data-sources ./
 
 # Moving the binary to the 'final Image' to make it smaller
-FROM ubuntu:latest as release
+FROM ubuntu:latest AS release
 WORKDIR /app
 
 # `boilerplate` should be replaced here as well

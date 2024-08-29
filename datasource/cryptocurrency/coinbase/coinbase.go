@@ -28,7 +28,7 @@ type CoinbaseClient struct {
 }
 
 func NewCoinbaseClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*CoinbaseClient, error) {
-	wsEndpoint := "wss://ws-feed.pro.coinbase.com"
+	wsEndpoint := "wss://ws-feed.exchange.coinbase.com"
 
 	coinbase := CoinbaseClient{
 		name:        "coinbase",

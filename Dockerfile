@@ -1,4 +1,4 @@
-FROM golang:1.23 AS build
+FROM golang:1.22 AS build
 
 # `boilerplate` should be replaced with your project name
 WORKDIR /go/src/ftso-data-sources

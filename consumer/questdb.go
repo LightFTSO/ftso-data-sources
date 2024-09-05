@@ -110,7 +110,7 @@ func NewQuestDbConsumer(options QuestDbConsumerOptions, useExchangeTimestamp boo
 			options.FlushInterval, minFlushInterval, minFlushInterval))
 	}
 	if schema == "http" || schema == "https" {
-		configString = fmt.Sprintf("%sauto_flush_interval=%d;", configString, options.FlushInterval)
+		configString = fmt.Sprintf("%sauto_flush_interval=%d;", configString, options.FlushInterval.Milliseconds())
 	} else {
 		log.Warn(fmt.Sprintf("Flush interval %v only applies to senders using the http(s) schema",
 			options.FlushInterval))

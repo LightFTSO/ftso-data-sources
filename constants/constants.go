@@ -8,7 +8,7 @@ type AssetName string
 type AssetList []string
 
 var BASES_CRYPTO = AssetList{"flr", "sgb", "btc", "xrp", "ltc", "xlm", "doge",
-	"ada", "algo", "eth", "fil", "arb", "avax", "bnb", "matic", "sol", "usdc", "usdt", "xdc",
+	"ada", "algo", "eth", "fil", "arb", "avax", "bnb", "matic", "pol", "sol", "usdc", "usdt", "xdc",
 	"trx", "dot", "shib", "uni", "hbar", "near", "vet", "rndr", "strk", "aave", "qnt",
 	"xtz", "gala", "atom", "etc", "beam", "imx", "stx", "apt", "op", "icp", "inj", "tia", "grt", "sui", "ldo"}
 

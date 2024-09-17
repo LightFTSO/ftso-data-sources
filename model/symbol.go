@@ -20,10 +20,6 @@ func ParseSymbol(s string) Symbol {
 	base := getBaseCurrency(pair)
 	quote := strings.Replace(pair, base, "", 1)
 
-	if base == "POL" {
-		base = "MATIC"
-	}
-
 	return Symbol{
 		Base:  base,
 		Quote: quote,

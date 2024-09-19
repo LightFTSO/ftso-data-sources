@@ -14,3 +14,4 @@ mosquitto/
 redis/redis_persistent_storage/
 questdb/db
 questdb/public
+out.test

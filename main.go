@@ -3,10 +3,13 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	slog "log/slog"
 	"net"
+	"net/http"
 	"net/rpc"
+	"net/rpc/jsonrpc"
 
 	"github.com/textileio/go-threads/broadcast"
 
@@ -76,6 +79,16 @@ func startrpcmanager(manager *rpcmanager.RPCManager) {
 	rpc.Register(manager)
 	rpc.HandleHTTP()
 
+	http.HandleFunc("/rpc", func(w http.ResponseWriter, r *http.Request) {
+		var conn = struct {
+			io.Reader
+			io.Writer
+			io.Closer
+		}{r.Body, w, r.Body}
+
+		jsonrpc.ServeConn(conn)
+	})
+
 	// Listen on a TCP port, e.g., 1234
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", manager.GlobalConfig.RPCPort))
 	if err != nil {
@@ -85,7 +98,7 @@ func startrpcmanager(manager *rpcmanager.RPCManager) {
 
 	slog.Info(fmt.Sprintf("RPC server started on port %d", manager.GlobalConfig.RPCPort))
 
-	rpc.Accept(listener)
+	http.Serve(listener, nil)
 }
 
 func enableConsumer(c consumer.Consumer, tickerTopic *broadcast.Broadcaster) {

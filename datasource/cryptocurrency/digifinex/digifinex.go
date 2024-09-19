@@ -31,6 +31,8 @@ type DigifinexClient struct {
 	log           *slog.Logger
 
 	pingInterval int
+
+	isRunning bool
 }
 
 func NewDigifinexClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*DigifinexClient, error) {
@@ -56,6 +58,7 @@ func NewDigifinexClient(options interface{}, symbolList symbols.AllSymbols, tick
 }
 
 func (b *DigifinexClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -77,9 +80,14 @@ func (b *DigifinexClient) onConnect() error {
 }
 func (b *DigifinexClient) Close() error {
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *DigifinexClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *DigifinexClient) onMessage(message internal.WsMessage) {

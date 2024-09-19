@@ -34,6 +34,8 @@ type WhitebitClient struct {
 	pingInterval int
 
 	subscriptionId atomic.Uint64
+
+	isRunning bool
 }
 
 func NewWhitebitClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*WhitebitClient, error) {
@@ -59,6 +61,7 @@ func NewWhitebitClient(options interface{}, symbolList symbols.AllSymbols, ticke
 }
 
 func (b *WhitebitClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -79,9 +82,14 @@ func (b *WhitebitClient) onConnect() error {
 }
 func (b *WhitebitClient) Close() error {
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *WhitebitClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *WhitebitClient) onMessage(message internal.WsMessage) {

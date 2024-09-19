@@ -31,6 +31,8 @@ type MetalsDevClient struct {
 	apiEndpoint      string
 	apiToken         string
 	log              *slog.Logger
+
+	isRunning bool
 }
 
 func NewMetalsDevClient(options *MetalsDevOptions, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*MetalsDevClient, error) {
@@ -58,6 +60,7 @@ func NewMetalsDevClient(options *MetalsDevOptions, symbolList symbols.AllSymbols
 }
 
 func (b *MetalsDevClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 	b.log.Info("Connecting...")
 
@@ -77,9 +80,14 @@ func (b *MetalsDevClient) Reconnect() error {
 }
 
 func (b *MetalsDevClient) Close() error {
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *MetalsDevClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *MetalsDevClient) getLatest(useSample bool) (*LatestEndpointResponse, error) {

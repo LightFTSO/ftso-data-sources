@@ -28,6 +28,7 @@ type HuobiClient struct {
 	SymbolList    []model.Symbol
 	lastTimestamp time.Time
 	log           *slog.Logger
+	isRunning     bool
 }
 
 func NewHuobiClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*HuobiClient, error) {
@@ -51,6 +52,7 @@ func NewHuobiClient(options interface{}, symbolList symbols.AllSymbols, tickerTo
 }
 
 func (b *HuobiClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -72,9 +74,14 @@ func (b *HuobiClient) onConnect() error {
 
 func (b *HuobiClient) Close() error {
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *HuobiClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *HuobiClient) onMessage(message internal.WsMessage) {

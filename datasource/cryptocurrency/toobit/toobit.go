@@ -30,6 +30,8 @@ type ToobitClient struct {
 	pingInterval int
 
 	subscriptionId atomic.Uint64
+
+	isRunning bool
 }
 
 func NewToobitClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*ToobitClient, error) {
@@ -54,6 +56,7 @@ func NewToobitClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 }
 
 func (b *ToobitClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -74,9 +77,14 @@ func (b *ToobitClient) onConnect() error {
 }
 func (b *ToobitClient) Close() error {
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *ToobitClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *ToobitClient) onMessage(message internal.WsMessage) {

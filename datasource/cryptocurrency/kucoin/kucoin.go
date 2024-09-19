@@ -22,6 +22,7 @@ type KucoinClient struct {
 	apiEndpoint string
 	SymbolList  []model.Symbol
 	log         *slog.Logger
+	isRunning   bool
 }
 
 func NewKucoinClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*KucoinClient, error) {
@@ -39,6 +40,7 @@ func NewKucoinClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 }
 
 func (b *KucoinClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	availableSymbols, err := b.getAvailableSymbols()
@@ -81,11 +83,16 @@ func (b *KucoinClient) Reconnect() error {
 }
 
 func (b *KucoinClient) Close() error {
-
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
 }
+
+func (b *KucoinClient) IsRunning() bool {
+	return b.isRunning
+}
+
 func (b *KucoinClient) SubscribeTickers() error {
 	return nil
 }

@@ -33,6 +33,7 @@ type MexcClient struct {
 
 	tzInfo         *time.Location
 	subscriptionId atomic.Uint64
+	isRunning      bool
 }
 
 func NewMexcClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*MexcClient, error) {
@@ -64,6 +65,7 @@ func NewMexcClient(options interface{}, symbolList symbols.AllSymbols, tickerTop
 }
 
 func (b *MexcClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -84,9 +86,14 @@ func (b *MexcClient) onConnect() error {
 }
 func (b *MexcClient) Close() error {
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *MexcClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *MexcClient) onMessage(message internal.WsMessage) {

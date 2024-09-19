@@ -31,10 +31,19 @@ type TiingoClient struct {
 	log           *slog.Logger
 
 	pingInterval int
+
+	isRunning bool
 }
 
 func NewTiingoFxClient(options map[string]interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*TiingoClient, error) {
 	wsEndpoint := "wss://api.tiingo.com/fx"
+
+	apiToken := ""
+	if options["api_token"] == nil {
+		apiToken = ""
+	} else {
+		apiToken = options["api_token"].(string)
+	}
 
 	tiingo := TiingoClient{
 		name:           "tiingo_fx",
@@ -45,7 +54,7 @@ func NewTiingoFxClient(options map[string]interface{}, symbolList symbols.AllSym
 		wsEndpoint:     wsEndpoint,
 		SymbolList:     symbolList.Forex,
 		pingInterval:   20,
-		apiToken:       options["api_token"].(string),
+		apiToken:       apiToken,
 		thresholdLevel: 5,
 	}
 	tiingo.wsClient.SetMessageHandler(tiingo.onMessage)
@@ -78,6 +87,7 @@ func NewTiingoIexClient(options map[string]interface{}, symbolList symbols.AllSy
 }
 
 func (b *TiingoClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 	b.log.Info("Connecting...")
 
@@ -102,9 +112,14 @@ func (b *TiingoClient) onConnect() error {
 
 func (b *TiingoClient) Close() error {
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *TiingoClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *TiingoClient) onMessage(message internal.WsMessage) {

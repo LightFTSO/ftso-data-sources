@@ -35,6 +35,8 @@ type BitfinexClient struct {
 
 	apiSymbolMap     [][2]string
 	channelSymbolMap ChannelSymbolMap
+
+	isRunning bool
 }
 
 func NewBitfinexClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BitfinexClient, error) {
@@ -62,6 +64,7 @@ func NewBitfinexClient(options interface{}, symbolList symbols.AllSymbols, ticke
 }
 
 func (b *BitfinexClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -83,10 +86,16 @@ func (b *BitfinexClient) onConnect() error {
 }
 
 func (b *BitfinexClient) Close() error {
+	b.isRunning = false
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *BitfinexClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *BitfinexClient) onMessage(message internal.WsMessage) {

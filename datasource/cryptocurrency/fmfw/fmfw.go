@@ -27,6 +27,8 @@ type FmfwClient struct {
 	log           *slog.Logger
 
 	pingInterval int
+
+	isRunning bool
 }
 
 func NewFmfwClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*FmfwClient, error) {
@@ -51,6 +53,7 @@ func NewFmfwClient(options interface{}, symbolList symbols.AllSymbols, tickerTop
 }
 
 func (b *FmfwClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -71,9 +74,14 @@ func (b *FmfwClient) onConnect() error {
 }
 func (b *FmfwClient) Close() error {
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *FmfwClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *FmfwClient) onMessage(message internal.WsMessage) {

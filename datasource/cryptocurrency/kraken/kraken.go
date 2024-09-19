@@ -34,6 +34,8 @@ type KrakenClient struct {
 	log           *slog.Logger
 
 	pingInterval int
+
+	isRunning bool
 }
 
 func NewKrakenClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*KrakenClient, error) {
@@ -59,6 +61,7 @@ func NewKrakenClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 }
 
 func (b *KrakenClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -79,9 +82,14 @@ func (b *KrakenClient) onConnect() error {
 }
 func (b *KrakenClient) Close() error {
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *KrakenClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *KrakenClient) onMessage(message internal.WsMessage) {

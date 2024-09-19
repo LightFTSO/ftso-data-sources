@@ -25,6 +25,7 @@ type CoinbaseClient struct {
 	SymbolList    []model.Symbol
 	lastTimestamp time.Time
 	log           *slog.Logger
+	isRunning     bool
 }
 
 func NewCoinbaseClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*CoinbaseClient, error) {
@@ -48,6 +49,7 @@ func NewCoinbaseClient(options interface{}, symbolList symbols.AllSymbols, ticke
 }
 
 func (b *CoinbaseClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -69,9 +71,14 @@ func (b *CoinbaseClient) onConnect() error {
 
 func (b *CoinbaseClient) Close() error {
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *CoinbaseClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *CoinbaseClient) onMessage(message internal.WsMessage) {

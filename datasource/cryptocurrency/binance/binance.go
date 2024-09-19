@@ -28,6 +28,7 @@ type BinanceClient struct {
 	SymbolList    []model.Symbol
 	lastTimestamp time.Time
 	log           *slog.Logger
+	isRunning     bool
 }
 
 func NewBinanceClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BinanceClient, error) {
@@ -52,6 +53,7 @@ func NewBinanceClient(options interface{}, symbolList symbols.AllSymbols, ticker
 }
 
 func (b *BinanceClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 	b.wsClient.Start()
 	b.setLastTickerWatcher()
@@ -72,8 +74,13 @@ func (b *BinanceClient) onConnect() error {
 func (b *BinanceClient) Close() error {
 	b.wsClient.Close()
 	b.W.Done()
-
+	b.isRunning = false
+	b.log.Info("Binance closing")
 	return nil
+}
+
+func (b *BinanceClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *BinanceClient) onMessage(message internal.WsMessage) {

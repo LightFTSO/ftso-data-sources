@@ -31,6 +31,8 @@ type PionexClient struct {
 	apiEndpoint   string
 
 	pingInterval int
+
+	isRunning bool
 }
 
 func NewPionexClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*PionexClient, error) {
@@ -56,6 +58,7 @@ func NewPionexClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 }
 
 func (b *PionexClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -76,9 +79,14 @@ func (b *PionexClient) onConnect() error {
 }
 func (b *PionexClient) Close() error {
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *PionexClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *PionexClient) onMessage(message internal.WsMessage) {

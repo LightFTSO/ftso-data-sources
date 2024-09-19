@@ -31,6 +31,8 @@ type XtClient struct {
 	pingInterval int
 
 	subscriptionId atomic.Uint64
+
+	isRunning bool
 }
 
 func NewXtClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*XtClient, error) {
@@ -56,6 +58,7 @@ func NewXtClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic
 }
 
 func (b *XtClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -76,9 +79,14 @@ func (b *XtClient) onConnect() error {
 }
 func (b *XtClient) Close() error {
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *XtClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *XtClient) onMessage(message internal.WsMessage) {

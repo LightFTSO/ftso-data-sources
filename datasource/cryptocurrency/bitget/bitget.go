@@ -27,6 +27,8 @@ type BitgetClient struct {
 	log           *slog.Logger
 
 	pingInterval int
+
+	isRunning bool
 }
 
 func NewBitgetClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BitgetClient, error) {
@@ -51,6 +53,7 @@ func NewBitgetClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 }
 
 func (b *BitgetClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -70,10 +73,16 @@ func (b *BitgetClient) onConnect() error {
 	return nil
 }
 func (b *BitgetClient) Close() error {
+	b.isRunning = false
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *BitgetClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *BitgetClient) onMessage(message internal.WsMessage) {

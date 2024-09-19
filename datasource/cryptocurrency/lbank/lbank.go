@@ -32,6 +32,8 @@ type LbankClient struct {
 
 	subscriptionId atomic.Uint64
 	tzInfo         *time.Location
+
+	isRunning bool
 }
 
 func NewLbankClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*LbankClient, error) {
@@ -62,6 +64,7 @@ func NewLbankClient(options interface{}, symbolList symbols.AllSymbols, tickerTo
 }
 
 func (b *LbankClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -82,9 +85,14 @@ func (b *LbankClient) onConnect() error {
 }
 func (b *LbankClient) Close() error {
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *LbankClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *LbankClient) onMessage(message internal.WsMessage) {

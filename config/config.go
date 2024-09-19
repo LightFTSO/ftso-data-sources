@@ -8,6 +8,12 @@ import (
 	"roselabs.mx/ftso-data-sources/datasource"
 )
 
+type AssetConfig struct {
+	Crypto      []string `mapstructure:"crypto"`
+	Commodities []string `mapstructure:"commodities"`
+	Forex       []string `mapstructure:"forex"`
+	Stocks      []string `mapstructure:"stocks"`
+}
 type ConfigOptions struct {
 	Env string `mapstructure:"env"`
 
@@ -17,14 +23,11 @@ type ConfigOptions struct {
 
 	UseExchangeTimestamp bool `mapstructure:"use_exchange_timestamp"`
 
+	RPCPort int `mapstructure:"rpc_port"`
+
 	Datasources []datasource.DataSourceOptions `mapstructure:"datasources"`
 
-	Assets struct {
-		Crypto      []string `mapstructure:"crypto"`
-		Commodities []string `mapstructure:"commodities"`
-		Forex       []string `mapstructure:"forex"`
-		Stocks      []string `mapstructure:"stocks"`
-	} `mapstructure:"assets"`
+	Assets AssetConfig `mapstructure:"assets"`
 
 	Stats consumer.StatisticsGeneratorOptions `mapstructure:"stats"`
 

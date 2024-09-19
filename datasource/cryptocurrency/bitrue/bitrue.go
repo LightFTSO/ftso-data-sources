@@ -29,6 +29,8 @@ type BitrueClient struct {
 	log           *slog.Logger
 
 	pingInterval int
+
+	isRunning bool
 }
 
 func NewBitrueClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BitrueClient, error) {
@@ -55,6 +57,7 @@ func NewBitrueClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 }
 
 func (b *BitrueClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -74,10 +77,16 @@ func (b *BitrueClient) onConnect() error {
 	return nil
 }
 func (b *BitrueClient) Close() error {
+	b.isRunning = false
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *BitrueClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *BitrueClient) onMessage(message internal.WsMessage) {

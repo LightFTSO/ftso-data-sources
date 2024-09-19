@@ -30,6 +30,8 @@ type CryptoComClient struct {
 	pingInterval int
 
 	subscriptionId atomic.Uint64
+
+	isRunning bool
 }
 
 func NewCryptoComClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*CryptoComClient, error) {
@@ -55,6 +57,7 @@ func NewCryptoComClient(options interface{}, symbolList symbols.AllSymbols, tick
 }
 
 func (b *CryptoComClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -74,9 +77,14 @@ func (b *CryptoComClient) onConnect() error {
 }
 func (b *CryptoComClient) Close() error {
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *CryptoComClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *CryptoComClient) onMessage(message internal.WsMessage) {

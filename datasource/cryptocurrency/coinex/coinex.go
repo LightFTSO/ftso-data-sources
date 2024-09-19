@@ -32,6 +32,7 @@ type CoinexClient struct {
 	log            *slog.Logger
 	subscriptionId atomic.Uint64
 	pingInterval   int
+	isRunning      bool
 }
 
 func NewCoinexClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*CoinexClient, error) {
@@ -57,6 +58,7 @@ func NewCoinexClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 }
 
 func (b *CoinexClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -79,9 +81,14 @@ func (b *CoinexClient) onConnect() error {
 }
 func (b *CoinexClient) Close() error {
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *CoinexClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *CoinexClient) onMessage(message internal.WsMessage) {

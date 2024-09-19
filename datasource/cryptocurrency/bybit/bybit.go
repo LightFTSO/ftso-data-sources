@@ -32,6 +32,8 @@ type BybitClient struct {
 	log           *slog.Logger
 
 	pingInterval int
+
+	isRunning bool
 }
 
 func NewBybitClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BybitClient, error) {
@@ -57,6 +59,7 @@ func NewBybitClient(options interface{}, symbolList symbols.AllSymbols, tickerTo
 }
 
 func (b *BybitClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -79,9 +82,14 @@ func (b *BybitClient) onConnect() error {
 }
 func (b *BybitClient) Close() error {
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *BybitClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *BybitClient) onMessage(message internal.WsMessage) {

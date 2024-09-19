@@ -28,6 +28,8 @@ type BitstampClient struct {
 	log           *slog.Logger
 
 	pingInterval int
+
+	isRunning bool
 }
 
 func NewBitstampClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BitstampClient, error) {
@@ -52,6 +54,7 @@ func NewBitstampClient(options interface{}, symbolList symbols.AllSymbols, ticke
 }
 
 func (b *BitstampClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -73,9 +76,14 @@ func (b *BitstampClient) onConnect() error {
 }
 func (b *BitstampClient) Close() error {
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *BitstampClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *BitstampClient) onMessage(message internal.WsMessage) {

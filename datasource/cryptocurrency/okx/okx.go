@@ -28,6 +28,8 @@ type OkxClient struct {
 	log           *slog.Logger
 
 	pingInterval int
+
+	isRunning bool
 }
 
 func NewOkxClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*OkxClient, error) {
@@ -53,6 +55,7 @@ func NewOkxClient(options interface{}, symbolList symbols.AllSymbols, tickerTopi
 }
 
 func (b *OkxClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 	b.wsClient.Start()
 	b.setPing()
@@ -72,9 +75,14 @@ func (b *OkxClient) onConnect() error {
 
 func (b *OkxClient) Close() error {
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *OkxClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *OkxClient) onMessage(message internal.WsMessage) {

@@ -27,6 +27,8 @@ type HitbtcClient struct {
 	log           *slog.Logger
 
 	pingInterval int
+
+	isRunning bool
 }
 
 func NewHitbtcClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*HitbtcClient, error) {
@@ -51,6 +53,7 @@ func NewHitbtcClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 }
 
 func (b *HitbtcClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -71,9 +74,14 @@ func (b *HitbtcClient) onConnect() error {
 }
 func (b *HitbtcClient) Close() error {
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *HitbtcClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *HitbtcClient) onMessage(message internal.WsMessage) {

@@ -26,9 +26,11 @@ type NoisySource struct {
 	SymbolList   []model.Symbol
 	timeInterval time.Ticker
 	log          *slog.Logger
+	isRunning    bool
 }
 
 func (n *NoisySource) Connect() error {
+	n.isRunning = true
 	n.W.Add(1)
 	return nil
 }
@@ -62,9 +64,14 @@ func (n *NoisySource) SubscribeTickers() error {
 }
 
 func (n *NoisySource) Close() error {
+	n.isRunning = false
 	n.W.Done()
 
 	return nil
+}
+
+func (b *NoisySource) IsRunning() bool {
+	return b.isRunning
 }
 
 func (n *NoisySource) GetName() string {

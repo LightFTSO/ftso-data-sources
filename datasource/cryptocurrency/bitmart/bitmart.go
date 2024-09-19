@@ -27,6 +27,8 @@ type BitmartClient struct {
 	log           *slog.Logger
 
 	pingInterval int
+
+	isRunning bool
 }
 
 func NewBitmartClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BitmartClient, error) {
@@ -51,6 +53,7 @@ func NewBitmartClient(options interface{}, symbolList symbols.AllSymbols, ticker
 }
 
 func (b *BitmartClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -71,10 +74,16 @@ func (b *BitmartClient) onConnect() error {
 	return nil
 }
 func (b *BitmartClient) Close() error {
+	b.isRunning = false
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *BitmartClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *BitmartClient) onMessage(message internal.WsMessage) {

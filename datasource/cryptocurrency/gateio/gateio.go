@@ -30,6 +30,8 @@ type GateIoClient struct {
 	log           *slog.Logger
 
 	pingInterval int
+
+	isRunning bool
 }
 
 func NewGateIoClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*GateIoClient, error) {
@@ -55,6 +57,7 @@ func NewGateIoClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 }
 
 func (b *GateIoClient) Connect() error {
+	b.isRunning = true
 	b.W.Add(1)
 
 	b.wsClient.Start()
@@ -75,9 +78,14 @@ func (b *GateIoClient) onConnect() error {
 }
 func (b *GateIoClient) Close() error {
 	b.wsClient.Close()
+	b.isRunning = false
 	b.W.Done()
 
 	return nil
+}
+
+func (b *GateIoClient) IsRunning() bool {
+	return b.isRunning
 }
 
 func (b *GateIoClient) onMessage(message internal.WsMessage) {

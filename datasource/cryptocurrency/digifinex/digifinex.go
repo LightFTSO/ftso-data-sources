@@ -30,7 +30,8 @@ type DigifinexClient struct {
 	lastTimestamp time.Time
 	log           *slog.Logger
 
-	pingInterval int
+	pingInterval     int
+	availableMarkets []model.Symbol
 }
 
 func NewDigifinexClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*DigifinexClient, error) {
@@ -145,6 +146,10 @@ func (b *DigifinexClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 }
 
 func (b *DigifinexClient) getAvailableSymbols() ([]model.Symbol, error) {
+	if b.availableMarkets != nil {
+		return b.availableMarkets, nil
+	}
+
 	reqUrl := b.apiEndpoint + "/v3/markets"
 
 	req, err := http.NewRequest(http.MethodGet, reqUrl, nil)
@@ -173,6 +178,7 @@ func (b *DigifinexClient) getAvailableSymbols() ([]model.Symbol, error) {
 		availableMarkets = append(availableMarkets, model.ParseSymbol(v.Market))
 	}
 
+	b.availableMarkets = availableMarkets
 	return availableMarkets, nil
 }
 
@@ -180,7 +186,7 @@ func (b *DigifinexClient) SubscribeTickers() error {
 	availableSymbols, err := b.getAvailableSymbols()
 	if err != nil {
 		b.W.Done()
-		b.log.Error("error obtaining available symbols. Closing kraken datasource", "error", err.Error())
+		b.log.Error("error obtaining available symbols. Closing digifinex datasource", "error", err.Error())
 		return err
 	}
 

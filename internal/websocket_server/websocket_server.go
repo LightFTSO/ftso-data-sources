@@ -36,12 +36,6 @@ func (ws *WebsocketServer) Connect() error {
 		serveWs(&ws.hub, w, r)
 	})
 
-	/*err_chan := make(chan error, 1)
-	go func() {
-		err := http.ListenAndServe(ws.Address, nil)
-		err_chan <- err
-	}()*/
-	//err := <-err_chan
 	return nil
 }
 

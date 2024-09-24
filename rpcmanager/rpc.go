@@ -230,19 +230,9 @@ func (m *RPCManager) AddAsset(args NewAssetArgs, reply *AssetReply) error {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 
-	var currentAssets []string
-
-	switch args.Category {
-	case "crypto":
-		currentAssets = m.CurrentAssets.Crypto
-	case "commodities":
-		currentAssets = m.CurrentAssets.Commodities
-	case "forex":
-		currentAssets = m.CurrentAssets.Forex
-	case "stocks":
-		currentAssets = m.CurrentAssets.Stocks
-	default:
-		return errors.New("unknown category")
+	currentAssets, err := m.getAssetsByCategory(args.Category)
+	if err != nil {
+		return err
 	}
 
 	assetName := strings.ToUpper(args.AssetName)
@@ -265,7 +255,7 @@ func (m *RPCManager) AddAsset(args NewAssetArgs, reply *AssetReply) error {
 	m.GlobalConfig.Assets = m.CurrentAssets
 
 	// Reload data sources to recognize the new asset
-	err := m.reloadDataSourcesLocked()
+	err = m.reloadDataSourcesLocked()
 	if err != nil {
 		return err
 	}
@@ -282,19 +272,9 @@ func (m *RPCManager) RemoveAsset(args NewAssetArgs, reply *AssetReply) error {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 
-	var currentAssets []string
-
-	switch args.Category {
-	case "crypto":
-		currentAssets = m.CurrentAssets.Crypto
-	case "commodities":
-		currentAssets = m.CurrentAssets.Commodities
-	case "forex":
-		currentAssets = m.CurrentAssets.Forex
-	case "stocks":
-		currentAssets = m.CurrentAssets.Stocks
-	default:
-		return errors.New("unknown category")
+	currentAssets, err := m.getAssetsByCategory(args.Category)
+	if err != nil {
+		return err
 	}
 
 	assetName := strings.ToUpper(args.AssetName)
@@ -317,7 +297,7 @@ func (m *RPCManager) RemoveAsset(args NewAssetArgs, reply *AssetReply) error {
 	m.GlobalConfig.Assets = m.CurrentAssets
 
 	// Reload data sources to reflect the asset removal
-	err := m.reloadDataSourcesLocked()
+	err = m.reloadDataSourcesLocked()
 	if err != nil {
 		return err
 	}
@@ -333,19 +313,9 @@ func (m *RPCManager) RenameAsset(args RenameAssetArgs, reply *AssetReply) error 
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 
-	var currentAssets []string
-
-	switch args.Category {
-	case "crypto":
-		currentAssets = m.CurrentAssets.Crypto
-	case "commodities":
-		currentAssets = m.CurrentAssets.Commodities
-	case "forex":
-		currentAssets = m.CurrentAssets.Forex
-	case "stocks":
-		currentAssets = m.CurrentAssets.Stocks
-	default:
-		return errors.New("unknown category")
+	currentAssets, err := m.getAssetsByCategory(args.Category)
+	if err != nil {
+		return err
 	}
 
 	oldName := strings.ToUpper(args.AssetName)
@@ -378,7 +348,7 @@ func (m *RPCManager) RenameAsset(args RenameAssetArgs, reply *AssetReply) error 
 	m.GlobalConfig.Assets = m.CurrentAssets
 
 	// Reload data sources to reflect the asset renaming
-	err := m.reloadDataSourcesLocked()
+	err = m.reloadDataSourcesLocked()
 	if err != nil {
 		return err
 	}
@@ -422,4 +392,19 @@ func (m *RPCManager) reloadDataSourcesLocked() error {
 // getAssetList returns a list of current assets
 func (m *RPCManager) getAssetList() config.AssetConfig {
 	return m.CurrentAssets
+}
+
+func (m *RPCManager) getAssetsByCategory(category string) ([]string, error) {
+	switch category {
+	case "crypto":
+		return m.CurrentAssets.Crypto, nil
+	case "commodities":
+		return m.CurrentAssets.Commodities, nil
+	case "forex":
+		return m.CurrentAssets.Forex, nil
+	case "stocks":
+		return m.CurrentAssets.Stocks, nil
+	default:
+		return []string{}, errors.New("unknown category")
+	}
 }

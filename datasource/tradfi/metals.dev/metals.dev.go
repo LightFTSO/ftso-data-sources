@@ -83,7 +83,7 @@ func (d *MetalsDevClient) Reconnect() error {
 }
 
 func (d *MetalsDevClient) Close() error {
-	if !d.isRunning {
+	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
 	d.timeInterval.Stop()

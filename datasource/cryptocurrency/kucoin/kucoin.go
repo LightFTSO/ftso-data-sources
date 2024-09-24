@@ -84,7 +84,7 @@ func (d *KucoinClient) Reconnect() error {
 }
 
 func (d *KucoinClient) Close() error {
-	if !d.isRunning {
+	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
 	d.isRunning = false

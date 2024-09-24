@@ -86,7 +86,7 @@ func (d *BitfinexClient) onConnect() error {
 }
 
 func (d *BitfinexClient) Close() error {
-	if !d.isRunning {
+	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
 	d.wsClient.Close()

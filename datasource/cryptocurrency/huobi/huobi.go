@@ -74,7 +74,7 @@ func (d *HuobiClient) onConnect() error {
 }
 
 func (d *HuobiClient) Close() error {
-	if !d.isRunning {
+	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
 	d.wsClient.Close()

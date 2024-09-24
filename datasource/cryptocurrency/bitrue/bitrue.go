@@ -78,7 +78,7 @@ func (d *BitrueClient) onConnect() error {
 	return nil
 }
 func (d *BitrueClient) Close() error {
-	if !d.isRunning {
+	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
 	d.wsClient.Close()

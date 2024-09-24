@@ -77,7 +77,7 @@ func (d *CryptoComClient) onConnect() error {
 	return nil
 }
 func (d *CryptoComClient) Close() error {
-	if !d.isRunning {
+	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
 	d.wsClient.Close()

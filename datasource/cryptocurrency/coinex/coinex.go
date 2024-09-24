@@ -81,7 +81,7 @@ func (d *CoinexClient) onConnect() error {
 	return nil
 }
 func (d *CoinexClient) Close() error {
-	if !d.isRunning {
+	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
 	d.wsClient.Close()

@@ -71,7 +71,7 @@ func (d *CoinbaseClient) onConnect() error {
 }
 
 func (d *CoinbaseClient) Close() error {
-	if !d.isRunning {
+	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
 	d.wsClient.Close()

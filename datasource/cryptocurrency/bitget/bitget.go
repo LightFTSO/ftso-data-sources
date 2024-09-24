@@ -74,7 +74,7 @@ func (d *BitgetClient) onConnect() error {
 	return nil
 }
 func (d *BitgetClient) Close() error {
-	if !d.isRunning {
+	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
 	d.wsClient.Close()

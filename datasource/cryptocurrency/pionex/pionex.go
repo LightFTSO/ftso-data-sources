@@ -79,7 +79,7 @@ func (d *PionexClient) onConnect() error {
 	return nil
 }
 func (d *PionexClient) Close() error {
-	if !d.isRunning {
+	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
 	d.wsClient.Close()

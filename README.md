@@ -54,6 +54,9 @@ env: production
 # set log level
 log_level: info # debug, info, warn, error
 
+# port (for RPC and Websocket consumer)
+port: 9999
+
 datasources:
   - source: binance
   - source: binance.us
@@ -132,8 +135,6 @@ file_output:
 
 websocket_server:
   enabled: false
-  host: 127.0.0.1
-  port: 9999
   use_sbe_encoding: false
   endpoints:
     tickers: /tickers

@@ -20,9 +20,9 @@ type WebsocketServer struct {
 	wsEndpoint string
 }
 
-func NewWebsocketServer(addr string, port int, wsEndpoint string) *WebsocketServer {
+func NewWebsocketServer(port int, wsEndpoint string) *WebsocketServer {
 	server := &WebsocketServer{
-		Address:    fmt.Sprintf("%s:%d", addr, port),
+		Address:    fmt.Sprintf(":%d", port),
 		wsEndpoint: wsEndpoint,
 		hub:        *newHub(),
 	}
@@ -35,11 +35,12 @@ func (ws *WebsocketServer) Connect() error {
 	http.HandleFunc(ws.wsEndpoint, func(w http.ResponseWriter, r *http.Request) {
 		serveWs(&ws.hub, w, r)
 	})
-	err_chan := make(chan error, 1)
+
+	/*err_chan := make(chan error, 1)
 	go func() {
 		err := http.ListenAndServe(ws.Address, nil)
 		err_chan <- err
-	}()
+	}()*/
 	//err := <-err_chan
 	return nil
 }

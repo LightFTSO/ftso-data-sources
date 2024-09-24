@@ -1,6 +1,7 @@
 package metalsdev
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -32,6 +33,8 @@ type MetalsDevClient struct {
 	apiToken         string
 	log              *slog.Logger
 
+	timeInterval *time.Ticker
+
 	isRunning bool
 }
 
@@ -59,38 +62,42 @@ func NewMetalsDevClient(options *MetalsDevOptions, symbolList symbols.AllSymbols
 	return &metalsdev, nil
 }
 
-func (b *MetalsDevClient) Connect() error {
-	b.isRunning = true
-	b.W.Add(1)
-	b.log.Info("Connecting...")
+func (d *MetalsDevClient) Connect() error {
+	d.isRunning = true
+	d.W.Add(1)
+	d.log.Info("Connecting...")
 
-	err := b.SubscribeTickers()
+	err := d.SubscribeTickers()
 	if err != nil {
-		b.log.Error("Error subscribing to tickers")
+		d.log.Error("Error subscribing to tickers")
 		return err
 	}
 
 	return nil
 }
 
-func (b *MetalsDevClient) Reconnect() error {
-	b.log.Info("Reconnecting...")
+func (d *MetalsDevClient) Reconnect() error {
+	d.log.Info("Reconnecting...")
 
 	return nil
 }
 
-func (b *MetalsDevClient) Close() error {
-	b.isRunning = false
-	b.W.Done()
+func (d *MetalsDevClient) Close() error {
+	if !d.isRunning {
+		return errors.New("datasource is not running")
+	}
+	d.timeInterval.Stop()
+	d.isRunning = false
+	d.W.Done()
 
 	return nil
 }
 
-func (b *MetalsDevClient) IsRunning() bool {
-	return b.isRunning
+func (d *MetalsDevClient) IsRunning() bool {
+	return d.isRunning
 }
 
-func (b *MetalsDevClient) getLatest(useSample bool) (*LatestEndpointResponse, error) {
+func (d *MetalsDevClient) getLatest(useSample bool) (*LatestEndpointResponse, error) {
 	if useSample {
 		var latestData = new(LatestEndpointResponse)
 		err := sonic.Unmarshal(sampleLatest, latestData)
@@ -101,7 +108,7 @@ func (b *MetalsDevClient) getLatest(useSample bool) (*LatestEndpointResponse, er
 		return latestData, nil
 	}
 
-	reqUrl := b.apiEndpoint + fmt.Sprintf("/latest?api_key=%s&currency=%s&unit=%s", b.apiToken, "USD", "toz")
+	reqUrl := d.apiEndpoint + fmt.Sprintf("/latest?api_key=%s&currency=%s&unit=%s", d.apiToken, "USD", "toz")
 
 	req, err := http.NewRequest(http.MethodGet, reqUrl, nil)
 	if err != nil {
@@ -128,19 +135,19 @@ func (b *MetalsDevClient) getLatest(useSample bool) (*LatestEndpointResponse, er
 
 }
 
-func (b *MetalsDevClient) SubscribeTickers() error {
+func (d *MetalsDevClient) SubscribeTickers() error {
 	go func(br *broadcast.Broadcaster) {
-		timeInterval := *time.NewTicker(b.Interval)
+		d.timeInterval = time.NewTicker(d.Interval)
 
-		defer timeInterval.Stop()
+		defer d.timeInterval.Stop()
 
-		for t := range timeInterval.C {
-			data, err := b.getLatest(false)
+		for t := range d.timeInterval.C {
+			data, err := d.getLatest(false)
 			if err != nil {
-				b.log.Error("error obtaining latest data", "error", err.Error())
+				d.log.Error("error obtaining latest data", "error", err.Error())
 				continue
 			}
-			for _, s := range b.CommoditySymbols {
+			for _, s := range d.CommoditySymbols {
 				price, present := data.Metals[metalsDevCommodityMap[strings.ToUpper(s.Base)]]
 				if !present {
 					continue
@@ -150,13 +157,13 @@ func (b *MetalsDevClient) SubscribeTickers() error {
 					Symbol:    strings.ToUpper(s.GetSymbol()),
 					Base:      strings.ToUpper(s.Base),
 					Quote:     strings.ToUpper(s.Quote),
-					Source:    b.GetName(),
+					Source:    d.GetName(),
 					Timestamp: t,
 				}
-				b.log.Info(fmt.Sprintf("metalsdev: symbol=%s price=%s", ticker.Symbol, ticker.LastPrice))
+				d.log.Info(fmt.Sprintf("metalsdev: symbol=%s price=%s", ticker.Symbol, ticker.LastPrice))
 				br.Send(&ticker)
 			}
-			for _, s := range b.ForexSymbols {
+			for _, s := range d.ForexSymbols {
 				price, present := data.Currencies[strings.ToUpper(s.Base)]
 				if !present {
 					continue
@@ -167,19 +174,19 @@ func (b *MetalsDevClient) SubscribeTickers() error {
 					Symbol:    strings.ToUpper(s.GetSymbol()),
 					Base:      strings.ToUpper(s.Base),
 					Quote:     strings.ToUpper(s.Quote),
-					Source:    b.GetName(),
+					Source:    d.GetName(),
 					Timestamp: t,
 				}
-				b.log.Info(fmt.Sprintf("metalsdev: symbol=%s price=%s", ticker.Symbol, ticker.LastPrice))
+				d.log.Info(fmt.Sprintf("metalsdev: symbol=%s price=%s", ticker.Symbol, ticker.LastPrice))
 				br.Send(&ticker)
 			}
 
 		}
-	}(b.TickerTopic)
+	}(d.TickerTopic)
 
 	return nil
 }
 
-func (b *MetalsDevClient) GetName() string {
-	return b.name
+func (d *MetalsDevClient) GetName() string {
+	return d.name
 }

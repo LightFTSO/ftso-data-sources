@@ -1,6 +1,7 @@
 package xt
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -57,116 +58,119 @@ func NewXtClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic
 	return &xt, nil
 }
 
-func (b *XtClient) Connect() error {
-	b.isRunning = true
-	b.W.Add(1)
+func (d *XtClient) Connect() error {
+	d.isRunning = true
+	d.W.Add(1)
 
-	b.wsClient.Start()
+	d.wsClient.Start()
 
-	b.setPing()
-	b.setLastTickerWatcher()
+	d.setPing()
+	d.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *XtClient) onConnect() error {
-	err := b.SubscribeTickers()
+func (d *XtClient) onConnect() error {
+	err := d.SubscribeTickers()
 	if err != nil {
-		b.log.Error("Error subscribing to tickers")
+		d.log.Error("Error subscribing to tickers")
 		return err
 	}
 	return nil
 }
-func (b *XtClient) Close() error {
-	b.wsClient.Close()
-	b.isRunning = false
-	b.W.Done()
+func (d *XtClient) Close() error {
+	if !d.isRunning {
+		return errors.New("datasource is not running")
+	}
+	d.wsClient.Close()
+	d.isRunning = false
+	d.W.Done()
 
 	return nil
 }
 
-func (b *XtClient) IsRunning() bool {
-	return b.isRunning
+func (d *XtClient) IsRunning() bool {
+	return d.isRunning
 }
 
-func (b *XtClient) onMessage(message internal.WsMessage) {
+func (d *XtClient) onMessage(message internal.WsMessage) {
 	if message.Type == websocket.TextMessage {
 		if strings.Contains(string(message.Message), `"event":"ticker@`) {
-			ticker, err := b.parseTicker(message.Message)
+			ticker, err := d.parseTicker(message.Message)
 			if err != nil {
-				b.log.Error("Error parsing ticker",
+				d.log.Error("Error parsing ticker",
 					"ticker", ticker, "error", err.Error())
 				return
 			}
-			b.lastTimestamp = time.Now()
-			b.TickerTopic.Send(ticker)
+			d.lastTimestamp = time.Now()
+			d.TickerTopic.Send(ticker)
 		}
 	}
 }
 
-func (b *XtClient) parseTicker(message []byte) (*model.Ticker, error) {
+func (d *XtClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var newTickerEvent WsTickerMessage
 	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
-		b.log.Error(err.Error())
+		d.log.Error(err.Error())
 		return &model.Ticker{}, err
 	}
 
 	symbol := model.ParseSymbol(newTickerEvent.Data.Symbol)
 	ticker, err := model.NewTicker(newTickerEvent.Data.LastPrice,
 		symbol,
-		b.GetName(),
+		d.GetName(),
 		time.UnixMilli(newTickerEvent.Data.Timestamp))
 
 	return ticker, err
 }
 
-func (b *XtClient) SubscribeTickers() error {
-	for _, v := range b.SymbolList {
+func (d *XtClient) SubscribeTickers() error {
+	for _, v := range d.SymbolList {
 		subMessage := map[string]interface{}{
-			"id":     b.subscriptionId.Add(1),
+			"id":     d.subscriptionId.Add(1),
 			"method": "subscribe",
 			"params": []string{fmt.Sprintf("ticker@%s_%s", strings.ToLower(v.Base), strings.ToLower(v.Quote))},
 		}
-		b.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
-		b.log.Debug("Subscribed ticker symbol", "symbols", v.GetSymbol())
+		d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+		d.log.Debug("Subscribed ticker symbol", "symbols", v.GetSymbol())
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	b.log.Debug("Subscribed ticker symbols")
+	d.log.Debug("Subscribed ticker symbols")
 
 	return nil
 }
 
-func (b *XtClient) GetName() string {
-	return b.name
+func (d *XtClient) GetName() string {
+	return d.name
 }
 
-func (b *XtClient) setLastTickerWatcher() {
+func (d *XtClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	b.lastTimestamp = time.Now()
+	d.lastTimestamp = time.Now()
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
-			diff := now.Sub(b.lastTimestamp)
+			diff := now.Sub(d.lastTimestamp)
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-				b.lastTimestamp = time.Now()
-				b.wsClient.Reconnect()
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				d.lastTimestamp = time.Now()
+				d.wsClient.Reconnect()
 			}
 		}
 	}()
 }
 
-func (b *XtClient) setPing() {
-	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
+func (d *XtClient) setPing() {
+	ticker := time.NewTicker(time.Duration(d.pingInterval) * time.Second)
 	go func() {
 		defer ticker.Stop()
 		for range ticker.C {
-			b.wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte(`ping`)})
+			d.wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte(`ping`)})
 		}
 	}()
 }

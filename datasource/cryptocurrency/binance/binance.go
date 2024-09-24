@@ -1,6 +1,7 @@
 package binance
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -52,55 +53,58 @@ func NewBinanceClient(options interface{}, symbolList symbols.AllSymbols, ticker
 	return &binance, nil
 }
 
-func (b *BinanceClient) Connect() error {
-	b.isRunning = true
-	b.W.Add(1)
-	b.wsClient.Start()
-	b.setLastTickerWatcher()
+func (d *BinanceClient) Connect() error {
+	d.isRunning = true
+	d.W.Add(1)
+	d.wsClient.Start()
+	d.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *BinanceClient) onConnect() error {
-	err := b.SubscribeTickers()
+func (d *BinanceClient) onConnect() error {
+	err := d.SubscribeTickers()
 	if err != nil {
-		b.log.Error("Error subscribing to tickers")
+		d.log.Error("Error subscribing to tickers")
 		return err
 	}
 
 	return nil
 }
 
-func (b *BinanceClient) Close() error {
-	b.wsClient.Close()
-	b.W.Done()
-	b.isRunning = false
-	b.log.Info("Binance closing")
+func (d *BinanceClient) Close() error {
+	if !d.isRunning {
+		return errors.New("datasource is not running")
+	}
+	d.wsClient.Close()
+	d.W.Done()
+	d.isRunning = false
+	d.log.Info("Binance closing")
 	return nil
 }
 
-func (b *BinanceClient) IsRunning() bool {
-	return b.isRunning
+func (d *BinanceClient) IsRunning() bool {
+	return d.isRunning
 }
 
-func (b *BinanceClient) onMessage(message internal.WsMessage) {
+func (d *BinanceClient) onMessage(message internal.WsMessage) {
 	if message.Type == websocket.TextMessage {
 
 		if strings.Contains(string(message.Message), "@ticker") {
-			ticker, err := b.parseTicker(message.Message)
+			ticker, err := d.parseTicker(message.Message)
 			if err != nil {
-				b.log.Error("Error parsing ticker",
+				d.log.Error("Error parsing ticker",
 					"ticker", ticker, "error", err.Error())
 				return
 			}
-			b.lastTimestamp = time.Now()
-			b.TickerTopic.Send(ticker)
+			d.lastTimestamp = time.Now()
+			d.TickerTopic.Send(ticker)
 			return
 		}
 	}
 }
 
-func (b *BinanceClient) parseTicker(message []byte) (*model.Ticker, error) {
+func (d *BinanceClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var newTickerEvent WsTickerMessage
 	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
@@ -109,14 +113,14 @@ func (b *BinanceClient) parseTicker(message []byte) (*model.Ticker, error) {
 	symbol := model.ParseSymbol(newTickerEvent.Data.Symbol)
 	ticker, err := model.NewTicker(newTickerEvent.Data.LastPrice,
 		symbol,
-		b.GetName(),
+		d.GetName(),
 		time.UnixMilli(newTickerEvent.Data.Time))
 
 	return ticker, err
 }
 
-func (b *BinanceClient) getAvailableSymbols() ([]BinanceSymbol, error) {
-	reqUrl := b.apiEndpoint + "/api/v3/exchangeInfo?permissions=SPOT"
+func (d *BinanceClient) getAvailableSymbols() ([]BinanceSymbol, error) {
+	reqUrl := d.apiEndpoint + "/api/v3/exchangeInfo?permissions=SPOT"
 
 	req, err := http.NewRequest(http.MethodGet, reqUrl, nil)
 	if err != nil {
@@ -157,16 +161,16 @@ func (b *BinanceClient) getAvailableSymbols() ([]BinanceSymbol, error) {
 
 *
 */
-func (b *BinanceClient) SubscribeTickers() error {
-	availableSymbols, err := b.getAvailableSymbols()
+func (d *BinanceClient) SubscribeTickers() error {
+	availableSymbols, err := d.getAvailableSymbols()
 	if err != nil {
-		b.W.Done()
-		b.log.Error("Error obtaining available symbols. Closing binance datasource %s", "error", err.Error())
+		d.W.Done()
+		d.log.Error("Error obtaining available symbols. Closing binance datasource %s", "error", err.Error())
 		return err
 	}
 
 	subscribedSymbols := []model.Symbol{}
-	for _, v1 := range b.SymbolList {
+	for _, v1 := range d.SymbolList {
 		for _, v2 := range availableSymbols {
 			if strings.EqualFold(strings.ToUpper(v1.Base), strings.ToUpper(v2.BaseAsset)) && strings.EqualFold(strings.ToUpper(v1.Quote), strings.ToUpper(v2.QuoteAsset)) {
 				subscribedSymbols = append(subscribedSymbols, model.Symbol{
@@ -186,30 +190,30 @@ func (b *BinanceClient) SubscribeTickers() error {
 		"params": s,
 	}
 
-	b.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+	d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 
-	b.log.Debug("Subscribed ticker symbols", "symbols", len(subscribedSymbols))
+	d.log.Debug("Subscribed ticker symbols", "symbols", len(subscribedSymbols))
 	return nil
 }
 
-func (b *BinanceClient) GetName() string {
-	return b.name
+func (d *BinanceClient) GetName() string {
+	return d.name
 }
 
-func (b *BinanceClient) setLastTickerWatcher() {
+func (d *BinanceClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	b.lastTimestamp = time.Now()
+	d.lastTimestamp = time.Now()
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
-			diff := now.Sub(b.lastTimestamp)
+			diff := now.Sub(d.lastTimestamp)
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-				b.lastTimestamp = time.Now()
-				b.wsClient.Reconnect()
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				d.lastTimestamp = time.Now()
+				d.wsClient.Reconnect()
 			}
 		}
 	}()

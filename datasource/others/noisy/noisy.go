@@ -1,6 +1,7 @@
 package noisy
 
 import (
+	"errors"
 	"log/slog"
 	"math/rand"
 	"strconv"
@@ -64,14 +65,18 @@ func (n *NoisySource) SubscribeTickers() error {
 }
 
 func (n *NoisySource) Close() error {
+	if !n.isRunning {
+		return errors.New("datasource is not running")
+	}
+	n.timeInterval.Stop()
 	n.isRunning = false
 	n.W.Done()
 
 	return nil
 }
 
-func (b *NoisySource) IsRunning() bool {
-	return b.isRunning
+func (d *NoisySource) IsRunning() bool {
+	return d.isRunning
 }
 
 func (n *NoisySource) GetName() string {

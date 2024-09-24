@@ -2,6 +2,7 @@ package kucoin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -39,35 +40,35 @@ func NewKucoinClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 	return &kucoin, nil
 }
 
-func (b *KucoinClient) Connect() error {
-	b.isRunning = true
-	b.W.Add(1)
+func (d *KucoinClient) Connect() error {
+	d.isRunning = true
+	d.W.Add(1)
 
-	availableSymbols, err := b.getAvailableSymbols()
+	availableSymbols, err := d.getAvailableSymbols()
 	if err != nil {
-		b.log.Error("Error obtaining available symbols", "error", err)
-		b.W.Done()
+		d.log.Error("Error obtaining available symbols", "error", err)
+		d.W.Done()
 		return err
 	}
 
 	go func() {
-		defer b.W.Done()
+		defer d.W.Done()
 
 		// create new instance servers indefinitely as they're closed, until we get the close signal from the main function
 		for {
-			b.log.Info("Creating kucoin instance client...")
+			d.log.Info("Creating kucoin instance client...")
 			instanceContext, instanceCancelContext := context.WithCancel(context.Background())
-			instanceData, err := b.getNewInstanceData()
+			instanceData, err := d.getNewInstanceData()
 			if err != nil {
-				b.log.Error("Error obtaining Kucoin instance client data", "error", err)
+				d.log.Error("Error obtaining Kucoin instance client data", "error", err)
 				time.Sleep(5 * time.Second)
 				continue
 			}
-			instanceClient := newKucoinInstanceClient(*instanceData, availableSymbols, b.SymbolList, b.TickerTopic, instanceContext, instanceCancelContext)
+			instanceClient := newKucoinInstanceClient(*instanceData, availableSymbols, d.SymbolList, d.TickerTopic, instanceContext, instanceCancelContext)
 
 			err = instanceClient.connect()
 			if err != nil {
-				b.log.Error("", "error", err)
+				d.log.Error("", "error", err)
 			}
 
 			<-instanceContext.Done()
@@ -78,27 +79,30 @@ func (b *KucoinClient) Connect() error {
 	return nil
 }
 
-func (b *KucoinClient) Reconnect() error {
+func (d *KucoinClient) Reconnect() error {
 	return nil
 }
 
-func (b *KucoinClient) Close() error {
-	b.isRunning = false
-	b.W.Done()
+func (d *KucoinClient) Close() error {
+	if !d.isRunning {
+		return errors.New("datasource is not running")
+	}
+	d.isRunning = false
+	d.W.Done()
 
 	return nil
 }
 
-func (b *KucoinClient) IsRunning() bool {
-	return b.isRunning
+func (d *KucoinClient) IsRunning() bool {
+	return d.isRunning
 }
 
-func (b *KucoinClient) SubscribeTickers() error {
+func (d *KucoinClient) SubscribeTickers() error {
 	return nil
 }
 
-func (b *KucoinClient) getAvailableSymbols() ([]model.Symbol, error) {
-	reqUrl := b.apiEndpoint + "/api/v2/symbols"
+func (d *KucoinClient) getAvailableSymbols() ([]model.Symbol, error) {
+	reqUrl := d.apiEndpoint + "/api/v2/symbols"
 
 	req, err := http.NewRequest(http.MethodGet, reqUrl, nil)
 	if err != nil {
@@ -137,8 +141,8 @@ func (b *KucoinClient) getAvailableSymbols() ([]model.Symbol, error) {
 
 }
 
-func (b *KucoinClient) getNewInstanceData() (*InstanceServer, error) {
-	reqUrl := fmt.Sprintf("%s/api/v1/bullet-public", b.apiEndpoint)
+func (d *KucoinClient) getNewInstanceData() (*InstanceServer, error) {
+	reqUrl := fmt.Sprintf("%s/api/v1/bullet-public", d.apiEndpoint)
 	req, err := http.NewRequest(http.MethodPost, reqUrl, nil)
 	if err != nil {
 		return &InstanceServer{}, err
@@ -177,6 +181,6 @@ func (b *KucoinClient) getNewInstanceData() (*InstanceServer, error) {
 
 }
 
-func (b *KucoinClient) GetName() string {
-	return b.name
+func (d *KucoinClient) GetName() string {
+	return d.name
 }

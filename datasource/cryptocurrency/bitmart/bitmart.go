@@ -1,6 +1,7 @@
 package bitmart
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -52,41 +53,43 @@ func NewBitmartClient(options interface{}, symbolList symbols.AllSymbols, ticker
 	return &bitmart, nil
 }
 
-func (b *BitmartClient) Connect() error {
-	b.isRunning = true
-	b.W.Add(1)
+func (d *BitmartClient) Connect() error {
+	d.isRunning = true
+	d.W.Add(1)
 
-	b.wsClient.Start()
+	d.wsClient.Start()
 
-	b.setPing()
-	b.setLastTickerWatcher()
+	d.setPing()
+	d.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *BitmartClient) onConnect() error {
-	err := b.SubscribeTickers()
+func (d *BitmartClient) onConnect() error {
+	err := d.SubscribeTickers()
 	if err != nil {
-		b.log.Error("Error subscribing to tickers")
+		d.log.Error("Error subscribing to tickers")
 		return err
 	}
 
 	return nil
 }
-func (b *BitmartClient) Close() error {
-	b.isRunning = false
-	b.wsClient.Close()
-	b.isRunning = false
-	b.W.Done()
+func (d *BitmartClient) Close() error {
+	if !d.isRunning {
+		return errors.New("datasource is not running")
+	}
+	d.isRunning = false
+	d.wsClient.Close()
+	d.W.Done()
 
 	return nil
 }
 
-func (b *BitmartClient) IsRunning() bool {
-	return b.isRunning
+func (d *BitmartClient) IsRunning() bool {
+	return d.isRunning
 }
 
-func (b *BitmartClient) onMessage(message internal.WsMessage) {
+func (d *BitmartClient) onMessage(message internal.WsMessage) {
 	if message.Type == websocket.TextMessage {
 		msg := string(message.Message)
 		if strings.Contains(msg, `"event":"subscribe"`) {
@@ -94,44 +97,44 @@ func (b *BitmartClient) onMessage(message internal.WsMessage) {
 		}
 
 		if strings.Contains(msg, `"table":"spot/ticker"`) {
-			tickers, err := b.parseTicker(message.Message)
+			tickers, err := d.parseTicker(message.Message)
 			if err != nil {
-				b.log.Error("Error parsing ticker",
+				d.log.Error("Error parsing ticker",
 					"error", err.Error())
 				return
 			}
-			b.lastTimestamp = time.Now()
+			d.lastTimestamp = time.Now()
 
 			for _, v := range tickers {
-				b.TickerTopic.Send(v)
+				d.TickerTopic.Send(v)
 			}
 		}
 
 		// decompress
 		/*decompressedData, err := internal.DecompressFlate(message.Message)
 						if err != nil {
-							b.log.Error("Error decompressing message", "error", err.Error())
+							d.log.Error("Error decompressing message", "error", err.Error())
 							return nil
 						}
 						data := string(decompressedData)
 						if strings.Contains(data, "_ticker") && strings.Contains(data, "tick") && !strings.Contains(data, "event_rep") {
-							ticker, err := b.parseTicker([]byte(data))
+							ticker, err := d.parseTicker([]byte(data))
 							if err != nil {
-								b.log.Error("Error parsing ticker",
+								d.log.Error("Error parsing ticker",
 				"ticker",ticker,"error", err.Error())
 								return nil
 							}
-							b.lastTimestamp = time.Now()
-		b.TickerTopic.Send(ticker)
+							d.lastTimestamp = time.Now()
+		d.TickerTopic.Send(ticker)
 						}*/
 	}
 }
 
-func (b *BitmartClient) parseTicker(message []byte) ([]*model.Ticker, error) {
+func (d *BitmartClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	var newTickerEvent wsTickerMessage
 	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
-		b.log.Error(err.Error())
+		d.log.Error(err.Error())
 		return []*model.Ticker{}, err
 	}
 
@@ -140,10 +143,10 @@ func (b *BitmartClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 		symbol := model.ParseSymbol(t.Symbol)
 		newTicker, err := model.NewTicker(t.LastPrice,
 			symbol,
-			b.GetName(),
+			d.GetName(),
 			time.UnixMilli(t.TimestampMs))
 		if err != nil {
-			b.log.Error("Error parsing ticker",
+			d.log.Error("Error parsing ticker",
 				"ticker", newTicker, "error", err.Error())
 			continue
 		}
@@ -153,63 +156,63 @@ func (b *BitmartClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	return tickers, nil
 }
 
-func (b *BitmartClient) SubscribeTickers() error {
+func (d *BitmartClient) SubscribeTickers() error {
 	// batch subscriptions in packets of 10
 	chunksize := 10
-	for i := 0; i < len(b.SymbolList); i += chunksize {
+	for i := 0; i < len(d.SymbolList); i += chunksize {
 		subMessage := map[string]interface{}{
 			"op":   "subscribe",
 			"args": []string{},
 		}
 		s := []string{}
 		for j := range chunksize {
-			if i+j >= len(b.SymbolList) {
+			if i+j >= len(d.SymbolList) {
 				continue
 			}
-			v := b.SymbolList[i+j]
+			v := d.SymbolList[i+j]
 			s = append(s, fmt.Sprintf("spot/ticker:%s_%s", strings.ToUpper(v.Base), strings.ToUpper(v.Quote)))
 		}
 		subMessage["args"] = s
 
 		// sleep a bit to avoid rate limits
 		time.Sleep(10 * time.Millisecond)
-		b.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+		d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 	}
 
-	b.log.Debug("Subscribed ticker symbols")
+	d.log.Debug("Subscribed ticker symbols")
 
 	return nil
 }
 
-func (b *BitmartClient) GetName() string {
-	return b.name
+func (d *BitmartClient) GetName() string {
+	return d.name
 }
 
-func (b *BitmartClient) setLastTickerWatcher() {
+func (d *BitmartClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	b.lastTimestamp = time.Now()
+	d.lastTimestamp = time.Now()
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
-			diff := now.Sub(b.lastTimestamp)
+			diff := now.Sub(d.lastTimestamp)
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-				b.lastTimestamp = time.Now()
-				b.wsClient.Reconnect()
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				d.lastTimestamp = time.Now()
+				d.wsClient.Reconnect()
 			}
 		}
 	}()
 }
 
-func (b *BitmartClient) setPing() {
-	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
+func (d *BitmartClient) setPing() {
+	ticker := time.NewTicker(time.Duration(d.pingInterval) * time.Second)
 	go func() {
 		defer ticker.Stop()
 		for range ticker.C {
-			b.wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte("ping")})
+			d.wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte("ping")})
 		}
 	}()
 }

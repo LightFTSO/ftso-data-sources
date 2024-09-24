@@ -54,13 +54,11 @@ func run(globalConfig config.ConfigOptions) {
 
 	// Initialize RPC Manager
 	manager := &rpcmanager.RPCManager{
-		DataSources:  make(map[string]datasource.FtsoDataSource),
-		TickerTopic:  tickerTopic,
-		GlobalConfig: globalConfig,
+		DataSources:   make(map[string]datasource.FtsoDataSource),
+		TickerTopic:   tickerTopic,
+		GlobalConfig:  globalConfig,
+		CurrentAssets: config.Config.Assets,
 	}
-
-	// Initialize assets from configuration
-	manager.InitializeAssets()
 
 	// Initialize data sources
 	err := manager.InitDataSources()
@@ -69,13 +67,13 @@ func run(globalConfig config.ConfigOptions) {
 	}
 
 	// Start RPC server
-	go startrpcmanager(manager)
+	go startRpcManager(manager)
 
 	// Wait for all data sources to finish
 	manager.Wg.Wait()
 }
 
-func startrpcmanager(manager *rpcmanager.RPCManager) {
+func startRpcManager(manager *rpcmanager.RPCManager) {
 	rpc.Register(manager)
 	rpc.HandleHTTP()
 
@@ -90,13 +88,13 @@ func startrpcmanager(manager *rpcmanager.RPCManager) {
 	})
 
 	// Listen on a TCP port, e.g., 1234
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", manager.GlobalConfig.RPCPort))
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", manager.GlobalConfig.Port))
 	if err != nil {
 		log.Fatalf("Error starting RPC server: %v", err)
 	}
 	defer listener.Close()
 
-	slog.Info(fmt.Sprintf("RPC server started on port %d", manager.GlobalConfig.RPCPort))
+	slog.Info(fmt.Sprintf("RPC server started on port :%d", manager.GlobalConfig.Port))
 
 	http.Serve(listener, nil)
 }

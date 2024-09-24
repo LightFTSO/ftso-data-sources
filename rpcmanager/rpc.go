@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -38,6 +39,10 @@ type RenameAssetArgs struct {
 // AssetReply represents the reply from asset RPC methods
 type AssetReply struct {
 	Message string
+}
+
+type CurrentAssetsReply struct {
+	Assets config.AssetConfig
 }
 
 type RPCManager struct {
@@ -123,6 +128,7 @@ func (m *RPCManager) AddDataSource(args DataSourceArgs, reply *DataSourceReply) 
 	m.DataSources[args.Options.Source] = src
 
 	m.Wg.Add(1)
+
 	go func() {
 		defer m.Wg.Done()
 		err := src.Connect()
@@ -160,6 +166,9 @@ func (m *RPCManager) ReloadDataSources(args struct{}, reply *DataSourceReply) er
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 
+	m.Wg.Add(1)
+	defer m.Wg.Done()
+
 	// Disconnect all existing data sources
 	for name, ds := range m.DataSources {
 		err := ds.Close()
@@ -181,7 +190,7 @@ func (m *RPCManager) ReloadDataSources(args struct{}, reply *DataSourceReply) er
 
 // Initialize data sources from the global configuration
 func (m *RPCManager) InitDataSources() error {
-	allDataSources := datasource.AllDataSources()
+	//allDataSources := datasource.AllDataSources()
 
 	enabledDataSources := m.GlobalConfig.Datasources
 
@@ -192,7 +201,7 @@ func (m *RPCManager) InitDataSources() error {
 		log.Println("Warning: No data sources enabled, where will get the data from?")
 	}
 
-	for _, source := range allDataSources {
+	for _, source := range enabledDataSources {
 		src, err := datasource.BuilDataSource(source, symbols.GetAllSymbols(m.getAssetList().Crypto, m.getAssetList().Commodities, m.getAssetList().Forex, m.getAssetList().Stocks), m.TickerTopic, &m.Wg)
 		if err != nil {
 			log.Printf("Error creating data source %s: %v", source.Source, err)
@@ -244,14 +253,16 @@ func (m *RPCManager) AddAsset(args NewAssetArgs, reply *AssetReply) error {
 	// Add the asset
 	switch args.Category {
 	case "crypto":
-		m.CurrentAssets.Crypto = append(m.CurrentAssets.Crypto, assetName)
+		m.CurrentAssets.Crypto = append(currentAssets, assetName)
 	case "commodities":
-		m.CurrentAssets.Commodities = append(m.CurrentAssets.Commodities, assetName)
+		m.CurrentAssets.Commodities = append(currentAssets, assetName)
 	case "forex":
-		m.CurrentAssets.Forex = append(m.CurrentAssets.Forex, assetName)
+		m.CurrentAssets.Forex = append(currentAssets, assetName)
 	case "stocks":
-		m.CurrentAssets.Stocks = append(m.CurrentAssets.Stocks, assetName)
+		m.CurrentAssets.Stocks = append(currentAssets, assetName)
 	}
+
+	m.GlobalConfig.Assets = m.CurrentAssets
 
 	// Reload data sources to recognize the new asset
 	err := m.reloadDataSourcesLocked()
@@ -259,7 +270,10 @@ func (m *RPCManager) AddAsset(args NewAssetArgs, reply *AssetReply) error {
 		return err
 	}
 
-	reply.Message = fmt.Sprintf("Asset %s added successfully", assetName)
+	msg := fmt.Sprintf("Asset %s (%s) added successfully", assetName, args.Category)
+	slog.Info(msg)
+	reply.Message = msg
+	config.UpdateConfig(m.GlobalConfig, true)
 	return nil
 }
 
@@ -284,8 +298,8 @@ func (m *RPCManager) RemoveAsset(args NewAssetArgs, reply *AssetReply) error {
 	}
 
 	assetName := strings.ToUpper(args.AssetName)
-	if exists := helpers.ItemInSlice(assetName, currentAssets); exists {
-		return errors.New("asset already exists")
+	if exists := helpers.ItemInSlice(assetName, currentAssets); !exists {
+		return errors.New("asset to remove does not exist")
 	}
 
 	// Remove the asset
@@ -300,13 +314,17 @@ func (m *RPCManager) RemoveAsset(args NewAssetArgs, reply *AssetReply) error {
 		m.CurrentAssets.Stocks = helpers.RemoveFromSlice(m.CurrentAssets.Stocks, assetName)
 	}
 
+	m.GlobalConfig.Assets = m.CurrentAssets
+
 	// Reload data sources to reflect the asset removal
 	err := m.reloadDataSourcesLocked()
 	if err != nil {
 		return err
 	}
-
-	reply.Message = fmt.Sprintf("Asset %s removed successfully", assetName)
+	msg := fmt.Sprintf("Asset %s (%s) removed successfully", assetName, args.Category)
+	slog.Info(msg)
+	reply.Message = msg
+	config.UpdateConfig(m.GlobalConfig, true)
 	return nil
 }
 
@@ -333,7 +351,7 @@ func (m *RPCManager) RenameAsset(args RenameAssetArgs, reply *AssetReply) error 
 	oldName := strings.ToUpper(args.AssetName)
 	newName := strings.ToUpper(args.NewName)
 
-	if exists := helpers.ItemInSlice(newName, currentAssets); !exists {
+	if exists := helpers.ItemInSlice(oldName, currentAssets); !exists {
 		return errors.New("asset to rename does not exist")
 	}
 
@@ -344,32 +362,46 @@ func (m *RPCManager) RenameAsset(args RenameAssetArgs, reply *AssetReply) error 
 	// Remove old asset and add new asset
 	switch args.Category {
 	case "crypto":
-		m.CurrentAssets.Crypto = helpers.RemoveFromSlice(m.CurrentAssets.Crypto, newName)
+		m.CurrentAssets.Crypto = helpers.RemoveFromSlice(m.CurrentAssets.Crypto, oldName)
 		m.CurrentAssets.Crypto = append(m.CurrentAssets.Crypto, newName)
 	case "commodities":
-		m.CurrentAssets.Commodities = helpers.RemoveFromSlice(m.CurrentAssets.Commodities, newName)
+		m.CurrentAssets.Commodities = helpers.RemoveFromSlice(m.CurrentAssets.Commodities, oldName)
 		m.CurrentAssets.Commodities = append(m.CurrentAssets.Commodities, newName)
 	case "forex":
-		m.CurrentAssets.Forex = helpers.RemoveFromSlice(m.CurrentAssets.Forex, newName)
+		m.CurrentAssets.Forex = helpers.RemoveFromSlice(m.CurrentAssets.Forex, oldName)
 		m.CurrentAssets.Forex = append(m.CurrentAssets.Forex, newName)
 	case "stocks":
-		m.CurrentAssets.Stocks = helpers.RemoveFromSlice(m.CurrentAssets.Stocks, newName)
+		m.CurrentAssets.Stocks = helpers.RemoveFromSlice(m.CurrentAssets.Stocks, oldName)
 		m.CurrentAssets.Stocks = append(m.CurrentAssets.Stocks, newName)
 	}
+
+	m.GlobalConfig.Assets = m.CurrentAssets
 
 	// Reload data sources to reflect the asset renaming
 	err := m.reloadDataSourcesLocked()
 	if err != nil {
 		return err
 	}
+	msg := fmt.Sprintf("Asset %s (%s) renamed to %s successfully", oldName, args.Category, newName)
+	slog.Info(msg)
+	reply.Message = msg
 
-	reply.Message = fmt.Sprintf("Asset %s renamed to %s successfully", oldName, newName)
+	config.UpdateConfig(m.GlobalConfig, true)
+	return nil
+}
+
+// Get the current configured asset list
+func (m *RPCManager) GetAssets(args struct{}, reply *CurrentAssetsReply) error {
+	reply.Assets = m.CurrentAssets
 	return nil
 }
 
 // reloadDataSourcesLocked reloads data sources assuming the mutex is already locked
 func (m *RPCManager) reloadDataSourcesLocked() error {
 	// Disconnect all existing data sources
+	m.Wg.Add(1)
+	defer m.Wg.Done()
+
 	for name, ds := range m.DataSources {
 		err := ds.Close()
 		if err != nil {
@@ -390,21 +422,4 @@ func (m *RPCManager) reloadDataSourcesLocked() error {
 // getAssetList returns a list of current assets
 func (m *RPCManager) getAssetList() config.AssetConfig {
 	return m.CurrentAssets
-}
-
-// Initialize assets from configuration
-func (m *RPCManager) InitializeAssets() {
-	m.CurrentAssets = config.Config.Assets
-	for _, asset := range m.GlobalConfig.Assets.Crypto {
-		m.CurrentAssets.Crypto = append(m.CurrentAssets.Crypto, strings.ToUpper(asset))
-	}
-	for _, asset := range m.GlobalConfig.Assets.Commodities {
-		m.CurrentAssets.Commodities = append(m.CurrentAssets.Commodities, strings.ToUpper(asset))
-	}
-	for _, asset := range m.GlobalConfig.Assets.Forex {
-		m.CurrentAssets.Forex = append(m.CurrentAssets.Forex, strings.ToUpper(asset))
-	}
-	for _, asset := range m.GlobalConfig.Assets.Stocks {
-		m.CurrentAssets.Stocks = append(m.CurrentAssets.Stocks, strings.ToUpper(asset))
-	}
 }

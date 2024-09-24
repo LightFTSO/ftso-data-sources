@@ -1,6 +1,7 @@
 package mexc
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -64,115 +65,118 @@ func NewMexcClient(options interface{}, symbolList symbols.AllSymbols, tickerTop
 	return &mexc, nil
 }
 
-func (b *MexcClient) Connect() error {
-	b.isRunning = true
-	b.W.Add(1)
+func (d *MexcClient) Connect() error {
+	d.isRunning = true
+	d.W.Add(1)
 
-	b.wsClient.Start()
+	d.wsClient.Start()
 
-	b.setPing()
-	b.setLastTickerWatcher()
+	d.setPing()
+	d.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *MexcClient) onConnect() error {
-	err := b.SubscribeTickers()
+func (d *MexcClient) onConnect() error {
+	err := d.SubscribeTickers()
 	if err != nil {
-		b.log.Error("Error subscribing to tickers")
+		d.log.Error("Error subscribing to tickers")
 		return err
 	}
 	return nil
 }
-func (b *MexcClient) Close() error {
-	b.wsClient.Close()
-	b.isRunning = false
-	b.W.Done()
+func (d *MexcClient) Close() error {
+	if !d.isRunning {
+		return errors.New("datasource is not running")
+	}
+	d.wsClient.Close()
+	d.isRunning = false
+	d.W.Done()
 
 	return nil
 }
 
-func (b *MexcClient) IsRunning() bool {
-	return b.isRunning
+func (d *MexcClient) IsRunning() bool {
+	return d.isRunning
 }
 
-func (b *MexcClient) onMessage(message internal.WsMessage) {
+func (d *MexcClient) onMessage(message internal.WsMessage) {
 	if message.Type == websocket.TextMessage {
 		if strings.Contains(string(message.Message), `"c":"spot@public.miniTicker`) {
-			ticker, err := b.parseTicker(message.Message)
+			ticker, err := d.parseTicker(message.Message)
 			if err != nil {
-				b.log.Error("Error parsing ticker",
+				d.log.Error("Error parsing ticker",
 					"ticker", ticker, "error", err.Error())
 				return
 			}
-			b.lastTimestamp = time.Now()
-			b.TickerTopic.Send(ticker)
+			d.lastTimestamp = time.Now()
+			d.TickerTopic.Send(ticker)
 		}
 	}
 }
 
-func (b *MexcClient) parseTicker(message []byte) (*model.Ticker, error) {
+func (d *MexcClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var newTickerEvent WsTickerMessage
 	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
-		b.log.Error(err.Error())
+		d.log.Error(err.Error())
 		return &model.Ticker{}, err
 	}
 
 	symbol := model.ParseSymbol(newTickerEvent.Data.Symbol)
 	ticker, err := model.NewTicker(newTickerEvent.Data.LastPrice,
 		symbol,
-		b.GetName(),
+		d.GetName(),
 		time.UnixMilli(newTickerEvent.Timestamp))
 
 	return ticker, err
 }
 
-func (b *MexcClient) SubscribeTickers() error {
-	for _, v := range b.SymbolList {
+func (d *MexcClient) SubscribeTickers() error {
+	for _, v := range d.SymbolList {
 		subMessage := map[string]interface{}{
-			"id":     b.subscriptionId.Add(1),
+			"id":     d.subscriptionId.Add(1),
 			"method": "SUBSCRIPTION",
 			"params": []string{fmt.Sprintf("spot@public.miniTicker.v3.api@%s%s@UTC+8", strings.ToUpper(v.Base), strings.ToUpper(v.Quote))},
 		}
-		b.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
-		b.log.Debug("Subscribed ticker symbol", "symbols", v.GetSymbol())
+		d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+		d.log.Debug("Subscribed ticker symbol", "symbols", v.GetSymbol())
 	}
 
-	b.log.Debug("Subscribed ticker symbols")
+	d.log.Debug("Subscribed ticker symbols")
 
 	return nil
 }
 
-func (b *MexcClient) GetName() string {
-	return b.name
+func (d *MexcClient) GetName() string {
+	return d.name
 }
 
-func (b *MexcClient) setLastTickerWatcher() {
+func (d *MexcClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	b.lastTimestamp = time.Now()
+	d.lastTimestamp = time.Now()
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
-			diff := now.Sub(b.lastTimestamp)
+			diff := now.Sub(d.lastTimestamp)
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-				b.lastTimestamp = time.Now()
-				b.wsClient.Reconnect()
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				d.lastTimestamp = time.Now()
+				d.wsClient.Reconnect()
 			}
 		}
 	}()
 }
 
-func (b *MexcClient) setPing() {
-	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
+func (d *MexcClient) setPing() {
+	ticker := time.NewTicker(time.Duration(d.pingInterval) * time.Second)
 	go func() {
 		defer ticker.Stop()
 		for range ticker.C {
-			b.wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte(`{"method":"PING"}`)})
+			d.wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte(`{"method":"PING"}`)})
 		}
 	}()
 }

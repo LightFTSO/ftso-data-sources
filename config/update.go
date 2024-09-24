@@ -59,7 +59,7 @@ func UpdateConfig(newConfig ConfigOptions, saveCurrentConfig bool) {
 	viper.Set("questdb.individual_feed_table", newConfig.QuestDBConsumerOptions.IndividualFeedTable)
 
 	if saveCurrentConfig {
-		slog.Info("Saving new config ")
+		slog.Info("Saving new config")
 		err := viper.WriteConfig()
 		if err != nil {
 			slog.Error("error saving new config to file", "error", err)

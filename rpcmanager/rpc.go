@@ -24,9 +24,13 @@ type DataSourceReply struct {
 	Message string
 }
 
-type NewAssetArgs struct {
+type Asset struct {
 	AssetName string
 	Category  string
+}
+
+type AssetsArgs struct {
+	Assets []Asset
 }
 
 // AssetArgs represents arguments for asset RPC methods
@@ -226,41 +230,43 @@ func (m *RPCManager) InitDataSources() error {
 }
 
 // AddAsset adds a new base asset
-func (m *RPCManager) AddAsset(args NewAssetArgs, reply *AssetReply) error {
+func (m *RPCManager) AddAsset(args AssetsArgs, reply *AssetReply) error {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 
-	currentAssets, err := m.getAssetsByCategory(args.Category)
-	if err != nil {
-		return err
-	}
+	for _, a := range args.Assets {
+		currentAssets, err := m.getAssetsByCategory(a.Category)
+		if err != nil {
+			return err
+		}
 
-	assetName := strings.ToUpper(args.AssetName)
-	if exists := helpers.ItemInSlice(assetName, currentAssets); exists {
-		return errors.New("asset already exists")
-	}
+		assetName := strings.ToUpper(a.AssetName)
+		if exists := helpers.ItemInSlice(assetName, currentAssets); exists {
+			return errors.New("asset already exists")
+		}
 
-	// Add the asset
-	switch args.Category {
-	case "crypto":
-		m.CurrentAssets.Crypto = append(currentAssets, assetName)
-	case "commodities":
-		m.CurrentAssets.Commodities = append(currentAssets, assetName)
-	case "forex":
-		m.CurrentAssets.Forex = append(currentAssets, assetName)
-	case "stocks":
-		m.CurrentAssets.Stocks = append(currentAssets, assetName)
+		// Add the asset
+		switch a.Category {
+		case "crypto":
+			m.CurrentAssets.Crypto = append(currentAssets, assetName)
+		case "commodities":
+			m.CurrentAssets.Commodities = append(currentAssets, assetName)
+		case "forex":
+			m.CurrentAssets.Forex = append(currentAssets, assetName)
+		case "stocks":
+			m.CurrentAssets.Stocks = append(currentAssets, assetName)
+		}
 	}
 
 	m.GlobalConfig.Assets = m.CurrentAssets
 
 	// Reload data sources to recognize the new asset
-	err = m.reloadDataSourcesLocked()
+	err := m.reloadDataSourcesLocked()
 	if err != nil {
 		return err
 	}
 
-	msg := fmt.Sprintf("Asset %s (%s) added successfully", assetName, args.Category)
+	msg := fmt.Sprintf("Assets %v added successfully", args)
 	slog.Info(msg)
 	reply.Message = msg
 	config.UpdateConfig(m.GlobalConfig, true)
@@ -268,40 +274,42 @@ func (m *RPCManager) AddAsset(args NewAssetArgs, reply *AssetReply) error {
 }
 
 // RemoveAsset removes an existing base asset
-func (m *RPCManager) RemoveAsset(args NewAssetArgs, reply *AssetReply) error {
+func (m *RPCManager) RemoveAsset(args AssetsArgs, reply *AssetReply) error {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 
-	currentAssets, err := m.getAssetsByCategory(args.Category)
-	if err != nil {
-		return err
-	}
+	for _, a := range args.Assets {
+		currentAssets, err := m.getAssetsByCategory(a.Category)
+		if err != nil {
+			return err
+		}
 
-	assetName := strings.ToUpper(args.AssetName)
-	if exists := helpers.ItemInSlice(assetName, currentAssets); !exists {
-		return errors.New("asset to remove does not exist")
-	}
+		assetName := strings.ToUpper(a.AssetName)
+		if exists := helpers.ItemInSlice(assetName, currentAssets); !exists {
+			return errors.New("asset to remove does not exist")
+		}
 
-	// Remove the asset
-	switch args.Category {
-	case "crypto":
-		m.CurrentAssets.Crypto = helpers.RemoveFromSlice(m.CurrentAssets.Crypto, assetName)
-	case "commodities":
-		m.CurrentAssets.Commodities = helpers.RemoveFromSlice(m.CurrentAssets.Commodities, assetName)
-	case "forex":
-		m.CurrentAssets.Forex = helpers.RemoveFromSlice(m.CurrentAssets.Forex, assetName)
-	case "stocks":
-		m.CurrentAssets.Stocks = helpers.RemoveFromSlice(m.CurrentAssets.Stocks, assetName)
+		// Remove the asset
+		switch a.Category {
+		case "crypto":
+			m.CurrentAssets.Crypto = helpers.RemoveFromSlice(m.CurrentAssets.Crypto, assetName)
+		case "commodities":
+			m.CurrentAssets.Commodities = helpers.RemoveFromSlice(m.CurrentAssets.Commodities, assetName)
+		case "forex":
+			m.CurrentAssets.Forex = helpers.RemoveFromSlice(m.CurrentAssets.Forex, assetName)
+		case "stocks":
+			m.CurrentAssets.Stocks = helpers.RemoveFromSlice(m.CurrentAssets.Stocks, assetName)
+		}
 	}
 
 	m.GlobalConfig.Assets = m.CurrentAssets
 
 	// Reload data sources to reflect the asset removal
-	err = m.reloadDataSourcesLocked()
+	err := m.reloadDataSourcesLocked()
 	if err != nil {
 		return err
 	}
-	msg := fmt.Sprintf("Asset %s (%s) removed successfully", assetName, args.Category)
+	msg := fmt.Sprintf("Assets %v removed successfully", args)
 	slog.Info(msg)
 	reply.Message = msg
 	config.UpdateConfig(m.GlobalConfig, true)

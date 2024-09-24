@@ -305,3 +305,7 @@ or using the MQTT consumer, in another terminal connect to it using a client pro
 Outputs:
 `03:22 [ 496 /s]`
 For more info on `pv`, visit [https://docs.oracle.com/cd/E86824_01/html/E54763/pv-1.html](Oracle's man pages)
+
+# Contributing
+
+Contributions are welcome! Please feel free to submit a PR.

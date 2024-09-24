@@ -1,6 +1,7 @@
 package noisy
 
 import (
+	"errors"
 	"log/slog"
 	"math/rand"
 	"strconv"
@@ -26,9 +27,11 @@ type NoisySource struct {
 	SymbolList   []model.Symbol
 	timeInterval time.Ticker
 	log          *slog.Logger
+	isRunning    bool
 }
 
 func (n *NoisySource) Connect() error {
+	n.isRunning = true
 	n.W.Add(1)
 	return nil
 }
@@ -62,9 +65,18 @@ func (n *NoisySource) SubscribeTickers() error {
 }
 
 func (n *NoisySource) Close() error {
+	if !n.isRunning {
+		return errors.New("datasource is not running")
+	}
+	n.timeInterval.Stop()
+	n.isRunning = false
 	n.W.Done()
 
 	return nil
+}
+
+func (d *NoisySource) IsRunning() bool {
+	return d.isRunning
 }
 
 func (n *NoisySource) GetName() string {

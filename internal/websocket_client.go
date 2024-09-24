@@ -95,6 +95,7 @@ func (c *WebSocketClient) Start() {
 
 func (c *WebSocketClient) Close() {
 	c.once.Do(func() {
+		c.handleDisconnect()
 		c.closed = true
 		close(c.close)
 	})
@@ -226,9 +227,6 @@ func (c *WebSocketClient) handleDisconnect() {
 	if c.onDisconnect != nil {
 		c.onDisconnect()
 	}
-
-	//close(c.done)
-	//c.done = make(chan struct{})
 }
 
 func (c *WebSocketClient) startListening() {

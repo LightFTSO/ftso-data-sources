@@ -1,6 +1,7 @@
 package fmfw
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -27,6 +28,8 @@ type FmfwClient struct {
 	log           *slog.Logger
 
 	pingInterval int
+
+	isRunning bool
 }
 
 func NewFmfwClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*FmfwClient, error) {
@@ -50,56 +53,65 @@ func NewFmfwClient(options interface{}, symbolList symbols.AllSymbols, tickerTop
 	return &fmfw, nil
 }
 
-func (b *FmfwClient) Connect() error {
-	b.W.Add(1)
+func (d *FmfwClient) Connect() error {
+	d.isRunning = true
+	d.W.Add(1)
 
-	b.wsClient.Start()
+	d.wsClient.Start()
 
-	b.setPing()
-	b.setLastTickerWatcher()
+	d.setPing()
+	d.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *FmfwClient) onConnect() error {
-	err := b.SubscribeTickers()
+func (d *FmfwClient) onConnect() error {
+	err := d.SubscribeTickers()
 	if err != nil {
-		b.log.Error("Error subscribing to tickers")
+		d.log.Error("Error subscribing to tickers")
 		return err
 	}
 	return nil
 }
-func (b *FmfwClient) Close() error {
-	b.wsClient.Close()
-	b.W.Done()
+func (d *FmfwClient) Close() error {
+	if !d.IsRunning() {
+		return errors.New("datasource is not running")
+	}
+	d.wsClient.Close()
+	d.isRunning = false
+	d.W.Done()
 
 	return nil
 }
 
-func (b *FmfwClient) onMessage(message internal.WsMessage) {
+func (d *FmfwClient) IsRunning() bool {
+	return d.isRunning
+}
+
+func (d *FmfwClient) onMessage(message internal.WsMessage) {
 	if message.Type == websocket.TextMessage {
 		if strings.Contains(string(message.Message), "ticker/price/1s") && strings.Contains(string(message.Message), "data") {
-			tickers, err := b.parseTicker(message.Message)
+			tickers, err := d.parseTicker(message.Message)
 			if err != nil {
-				b.log.Error("Error parsing ticker",
+				d.log.Error("Error parsing ticker",
 					"error", err.Error())
 				return
 			}
 
-			b.lastTimestamp = time.Now()
+			d.lastTimestamp = time.Now()
 
 			for _, v := range tickers {
-				b.TickerTopic.Send(v)
+				d.TickerTopic.Send(v)
 			}
 		}
 	}
 }
 
-func (b *FmfwClient) parseTicker(message []byte) ([]*model.Ticker, error) {
+func (d *FmfwClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	var newTickerEvent wsTickerMessage
 	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
-		b.log.Error(err.Error())
+		d.log.Error(err.Error())
 		return []*model.Ticker{}, err
 	}
 
@@ -114,10 +126,10 @@ func (b *FmfwClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 		symbol := model.ParseSymbol(key)
 		newTicker, err := model.NewTicker(tickData.LastPrice,
 			symbol,
-			b.GetName(),
+			d.GetName(),
 			time.UnixMilli(tickData.Timestamp))
 		if err != nil {
-			b.log.Error("Error parsing ticker",
+			d.log.Error("Error parsing ticker",
 				"ticker", newTicker, "error", err.Error())
 			continue
 		}
@@ -127,10 +139,10 @@ func (b *FmfwClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	return tickers, nil
 }
 
-func (b *FmfwClient) SubscribeTickers() error {
+func (d *FmfwClient) SubscribeTickers() error {
 	// batch subscriptions in packets
-	chunksize := len(b.SymbolList)
-	for i := 0; i < len(b.SymbolList); i += chunksize {
+	chunksize := len(d.SymbolList)
+	for i := 0; i < len(d.SymbolList); i += chunksize {
 		subMessage := map[string]interface{}{
 			"ch":     "ticker/price/1s/batch",
 			"method": "subscribe",
@@ -139,10 +151,10 @@ func (b *FmfwClient) SubscribeTickers() error {
 		}
 		s := []string{}
 		for j := range chunksize {
-			if i+j >= len(b.SymbolList) {
+			if i+j >= len(d.SymbolList) {
 				continue
 			}
-			v := b.SymbolList[i+j]
+			v := d.SymbolList[i+j]
 			s = append(s, fmt.Sprintf("%s%s", strings.ToUpper(v.Base), strings.ToUpper(v.Quote)))
 		}
 		subMessage["params"] = map[string]interface{}{
@@ -151,43 +163,43 @@ func (b *FmfwClient) SubscribeTickers() error {
 
 		// sleep a bit to avoid rate limits
 		time.Sleep(10 * time.Millisecond)
-		b.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+		d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 	}
 
-	b.log.Debug("Subscribed ticker symbols")
+	d.log.Debug("Subscribed ticker symbols")
 
 	return nil
 }
 
-func (b *FmfwClient) GetName() string {
-	return b.name
+func (d *FmfwClient) GetName() string {
+	return d.name
 }
 
-func (b *FmfwClient) setLastTickerWatcher() {
+func (d *FmfwClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	b.lastTimestamp = time.Now()
+	d.lastTimestamp = time.Now()
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
-			diff := now.Sub(b.lastTimestamp)
+			diff := now.Sub(d.lastTimestamp)
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-				b.lastTimestamp = time.Now()
-				b.wsClient.Reconnect()
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				d.lastTimestamp = time.Now()
+				d.wsClient.Reconnect()
 			}
 		}
 	}()
 }
 
-func (b *FmfwClient) setPing() {
-	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
+func (d *FmfwClient) setPing() {
+	ticker := time.NewTicker(time.Duration(d.pingInterval) * time.Second)
 	go func() {
 		defer ticker.Stop()
 		for range ticker.C {
-			b.wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte("ping")})
+			d.wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte("ping")})
 		}
 	}()
 }

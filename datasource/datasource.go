@@ -41,6 +41,7 @@ type FtsoDataSource interface {
 	Connect() error
 	Close() error
 	GetName() string
+	IsRunning() bool
 }
 
 type DataSourceList []FtsoDataSource
@@ -50,12 +51,53 @@ type DataSourceOptions struct {
 	Options map[string]interface{} `mapstructure:",remain"`
 }
 
+func AllDataSources() []DataSourceOptions {
+	allDataSourcesNames := []string{
+		"binance",
+		"binanceus",
+		"bitfinex",
+		"bitget",
+		"bitmart",
+		"bitrue",
+		"bitstamp",
+		"bybit",
+		"coinbase",
+		"coinex",
+		"cryptocom",
+		"digifinex",
+		"fmfw",
+		"gateio",
+		"hitbtc",
+		"huobi",
+		"kraken",
+		"kucoin",
+		"lbank",
+		"mexc",
+		"okx",
+		"pionex",
+		"toobit",
+		"whitebit",
+		"xt",
+		"tiingo",
+		"metalsdev",
+		"noisy",
+	}
+
+	var allDataSources []DataSourceOptions
+
+	for _, v := range allDataSourcesNames {
+		allDataSources = append(allDataSources, DataSourceOptions{Source: v})
+	}
+
+	return allDataSources
+}
+
 func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (FtsoDataSource, error) {
 
 	switch source.Source {
 	case "binance":
 		return binance.NewBinanceClient(source.Options, allSymbols, tickerTopic, w)
-	case "binance.us":
+	case "binanceus":
 		return binance.NewBinanceUSClient(source.Options, allSymbols, tickerTopic, w)
 	case "bitfinex":
 		return bitfinex.NewBitfinexClient(source.Options, allSymbols, tickerTopic, w)
@@ -73,16 +115,12 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 		return coinbase.NewCoinbaseClient(source.Options, allSymbols, tickerTopic, w)
 	case "coinex":
 		return coinex.NewCoinexClient(source.Options, allSymbols, tickerTopic, w)
-	case "crypto":
-		fallthrough
 	case "cryptocom":
 		return cryptocom.NewCryptoComClient(source.Options, allSymbols, tickerTopic, w)
 	case "digifinex":
 		return digifinex.NewDigifinexClient(source.Options, allSymbols, tickerTopic, w)
 	case "fmfw":
 		return fmfw.NewFmfwClient(source.Options, allSymbols, tickerTopic, w)
-	case "gate.io":
-		fallthrough
 	case "gateio":
 		return gateio.NewGateIoClient(source.Options, allSymbols, tickerTopic, w)
 	case "hitbtc":
@@ -97,8 +135,6 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 		return lbank.NewLbankClient(source.Options, allSymbols, tickerTopic, w)
 	case "mexc":
 		return mexc.NewMexcClient(source.Options, allSymbols, tickerTopic, w)
-	case "okex":
-		fallthrough
 	case "okx":
 		return okx.NewOkxClient(source.Options, allSymbols, tickerTopic, w)
 	case "pionex":

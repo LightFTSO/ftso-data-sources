@@ -23,3 +23,12 @@ func ItemInSlice[K comparable](k K, list []K) bool {
 	}
 	return false
 }
+
+func RemoveFromSlice[T comparable](l []T, item T) []T {
+	for i, other := range l {
+		if other == item {
+			return append(l[:i], l[i+1:]...)
+		}
+	}
+	return l
+}

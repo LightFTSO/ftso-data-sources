@@ -7,8 +7,9 @@ Flow goes like this:
 3. Broadcast ticker data to each of the consumers
 4. Consume the data, that part depends on you
 5. Optionally generate and print statistics every determined interval of time
-6. ???
-7. profit
+6. Manage observed assets via JSON-RPC methods
+7. ???
+8. profit
 
 # Supported data sources:
 ### Crypto:
@@ -53,6 +54,9 @@ env: production
 
 # set log level
 log_level: info # debug, info, warn, error
+
+# port (for RPC and Websocket consumer)
+port: 9999
 
 datasources:
   - source: binance
@@ -132,8 +136,6 @@ file_output:
 
 websocket_server:
   enabled: false
-  host: 127.0.0.1
-  port: 9999
   use_sbe_encoding: false
   endpoints:
     tickers: /tickers
@@ -171,6 +173,131 @@ assets:
 # (expected to happen only with thousands of messages per second)
 message_buffer_size: 65536
 ```
+
+# JSON-RPC Functionality
+The [JSON-RPC](https://pkg.go.dev/net/rpc/jsonrpc "JSON-RPC") endpoint is by default located at `http://localhost:{config.port}/rpc`. The default port is **9999**.
+
+### Add new sssets
+**POST http://127.0.0.1:9999/rpc**
+```
+{
+	"method": "RPCManager.AddAsset",
+	"params": [
+		{
+			"Assets": [
+				{
+					"AssetName": "ETH",
+					"Category": "crypto"
+				},
+					{
+					"AssetName": "BTC",
+					"Category": "crypto"
+				}
+			]
+		}
+	],
+	"id": 1
+}
+```
+Response:
+```
+{
+	"id": 1,
+	"result": {
+		"Message": "Assets {[{ETH crypto} {BTC crypto}]} added successfully"
+	},
+	"error": null
+}
+```
+
+### Remove assets
+**POST http://127.0.0.1:9999/rpc**
+```
+{
+	"method": "RPCManager.RemoveAsset",
+	"params": [
+		{
+			"Assets": [
+				{
+					"AssetName": "ETH",
+					"Category": "crypto"
+				},
+					{
+					"AssetName": "BTC",
+					"Category": "crypto"
+				}
+			]
+		}
+	],
+	"id": 1
+}
+```
+Response:
+```
+{
+	"id": 1,
+	"result": {
+		"Message": "Asset {[{ETH crypto} {BTC crypto}]} removed successfully"
+	},
+	"error": null
+}
+```
+
+### Rename asset (e.g. MATIC to POL)
+**POST http://127.0.0.1:9999/rpc**
+```
+{
+	"method": "RPCManager.RenameAsset",
+	"params": [
+		{
+			"AssetName": "MATIC",
+			"NewName": "POL",
+			"Category": "crypto"
+		}
+	],
+	"id": 1
+}
+```
+Response:
+```
+{
+	"id": 1,
+	"result": {
+		"Message": "Asset MATIC (crypto) renamed to POL successfully"
+	},
+	"error": null
+}
+```
+
+### Get asset list
+**POST http://127.0.0.1:9999/rpc**
+````
+{
+	"method": "RPCManager.GetAssets",
+	"params": [],
+	"id": 1
+}
+```
+Response:
+```
+{
+	"id": 1,
+	"result": {
+		"Assets": {
+			"crypto": [
+				"BTC",
+				"ETH"
+			],
+			"commodities": [],
+			"forex": [],
+			"stocks": []
+		}
+	},
+	"error": null
+}
+```
+
+# Counting ticker rate
 You can count the number of tickers per second enabling the file-output consumer, using /dev/stdout as the output file
 or using the MQTT consumer, in another terminal connect to it using a client program and pipe the output to the program `pv`, e.g.:
 

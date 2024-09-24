@@ -3,6 +3,7 @@ package huobi
 import (
 	"bytes"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -28,6 +29,7 @@ type HuobiClient struct {
 	SymbolList    []model.Symbol
 	lastTimestamp time.Time
 	log           *slog.Logger
+	isRunning     bool
 }
 
 func NewHuobiClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*HuobiClient, error) {
@@ -50,44 +52,53 @@ func NewHuobiClient(options interface{}, symbolList symbols.AllSymbols, tickerTo
 	return &huobi, nil
 }
 
-func (b *HuobiClient) Connect() error {
-	b.W.Add(1)
+func (d *HuobiClient) Connect() error {
+	d.isRunning = true
+	d.W.Add(1)
 
-	b.wsClient.Start()
+	d.wsClient.Start()
 
-	b.setLastTickerWatcher()
+	d.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *HuobiClient) onConnect() error {
-	err := b.SubscribeTickers()
+func (d *HuobiClient) onConnect() error {
+	err := d.SubscribeTickers()
 	if err != nil {
-		b.log.Error("Error subscribing to tickers")
+		d.log.Error("Error subscribing to tickers")
 		return err
 	}
 
 	return nil
 }
 
-func (b *HuobiClient) Close() error {
-	b.wsClient.Close()
-	b.W.Done()
+func (d *HuobiClient) Close() error {
+	if !d.IsRunning() {
+		return errors.New("datasource is not running")
+	}
+	d.wsClient.Close()
+	d.isRunning = false
+	d.W.Done()
 
 	return nil
 }
 
-func (b *HuobiClient) onMessage(message internal.WsMessage) {
+func (d *HuobiClient) IsRunning() bool {
+	return d.isRunning
+}
+
+func (d *HuobiClient) onMessage(message internal.WsMessage) {
 	if message.Type == websocket.BinaryMessage {
 		// decompress
-		data, err := b.decompressGzip(message.Message)
+		data, err := d.decompressGzip(message.Message)
 		if err != nil {
-			b.log.Error("Error parsing binary message", "error", err.Error())
+			d.log.Error("Error parsing binary message", "error", err.Error())
 		}
 
 		msg := string(data)
 		if strings.Contains(msg, "ping") {
-			b.wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte(strings.ReplaceAll(msg, "ping", "pong"))})
+			d.wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte(strings.ReplaceAll(msg, "ping", "pong"))})
 			return
 		}
 
@@ -95,18 +106,18 @@ func (b *HuobiClient) onMessage(message internal.WsMessage) {
 			return
 		}
 
-		ticker, err := b.parseTicker(data)
+		ticker, err := d.parseTicker(data)
 		if err != nil {
-			b.log.Error("Error parsing ticker",
+			d.log.Error("Error parsing ticker",
 				"ticker", ticker, "error", err.Error())
 			return
 		}
-		b.lastTimestamp = time.Now()
-		b.TickerTopic.Send(ticker)
+		d.lastTimestamp = time.Now()
+		d.TickerTopic.Send(ticker)
 	}
 }
 
-func (b *HuobiClient) parseTicker(message []byte) (*model.Ticker, error) {
+func (d *HuobiClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var tickerMessage HuobiTicker
 	err := sonic.Unmarshal(message, &tickerMessage)
 	if err != nil {
@@ -120,53 +131,53 @@ func (b *HuobiClient) parseTicker(message []byte) (*model.Ticker, error) {
 
 	ticker, err := model.NewTicker(fmt.Sprint(tickerMessage.Tick.LastPrice),
 		symbol,
-		b.GetName(),
+		d.GetName(),
 		time.UnixMilli(tickerMessage.Timestamp))
 
 	return ticker, err
 }
 
-func (b *HuobiClient) SubscribeTickers() error {
-	for _, v := range b.SymbolList {
+func (d *HuobiClient) SubscribeTickers() error {
+	for _, v := range d.SymbolList {
 		subMessage := map[string]interface{}{
 			"sub": fmt.Sprintf("market.%s%s.ticker", strings.ToLower(v.Base), strings.ToLower(v.Quote)),
 			"id":  time.Now().UnixMilli(),
 		}
-		b.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
-		b.log.Debug("Subscribed ticker symbol", "symbols", v.GetSymbol())
+		d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+		d.log.Debug("Subscribed ticker symbol", "symbols", v.GetSymbol())
 	}
 
 	return nil
 }
 
-func (b *HuobiClient) GetName() string {
-	return b.name
+func (d *HuobiClient) GetName() string {
+	return d.name
 }
 
-func (b *HuobiClient) setLastTickerWatcher() {
+func (d *HuobiClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	b.lastTimestamp = time.Now()
+	d.lastTimestamp = time.Now()
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
-			diff := now.Sub(b.lastTimestamp)
+			diff := now.Sub(d.lastTimestamp)
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-				b.lastTimestamp = time.Now()
-				b.wsClient.Reconnect()
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				d.lastTimestamp = time.Now()
+				d.wsClient.Reconnect()
 			}
 		}
 	}()
 }
 
-func (b *HuobiClient) decompressGzip(decompressedData []byte) ([]byte, error) {
+func (d *HuobiClient) decompressGzip(decompressedData []byte) ([]byte, error) {
 	buf := bytes.NewBuffer(decompressedData)
 	r, err := gzip.NewReader(buf)
 	if err != nil {
-		b.log.Error("Error decompressing message", "error", err.Error())
+		d.log.Error("Error decompressing message", "error", err.Error())
 		return []byte{}, err
 	}
 	data, _ := io.ReadAll(r)

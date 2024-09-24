@@ -1,6 +1,7 @@
 package lbank
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -32,6 +33,8 @@ type LbankClient struct {
 
 	subscriptionId atomic.Uint64
 	tzInfo         *time.Location
+
+	isRunning bool
 }
 
 func NewLbankClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*LbankClient, error) {
@@ -61,124 +64,133 @@ func NewLbankClient(options interface{}, symbolList symbols.AllSymbols, tickerTo
 	return &lbank, nil
 }
 
-func (b *LbankClient) Connect() error {
-	b.W.Add(1)
+func (d *LbankClient) Connect() error {
+	d.isRunning = true
+	d.W.Add(1)
 
-	b.wsClient.Start()
+	d.wsClient.Start()
 
-	b.setPing()
-	b.setLastTickerWatcher()
+	d.setPing()
+	d.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *LbankClient) onConnect() error {
-	err := b.SubscribeTickers()
+func (d *LbankClient) onConnect() error {
+	err := d.SubscribeTickers()
 	if err != nil {
-		b.log.Error("Error subscribing to tickers")
+		d.log.Error("Error subscribing to tickers")
 		return err
 	}
 	return nil
 }
-func (b *LbankClient) Close() error {
-	b.wsClient.Close()
-	b.W.Done()
+func (d *LbankClient) Close() error {
+	if !d.IsRunning() {
+		return errors.New("datasource is not running")
+	}
+	d.wsClient.Close()
+	d.isRunning = false
+	d.W.Done()
 
 	return nil
 }
 
-func (b *LbankClient) onMessage(message internal.WsMessage) {
+func (d *LbankClient) IsRunning() bool {
+	return d.isRunning
+}
+
+func (d *LbankClient) onMessage(message internal.WsMessage) {
 	msg := string(message.Message)
 
 	if message.Type == websocket.TextMessage {
 		if strings.Contains(msg, `"type":"tick"`) {
-			ticker, err := b.parseTicker(message.Message)
+			ticker, err := d.parseTicker(message.Message)
 			if err != nil {
-				b.log.Error("Error parsing ticker",
+				d.log.Error("Error parsing ticker",
 					"ticker", ticker, "error", err.Error())
 				return
 			}
-			b.lastTimestamp = time.Now()
-			b.TickerTopic.Send(ticker)
+			d.lastTimestamp = time.Now()
+			d.TickerTopic.Send(ticker)
 
 		}
 	}
 }
 
-func (b *LbankClient) parseTicker(message []byte) (*model.Ticker, error) {
+func (d *LbankClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var newTickerEvent wsTickerMessage
 	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
-		b.log.Error(err.Error())
+		d.log.Error(err.Error())
 		return &model.Ticker{}, err
 	}
 
 	symbol := model.ParseSymbol(newTickerEvent.Pair)
-	ts, err := time.ParseInLocation("2006-01-02T15:04:05.999", newTickerEvent.Timestamp, b.tzInfo)
+	ts, err := time.ParseInLocation("2006-01-02T15:04:05.999", newTickerEvent.Timestamp, d.tzInfo)
 	if err != nil {
 		return nil, err
 	}
 
 	ticker, err := model.NewTicker(fmt.Sprintf("%.6f", newTickerEvent.Ticker.LastPrice),
 		symbol,
-		b.GetName(),
+		d.GetName(),
 		ts)
 
 	return ticker, err
 }
 
-func (b *LbankClient) SubscribeTickers() error {
-	for _, v := range b.SymbolList {
+func (d *LbankClient) SubscribeTickers() error {
+	for _, v := range d.SymbolList {
 		subMessage := map[string]interface{}{
 			"action":    "subscribe",
 			"subscribe": "tick",
 			"pair":      fmt.Sprintf("%s_%s", strings.ToUpper(v.Base), strings.ToUpper(v.Quote)),
 		}
-		b.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
-		b.log.Debug("Subscribed ticker symbol", "symbols", v.GetSymbol())
+		d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+		d.log.Debug("Subscribed ticker symbol", "symbols", v.GetSymbol())
 	}
 
-	b.log.Debug("Subscribed ticker symbols")
+	d.log.Debug("Subscribed ticker symbols")
 
 	return nil
 }
 
-func (b *LbankClient) GetName() string {
-	return b.name
+func (d *LbankClient) GetName() string {
+	return d.name
 }
 
-func (b *LbankClient) setLastTickerWatcher() {
+func (d *LbankClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	b.lastTimestamp = time.Now()
+	d.lastTimestamp = time.Now()
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
-			diff := now.Sub(b.lastTimestamp)
+			diff := now.Sub(d.lastTimestamp)
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-				b.lastTimestamp = time.Now()
-				b.wsClient.Reconnect()
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				d.lastTimestamp = time.Now()
+				d.wsClient.Reconnect()
 			}
 		}
 	}()
 }
-func (b *LbankClient) setPing() {
-	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
+func (d *LbankClient) setPing() {
+	ticker := time.NewTicker(time.Duration(d.pingInterval) * time.Second)
 	go func() {
 		defer ticker.Stop()
 		for {
 			select {
 			case <-ticker.C:
-				id := b.subscriptionId.Add(1)
+				id := d.subscriptionId.Add(1)
 				msg := map[string]interface{}{
 					"ping":   fmt.Sprintf("%d", id),
 					"action": "ping",
 				}
-				if err := b.wsClient.SendMessageJSON(websocket.TextMessage, msg); err != nil {
-					b.log.Warn("Failed to send ping", "error", err)
+				if err := d.wsClient.SendMessageJSON(websocket.TextMessage, msg); err != nil {
+					d.log.Warn("Failed to send ping", "error", err)
 				}
 
 			}

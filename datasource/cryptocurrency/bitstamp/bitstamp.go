@@ -1,6 +1,7 @@
 package bitstamp
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -28,6 +29,8 @@ type BitstampClient struct {
 	log           *slog.Logger
 
 	pingInterval int
+
+	isRunning bool
 }
 
 func NewBitstampClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BitstampClient, error) {
@@ -51,53 +54,62 @@ func NewBitstampClient(options interface{}, symbolList symbols.AllSymbols, ticke
 	return &bitstamp, nil
 }
 
-func (b *BitstampClient) Connect() error {
-	b.W.Add(1)
+func (d *BitstampClient) Connect() error {
+	d.isRunning = true
+	d.W.Add(1)
 
-	b.wsClient.Start()
+	d.wsClient.Start()
 
-	b.setPing()
-	b.setLastTickerWatcher()
+	d.setPing()
+	d.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *BitstampClient) onConnect() error {
-	err := b.SubscribeTickers()
+func (d *BitstampClient) onConnect() error {
+	err := d.SubscribeTickers()
 	if err != nil {
-		b.log.Error("Error subscribing to tickers")
+		d.log.Error("Error subscribing to tickers")
 		return err
 	}
 
 	return nil
 }
-func (b *BitstampClient) Close() error {
-	b.wsClient.Close()
-	b.W.Done()
+func (d *BitstampClient) Close() error {
+	if !d.IsRunning() {
+		return errors.New("datasource is not running")
+	}
+	d.wsClient.Close()
+	d.isRunning = false
+	d.W.Done()
 
 	return nil
 }
 
-func (b *BitstampClient) onMessage(message internal.WsMessage) {
+func (d *BitstampClient) IsRunning() bool {
+	return d.isRunning
+}
+
+func (d *BitstampClient) onMessage(message internal.WsMessage) {
 	if message.Type == websocket.TextMessage {
 		if strings.Contains(string(message.Message), `"event":"trade"`) {
-			ticker, err := b.parseTicker(message.Message)
+			ticker, err := d.parseTicker(message.Message)
 			if err != nil {
-				b.log.Error("Error parsing ticker",
+				d.log.Error("Error parsing ticker",
 					"ticker", ticker, "error", err.Error())
 				return
 			}
-			b.lastTimestamp = time.Now()
-			b.TickerTopic.Send(ticker)
+			d.lastTimestamp = time.Now()
+			d.TickerTopic.Send(ticker)
 		}
 	}
 }
 
-func (b *BitstampClient) parseTicker(message []byte) (*model.Ticker, error) {
+func (d *BitstampClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var newTickerEvent wsTickerMessage
 	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
-		b.log.Error(err.Error())
+		d.log.Error(err.Error())
 		return &model.Ticker{}, err
 	}
 
@@ -109,57 +121,57 @@ func (b *BitstampClient) parseTicker(message []byte) (*model.Ticker, error) {
 
 	ticker, err := model.NewTicker(newTickerEvent.Data.LastPrice,
 		symbol,
-		b.GetName(),
+		d.GetName(),
 		time.UnixMicro(ts))
 
 	return ticker, err
 }
 
-func (b *BitstampClient) SubscribeTickers() error {
-	for _, v := range b.SymbolList {
+func (d *BitstampClient) SubscribeTickers() error {
+	for _, v := range d.SymbolList {
 		subMessage := map[string]interface{}{
 			"event": "bts:subscribe",
 			"data": map[string]interface{}{
 				"channel": fmt.Sprintf("live_trades_%s%s", strings.ToLower(v.Base), strings.ToLower(v.Quote)),
 			},
 		}
-		b.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
-		b.log.Debug("Subscribed ticker symbol", "symbols", v.GetSymbol())
+		d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+		d.log.Debug("Subscribed ticker symbol", "symbols", v.GetSymbol())
 	}
 
-	b.log.Debug("Subscribed ticker symbols")
+	d.log.Debug("Subscribed ticker symbols")
 
 	return nil
 }
 
-func (b *BitstampClient) GetName() string {
-	return b.name
+func (d *BitstampClient) GetName() string {
+	return d.name
 }
 
-func (b *BitstampClient) setLastTickerWatcher() {
+func (d *BitstampClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	b.lastTimestamp = time.Now()
+	d.lastTimestamp = time.Now()
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
-			diff := now.Sub(b.lastTimestamp)
+			diff := now.Sub(d.lastTimestamp)
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-				b.lastTimestamp = time.Now()
-				b.wsClient.Reconnect()
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				d.lastTimestamp = time.Now()
+				d.wsClient.Reconnect()
 			}
 		}
 	}()
 }
-func (b *BitstampClient) setPing() {
-	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
+func (d *BitstampClient) setPing() {
+	ticker := time.NewTicker(time.Duration(d.pingInterval) * time.Second)
 	go func() {
 		defer ticker.Stop()
 		for range ticker.C {
-			b.wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte(`{"event":"bts:heartbeat"}`)})
+			d.wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte(`{"event":"bts:heartbeat"}`)})
 		}
 	}()
 }

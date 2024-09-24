@@ -1,6 +1,7 @@
 package coinbase
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -25,6 +26,7 @@ type CoinbaseClient struct {
 	SymbolList    []model.Symbol
 	lastTimestamp time.Time
 	log           *slog.Logger
+	isRunning     bool
 }
 
 func NewCoinbaseClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*CoinbaseClient, error) {
@@ -47,56 +49,65 @@ func NewCoinbaseClient(options interface{}, symbolList symbols.AllSymbols, ticke
 	return &coinbase, nil
 }
 
-func (b *CoinbaseClient) Connect() error {
-	b.W.Add(1)
+func (d *CoinbaseClient) Connect() error {
+	d.isRunning = true
+	d.W.Add(1)
 
-	b.wsClient.Start()
+	d.wsClient.Start()
 
-	b.setLastTickerWatcher()
+	d.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *CoinbaseClient) onConnect() error {
-	err := b.SubscribeTickers()
+func (d *CoinbaseClient) onConnect() error {
+	err := d.SubscribeTickers()
 	if err != nil {
-		b.log.Error("Error subscribing to tickers")
+		d.log.Error("Error subscribing to tickers")
 		return err
 	}
 
 	return nil
 }
 
-func (b *CoinbaseClient) Close() error {
-	b.wsClient.Close()
-	b.W.Done()
+func (d *CoinbaseClient) Close() error {
+	if !d.IsRunning() {
+		return errors.New("datasource is not running")
+	}
+	d.wsClient.Close()
+	d.isRunning = false
+	d.W.Done()
 
 	return nil
 }
 
-func (b *CoinbaseClient) onMessage(message internal.WsMessage) {
+func (d *CoinbaseClient) IsRunning() bool {
+	return d.isRunning
+}
+
+func (d *CoinbaseClient) onMessage(message internal.WsMessage) {
 	if message.Type == websocket.TextMessage {
 		msg := string(message.Message)
 
 		if strings.Contains(msg, `"type":"subscriptions"`) {
-			b.parseSubscriptions(message.Message)
+			d.parseSubscriptions(message.Message)
 			return
 		}
 
 		if strings.Contains(msg, `"type":"ticker"`) {
-			ticker, err := b.parseTicker(message.Message)
+			ticker, err := d.parseTicker(message.Message)
 			if err != nil {
-				b.log.Error("Error parsing ticker",
+				d.log.Error("Error parsing ticker",
 					"ticker", ticker, "error", err.Error())
 				return
 			}
-			b.lastTimestamp = time.Now()
-			b.TickerTopic.Send(ticker)
+			d.lastTimestamp = time.Now()
+			d.TickerTopic.Send(ticker)
 		}
 	}
 }
 
-func (b *CoinbaseClient) parseTicker(message []byte) (*model.Ticker, error) {
+func (d *CoinbaseClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var tickerMessage CoinbaseTicker
 	err := sonic.Unmarshal(message, &tickerMessage)
 	if err != nil {
@@ -111,27 +122,27 @@ func (b *CoinbaseClient) parseTicker(message []byte) (*model.Ticker, error) {
 
 	ticker, err := model.NewTicker(tickerMessage.LastPrice,
 		symbol,
-		b.GetName(),
+		d.GetName(),
 		ts)
 
 	return ticker, err
 }
 
-func (b *CoinbaseClient) parseSubscriptions(message []byte) {
+func (d *CoinbaseClient) parseSubscriptions(message []byte) {
 	var subscrSuccessMessage CoinbaseSubscriptionSuccessMessage
 	err := sonic.Unmarshal(message, &subscrSuccessMessage)
 	if err != nil {
-		b.log.Error(err.Error())
+		d.log.Error(err.Error())
 		return
 	}
 
-	b.log.Debug("Subscribed ticker symbols",
+	d.log.Debug("Subscribed ticker symbols",
 		"symbols", len(subscrSuccessMessage.Channels[0].ProductIds))
 }
 
-func (b *CoinbaseClient) SubscribeTickers() error {
+func (d *CoinbaseClient) SubscribeTickers() error {
 	s := []string{}
-	for _, v := range b.SymbolList {
+	for _, v := range d.SymbolList {
 		s = append(s, fmt.Sprintf("%s-%s", strings.ToUpper(v.Base), strings.ToUpper(v.Quote)))
 	}
 	subMessage := map[string]interface{}{
@@ -140,29 +151,29 @@ func (b *CoinbaseClient) SubscribeTickers() error {
 		"channels":    []string{"ticker"},
 	}
 
-	b.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+	d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 
 	return nil
 }
 
-func (b *CoinbaseClient) GetName() string {
-	return b.name
+func (d *CoinbaseClient) GetName() string {
+	return d.name
 }
 
-func (b *CoinbaseClient) setLastTickerWatcher() {
+func (d *CoinbaseClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	b.lastTimestamp = time.Now()
+	d.lastTimestamp = time.Now()
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
-			diff := now.Sub(b.lastTimestamp)
+			diff := now.Sub(d.lastTimestamp)
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-				b.lastTimestamp = time.Now()
-				b.wsClient.Reconnect()
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				d.lastTimestamp = time.Now()
+				d.wsClient.Reconnect()
 			}
 		}
 	}()

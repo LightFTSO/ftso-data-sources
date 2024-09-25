@@ -22,16 +22,17 @@ type TiingoClient struct {
 	name           string
 	W              *sync.WaitGroup
 	TickerTopic    *broadcast.Broadcaster
-	wsClient       internal.WebSocketClient
+	wsClient       *internal.WebSocketClient
 	wsEndpoint     string
 	SymbolList     []model.Symbol
 	apiToken       string
 	thresholdLevel int
 
-	lastTimestamp time.Time
-	log           *slog.Logger
+	lastTimestamp      time.Time
+	lastTimestampMutex sync.Mutex
+	log                *slog.Logger
 
-	pingInterval int
+	pingInterval time.Duration
 
 	isRunning bool
 }
@@ -51,10 +52,10 @@ func NewTiingoFxClient(options map[string]interface{}, symbolList symbols.AllSym
 		log:            slog.Default().With(slog.String("datasource", "tiingo_fx")),
 		W:              w,
 		TickerTopic:    tickerTopic,
-		wsClient:       *internal.NewWebSocketClient(wsEndpoint),
+		wsClient:       internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:     wsEndpoint,
 		SymbolList:     symbolList.Forex,
-		pingInterval:   20,
+		pingInterval:   20 * time.Second,
 		apiToken:       apiToken,
 		thresholdLevel: 5,
 	}
@@ -73,10 +74,10 @@ func NewTiingoIexClient(options map[string]interface{}, symbolList symbols.AllSy
 		log:            slog.Default().With(slog.String("datasource", "tiingo_iex")),
 		W:              w,
 		TickerTopic:    tickerTopic,
-		wsClient:       *internal.NewWebSocketClient(wsEndpoint),
+		wsClient:       internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:     wsEndpoint,
 		SymbolList:     symbolList.Forex,
-		pingInterval:   20,
+		pingInterval:   20 * time.Second,
 		apiToken:       options["api_token"].(string),
 		thresholdLevel: 5,
 	}
@@ -136,7 +137,10 @@ func (d *TiingoClient) onMessage(message internal.WsMessage) {
 				return
 
 			}
+			d.lastTimestampMutex.Lock()
 			d.lastTimestamp = time.Now()
+			d.lastTimestampMutex.Unlock()
+
 			d.TickerTopic.Send(ticker)
 		}
 	}
@@ -214,17 +218,27 @@ func (d *TiingoClient) GetName() string {
 
 func (d *TiingoClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
+	d.lastTimestampMutex.Lock()
 	d.lastTimestamp = time.Now()
+	d.lastTimestampMutex.Unlock()
+
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
+			d.lastTimestampMutex.Lock()
 			diff := now.Sub(d.lastTimestamp)
+			d.lastTimestampMutex.Unlock()
+
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				d.lastTimestampMutex.Lock()
 				d.lastTimestamp = time.Now()
+				d.lastTimestampMutex.Unlock()
+
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+
 				d.wsClient.Reconnect()
 			}
 		}
@@ -232,7 +246,7 @@ func (d *TiingoClient) setLastTickerWatcher() {
 }
 
 func (d *TiingoClient) setPing() {
-	ticker := time.NewTicker(time.Duration(d.pingInterval) * time.Second)
+	ticker := time.NewTicker(d.pingInterval)
 	go func() {
 		defer ticker.Stop()
 		for range ticker.C {

@@ -18,16 +18,17 @@ import (
 )
 
 type BitgetClient struct {
-	name          string
-	W             *sync.WaitGroup
-	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebSocketClient
-	wsEndpoint    string
-	SymbolList    []model.Symbol
-	lastTimestamp time.Time
-	log           *slog.Logger
+	name               string
+	W                  *sync.WaitGroup
+	TickerTopic        *broadcast.Broadcaster
+	wsClient           *internal.WebSocketClient
+	wsEndpoint         string
+	SymbolList         []model.Symbol
+	lastTimestamp      time.Time
+	lastTimestampMutex sync.Mutex
+	log                *slog.Logger
 
-	pingInterval int
+	pingInterval time.Duration
 
 	isRunning bool
 }
@@ -40,10 +41,10 @@ func NewBitgetClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 		log:          slog.Default().With(slog.String("datasource", "bitget")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebSocketClient(wsEndpoint),
+		wsClient:     internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		SymbolList:   symbolList.Crypto,
-		pingInterval: 30,
+		pingInterval: 30 * time.Second,
 	}
 	bitget.wsClient.SetMessageHandler(bitget.onMessage)
 	bitget.wsClient.SetOnConnect(bitget.onConnect)
@@ -98,7 +99,9 @@ func (d *BitgetClient) onMessage(message internal.WsMessage) {
 					"error", err.Error())
 				return
 			}
+			d.lastTimestampMutex.Lock()
 			d.lastTimestamp = time.Now()
+			d.lastTimestampMutex.Unlock()
 
 			for _, v := range tickers {
 				d.TickerTopic.Send(v)
@@ -170,17 +173,27 @@ func (d *BitgetClient) GetName() string {
 
 func (d *BitgetClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
+	d.lastTimestampMutex.Lock()
 	d.lastTimestamp = time.Now()
+	d.lastTimestampMutex.Unlock()
+
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
+			d.lastTimestampMutex.Lock()
 			diff := now.Sub(d.lastTimestamp)
+			d.lastTimestampMutex.Unlock()
+
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				d.lastTimestampMutex.Lock()
 				d.lastTimestamp = time.Now()
+				d.lastTimestampMutex.Unlock()
+
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+
 				d.wsClient.Reconnect()
 			}
 		}
@@ -188,7 +201,7 @@ func (d *BitgetClient) setLastTickerWatcher() {
 }
 
 func (d *BitgetClient) setPing() {
-	ticker := time.NewTicker(time.Duration(d.pingInterval) * time.Second)
+	ticker := time.NewTicker(d.pingInterval)
 	go func() {
 		defer ticker.Stop()
 		for range ticker.C {

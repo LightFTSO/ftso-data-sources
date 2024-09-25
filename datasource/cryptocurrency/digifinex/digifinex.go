@@ -21,17 +21,18 @@ import (
 )
 
 type DigifinexClient struct {
-	name          string
-	W             *sync.WaitGroup
-	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebSocketClient
-	wsEndpoint    string
-	apiEndpoint   string
-	SymbolList    []model.Symbol
-	lastTimestamp time.Time
-	log           *slog.Logger
+	name               string
+	W                  *sync.WaitGroup
+	TickerTopic        *broadcast.Broadcaster
+	wsClient           *internal.WebSocketClient
+	wsEndpoint         string
+	apiEndpoint        string
+	SymbolList         []model.Symbol
+	lastTimestamp      time.Time
+	lastTimestampMutex sync.Mutex
+	log                *slog.Logger
 
-	pingInterval     int
+	pingInterval     time.Duration
 	availableMarkets []model.Symbol
 
 	isRunning bool
@@ -45,11 +46,11 @@ func NewDigifinexClient(options interface{}, symbolList symbols.AllSymbols, tick
 		log:          slog.Default().With(slog.String("datasource", "digifinex")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebSocketClient(wsEndpoint),
+		wsClient:     internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://openapi.digifinex.com",
 		SymbolList:   symbolList.Crypto,
-		pingInterval: 15,
+		pingInterval: 15 * time.Second,
 	}
 	digifinex.wsClient.SetMessageHandler(digifinex.onMessage)
 	digifinex.wsClient.SetOnConnect(digifinex.onConnect)
@@ -123,7 +124,10 @@ func (d *DigifinexClient) onMessage(message internal.WsMessage) {
 				d.log.Error("Error parsing ticker", "error", err.Error())
 				return
 			}
+			d.lastTimestampMutex.Lock()
 			d.lastTimestamp = time.Now()
+			d.lastTimestampMutex.Unlock()
+
 			for _, t := range tickers {
 				d.TickerTopic.Send(t)
 			}
@@ -242,17 +246,27 @@ func (d *DigifinexClient) GetName() string {
 
 func (d *DigifinexClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
+	d.lastTimestampMutex.Lock()
 	d.lastTimestamp = time.Now()
+	d.lastTimestampMutex.Unlock()
+
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
+			d.lastTimestampMutex.Lock()
 			diff := now.Sub(d.lastTimestamp)
+			d.lastTimestampMutex.Unlock()
+
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				d.lastTimestampMutex.Lock()
 				d.lastTimestamp = time.Now()
+				d.lastTimestampMutex.Unlock()
+
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+
 				d.wsClient.Reconnect()
 			}
 		}
@@ -260,7 +274,7 @@ func (d *DigifinexClient) setLastTickerWatcher() {
 }
 
 func (d *DigifinexClient) setPing() {
-	ticker := time.NewTicker(time.Duration(d.pingInterval) * time.Second)
+	ticker := time.NewTicker(d.pingInterval)
 	go func() {
 		defer ticker.Stop()
 		for range ticker.C {

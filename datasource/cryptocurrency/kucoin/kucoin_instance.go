@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bytedance/sonic"
@@ -23,7 +24,8 @@ type kucoinInstanceClient struct {
 	SymbolList         []model.Symbol
 	availableSymbols   []model.Symbol
 	lastTimestamp      time.Time
-	pingIntervalMs     int
+	lastTimestampMutex sync.Mutex
+	pingInterval       time.Duration
 	ctx                context.Context
 	cancel             context.CancelFunc
 	log                *slog.Logger
@@ -48,7 +50,7 @@ func newKucoinInstanceClient(instanceServer InstanceServer, availableSymbols []m
 		instanceId:       fmt.Sprintf("%x", instanceId),
 		SymbolList:       symbolList,
 		availableSymbols: availableSymbols,
-		pingIntervalMs:   instanceServer.PingIntervalMs,
+		pingInterval:     time.Duration(instanceServer.PingIntervalMs) * time.Millisecond,
 		ctx:              ctx,
 		cancel:           cancel,
 		closed:           false,
@@ -103,7 +105,10 @@ func (d *kucoinInstanceClient) onMessage(message internal.WsMessage) {
 					"ticker", ticker, "error", err.Error())
 				return
 			}
+			d.lastTimestampMutex.Lock()
 			d.lastTimestamp = time.Now()
+			d.lastTimestampMutex.Unlock()
+
 			d.TickerTopic.Send(ticker)
 		}
 	}
@@ -122,7 +127,10 @@ func (d *kucoinInstanceClient) parseTicker(message []byte) (*model.Ticker, error
 		symbol,
 		d.getName(),
 		time.UnixMilli(newTickerEvent.Data.Time))
-
+	if err != nil {
+		d.log.Error("Error parsing ticker", "error", err)
+		return nil, err
+	}
 	return ticker, err
 }
 
@@ -161,7 +169,10 @@ func (d *kucoinInstanceClient) getName() string {
 
 func (d *kucoinInstanceClient) setLastTickerWatcher() {
 	d.lastTickerTsTicker = *time.NewTicker(1 * time.Second)
+	d.lastTimestampMutex.Lock()
 	d.lastTimestamp = time.Now()
+	d.lastTimestampMutex.Unlock()
+
 	timeout := (30 * time.Second)
 	go func() {
 		defer d.lastTickerTsTicker.Stop()
@@ -171,7 +182,10 @@ func (d *kucoinInstanceClient) setLastTickerWatcher() {
 			}
 
 			now := time.Now()
+			d.lastTimestampMutex.Lock()
 			diff := now.Sub(d.lastTimestamp)
+			d.lastTimestampMutex.Unlock()
+
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
 				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
@@ -183,7 +197,7 @@ func (d *kucoinInstanceClient) setLastTickerWatcher() {
 }
 
 func (d *kucoinInstanceClient) setPing() {
-	d.pingTicker = *time.NewTicker(time.Duration(d.pingIntervalMs) * time.Millisecond)
+	d.pingTicker = *time.NewTicker(time.Duration(d.pingInterval) * time.Millisecond)
 	go func() {
 		defer d.pingTicker.Stop()
 		for range d.pingTicker.C {

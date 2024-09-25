@@ -21,17 +21,18 @@ import (
 )
 
 type PionexClient struct {
-	name          string
-	W             *sync.WaitGroup
-	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebSocketClient
-	wsEndpoint    string
-	SymbolList    []model.Symbol
-	lastTimestamp time.Time
-	log           *slog.Logger
-	apiEndpoint   string
+	name               string
+	W                  *sync.WaitGroup
+	TickerTopic        *broadcast.Broadcaster
+	wsClient           *internal.WebSocketClient
+	wsEndpoint         string
+	SymbolList         []model.Symbol
+	lastTimestamp      time.Time
+	lastTimestampMutex sync.Mutex
+	log                *slog.Logger
+	apiEndpoint        string
 
-	pingInterval int
+	pingInterval time.Duration
 
 	isRunning bool
 }
@@ -44,10 +45,10 @@ func NewPionexClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 		log:          slog.Default().With(slog.String("datasource", "pionex")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebSocketClient(wsEndpoint),
+		wsClient:     internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		SymbolList:   symbolList.Crypto,
-		pingInterval: 15,
+		pingInterval: 15 * time.Second,
 		apiEndpoint:  "https://api.pionex.com/api/v1",
 	}
 	pionex.wsClient.SetMessageHandler(pionex.onMessage)
@@ -107,7 +108,9 @@ func (d *PionexClient) onMessage(message internal.WsMessage) {
 					"error", err.Error())
 				return
 			}
+			d.lastTimestampMutex.Lock()
 			d.lastTimestamp = time.Now()
+			d.lastTimestampMutex.Unlock()
 
 			for _, v := range tickers {
 				d.TickerTopic.Send(v)
@@ -230,17 +233,27 @@ func (d *PionexClient) GetName() string {
 
 func (d *PionexClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
+	d.lastTimestampMutex.Lock()
 	d.lastTimestamp = time.Now()
+	d.lastTimestampMutex.Unlock()
+
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
+			d.lastTimestampMutex.Lock()
 			diff := now.Sub(d.lastTimestamp)
+			d.lastTimestampMutex.Unlock()
+
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				d.lastTimestampMutex.Lock()
 				d.lastTimestamp = time.Now()
+				d.lastTimestampMutex.Unlock()
+
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+
 				d.wsClient.Reconnect()
 			}
 		}

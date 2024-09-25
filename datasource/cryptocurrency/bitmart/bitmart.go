@@ -18,16 +18,17 @@ import (
 )
 
 type BitmartClient struct {
-	name          string
-	W             *sync.WaitGroup
-	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebSocketClient
-	wsEndpoint    string
-	SymbolList    []model.Symbol
-	lastTimestamp time.Time
-	log           *slog.Logger
+	name               string
+	W                  *sync.WaitGroup
+	TickerTopic        *broadcast.Broadcaster
+	wsClient           *internal.WebSocketClient
+	wsEndpoint         string
+	SymbolList         []model.Symbol
+	lastTimestamp      time.Time
+	lastTimestampMutex sync.Mutex
+	log                *slog.Logger
 
-	pingInterval int
+	pingInterval time.Duration
 
 	isRunning bool
 }
@@ -40,10 +41,10 @@ func NewBitmartClient(options interface{}, symbolList symbols.AllSymbols, ticker
 		log:          slog.Default().With(slog.String("datasource", "bitmart")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebSocketClient(wsEndpoint),
+		wsClient:     internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		SymbolList:   symbolList.Crypto,
-		pingInterval: 15,
+		pingInterval: 15 * time.Second,
 	}
 	bitmart.wsClient.SetMessageHandler(bitmart.onMessage)
 	bitmart.wsClient.SetOnConnect(bitmart.onConnect)
@@ -103,7 +104,9 @@ func (d *BitmartClient) onMessage(message internal.WsMessage) {
 					"error", err.Error())
 				return
 			}
+			d.lastTimestampMutex.Lock()
 			d.lastTimestamp = time.Now()
+			d.lastTimestampMutex.Unlock()
 
 			for _, v := range tickers {
 				d.TickerTopic.Send(v)
@@ -112,21 +115,24 @@ func (d *BitmartClient) onMessage(message internal.WsMessage) {
 
 		// decompress
 		/*decompressedData, err := internal.DecompressFlate(message.Message)
-						if err != nil {
-							d.log.Error("Error decompressing message", "error", err.Error())
-							return nil
-						}
-						data := string(decompressedData)
-						if strings.Contains(data, "_ticker") && strings.Contains(data, "tick") && !strings.Contains(data, "event_rep") {
-							ticker, err := d.parseTicker([]byte(data))
-							if err != nil {
-								d.log.Error("Error parsing ticker",
-				"ticker",ticker,"error", err.Error())
-								return nil
-							}
-							d.lastTimestamp = time.Now()
-		d.TickerTopic.Send(ticker)
-						}*/
+								if err != nil {
+									d.log.Error("Error decompressing message", "error", err.Error())
+									return nil
+								}
+								data := string(decompressedData)
+								if strings.Contains(data, "_ticker") && strings.Contains(data, "tick") && !strings.Contains(data, "event_rep") {
+									ticker, err := d.parseTicker([]byte(data))
+									if err != nil {
+										d.log.Error("Error parsing ticker",
+						"ticker",ticker,"error", err.Error())
+										return nil
+									}
+									d.lastTimestampMutex.Lock()
+		    d.lastTimestamp = time.Now()
+		   d.lastTimestampMutex.Unlock()
+
+				d.TickerTopic.Send(ticker)
+								}*/
 	}
 }
 
@@ -190,17 +196,27 @@ func (d *BitmartClient) GetName() string {
 
 func (d *BitmartClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
+	d.lastTimestampMutex.Lock()
 	d.lastTimestamp = time.Now()
+	d.lastTimestampMutex.Unlock()
+
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
+			d.lastTimestampMutex.Lock()
 			diff := now.Sub(d.lastTimestamp)
+			d.lastTimestampMutex.Unlock()
+
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				d.lastTimestampMutex.Lock()
 				d.lastTimestamp = time.Now()
+				d.lastTimestampMutex.Unlock()
+
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+
 				d.wsClient.Reconnect()
 			}
 		}
@@ -208,7 +224,7 @@ func (d *BitmartClient) setLastTickerWatcher() {
 }
 
 func (d *BitmartClient) setPing() {
-	ticker := time.NewTicker(time.Duration(d.pingInterval) * time.Second)
+	ticker := time.NewTicker(d.pingInterval)
 	go func() {
 		defer ticker.Stop()
 		for range ticker.C {

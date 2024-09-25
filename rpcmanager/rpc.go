@@ -206,17 +206,17 @@ func (m *RPCManager) InitDataSources() error {
 	}
 
 	for _, source := range enabledDataSources {
-		src, err := datasource.BuilDataSource(source, symbols.GetAllSymbols(m.getAssetList().Crypto, m.getAssetList().Commodities, m.getAssetList().Forex, m.getAssetList().Stocks), m.TickerTopic, &m.Wg)
+		symbols := symbols.GetAllSymbols(m.getAssetList().Crypto, m.getAssetList().Commodities, m.getAssetList().Forex, m.getAssetList().Stocks)
+		src, err := datasource.BuilDataSource(source, symbols, m.TickerTopic, &m.Wg)
 		if err != nil {
 			log.Printf("Error creating data source %s: %v", source.Source, err)
 			continue
 		}
-
 		m.DataSources[src.GetName()] = src
 	}
-
 	for _, source := range enabledDataSources {
 		m.Wg.Add(1)
+
 		go func(ds datasource.FtsoDataSource) {
 			defer m.Wg.Done()
 			err := ds.Connect()

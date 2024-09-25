@@ -20,16 +20,17 @@ import (
 )
 
 type BinanceClient struct {
-	name          string
-	W             *sync.WaitGroup
-	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebSocketClient
-	wsEndpoint    string
-	apiEndpoint   string
-	SymbolList    []model.Symbol
-	lastTimestamp time.Time
-	log           *slog.Logger
-	isRunning     bool
+	name               string
+	W                  *sync.WaitGroup
+	TickerTopic        *broadcast.Broadcaster
+	wsClient           *internal.WebSocketClient
+	wsEndpoint         string
+	apiEndpoint        string
+	SymbolList         []model.Symbol
+	lastTimestamp      time.Time
+	lastTimestampMutex sync.Mutex
+	log                *slog.Logger
+	isRunning          bool
 }
 
 func NewBinanceClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BinanceClient, error) {
@@ -40,7 +41,7 @@ func NewBinanceClient(options interface{}, symbolList symbols.AllSymbols, ticker
 		log:         slog.Default().With(slog.String("datasource", "binance")),
 		W:           w,
 		TickerTopic: tickerTopic,
-		wsClient:    *internal.NewWebSocketClient(wsEndpoint),
+		wsClient:    internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:  wsEndpoint,
 		apiEndpoint: "https://api.binance.com",
 		SymbolList:  symbolList.Crypto,
@@ -97,7 +98,10 @@ func (d *BinanceClient) onMessage(message internal.WsMessage) {
 					"ticker", ticker, "error", err.Error())
 				return
 			}
+			d.lastTimestampMutex.Lock()
 			d.lastTimestamp = time.Now()
+			d.lastTimestampMutex.Unlock()
+
 			d.TickerTopic.Send(ticker)
 			return
 		}
@@ -115,7 +119,10 @@ func (d *BinanceClient) parseTicker(message []byte) (*model.Ticker, error) {
 		symbol,
 		d.GetName(),
 		time.UnixMilli(newTickerEvent.Data.Time))
-
+	if err != nil {
+		d.log.Error("Error parsing ticker", "error", err)
+		return nil, err
+	}
 	return ticker, err
 }
 
@@ -202,17 +209,27 @@ func (d *BinanceClient) GetName() string {
 
 func (d *BinanceClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
+	d.lastTimestampMutex.Lock()
 	d.lastTimestamp = time.Now()
+	d.lastTimestampMutex.Unlock()
+
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
+			d.lastTimestampMutex.Lock()
 			diff := now.Sub(d.lastTimestamp)
+			d.lastTimestampMutex.Unlock()
+
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				d.lastTimestampMutex.Lock()
 				d.lastTimestamp = time.Now()
+				d.lastTimestampMutex.Unlock()
+
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+
 				d.wsClient.Reconnect()
 			}
 		}

@@ -60,7 +60,7 @@ port: 9999
 
 datasources:
   - source: binance
-  - source: binance.us
+  - source: binanceus
   - source: bitget
   - source: bitmart
   - source: bitrue
@@ -137,9 +137,7 @@ file_output:
 websocket_server:
   enabled: false
   use_sbe_encoding: false
-  endpoints:
-    tickers: /tickers
-    volumes:
+  ticker_endpoint: /tickers
     
 assets:
   forex:

@@ -12,7 +12,6 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
-	"github.com/hashicorp/go-multierror"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
@@ -20,17 +19,18 @@ import (
 )
 
 type MexcClient struct {
-	name          string
-	W             *sync.WaitGroup
-	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebSocketClient
-	wsEndpoint    string
-	apiEndpoint   string
-	SymbolList    []model.Symbol
-	lastTimestamp time.Time
-	log           *slog.Logger
+	name               string
+	W                  *sync.WaitGroup
+	TickerTopic        *broadcast.Broadcaster
+	wsClient           *internal.WebSocketClient
+	wsEndpoint         string
+	apiEndpoint        string
+	SymbolList         []model.Symbol
+	lastTimestamp      time.Time
+	lastTimestampMutex sync.Mutex
+	log                *slog.Logger
 
-	pingInterval int
+	pingInterval time.Duration
 
 	tzInfo         *time.Location
 	subscriptionId atomic.Uint64
@@ -42,7 +42,7 @@ func NewMexcClient(options interface{}, symbolList symbols.AllSymbols, tickerTop
 
 	shanghaiTimezone, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
-		return nil, multierror.Append(fmt.Errorf("error loading timezone information"), err)
+		return nil, fmt.Errorf("error loading timezone information: %w", err)
 	}
 
 	mexc := MexcClient{
@@ -50,11 +50,11 @@ func NewMexcClient(options interface{}, symbolList symbols.AllSymbols, tickerTop
 		log:          slog.Default().With(slog.String("datasource", "mexc")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebSocketClient(wsEndpoint),
+		wsClient:     internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://api.mexc.com",
 		SymbolList:   symbolList.Crypto,
-		pingInterval: 30,
+		pingInterval: 20 * time.Second,
 		tzInfo:       shanghaiTimezone,
 	}
 	mexc.wsClient.SetMessageHandler(mexc.onMessage)
@@ -109,7 +109,10 @@ func (d *MexcClient) onMessage(message internal.WsMessage) {
 					"ticker", ticker, "error", err.Error())
 				return
 			}
+			d.lastTimestampMutex.Lock()
 			d.lastTimestamp = time.Now()
+			d.lastTimestampMutex.Unlock()
+
 			d.TickerTopic.Send(ticker)
 		}
 	}
@@ -119,8 +122,8 @@ func (d *MexcClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var newTickerEvent WsTickerMessage
 	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
-		d.log.Error(err.Error())
-		return &model.Ticker{}, err
+		d.log.Error("Error unmarshaling ticker", "error", err)
+		return nil, err
 	}
 
 	symbol := model.ParseSymbol(newTickerEvent.Data.Symbol)
@@ -128,6 +131,10 @@ func (d *MexcClient) parseTicker(message []byte) (*model.Ticker, error) {
 		symbol,
 		d.GetName(),
 		time.UnixMilli(newTickerEvent.Timestamp))
+	if err != nil {
+		d.log.Error("Error parsing ticker", "error", err)
+		return nil, err
+	}
 
 	return ticker, err
 }
@@ -154,17 +161,27 @@ func (d *MexcClient) GetName() string {
 
 func (d *MexcClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
+	d.lastTimestampMutex.Lock()
 	d.lastTimestamp = time.Now()
+	d.lastTimestampMutex.Unlock()
+
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
+			d.lastTimestampMutex.Lock()
 			diff := now.Sub(d.lastTimestamp)
+			d.lastTimestampMutex.Unlock()
+
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				d.lastTimestampMutex.Lock()
 				d.lastTimestamp = time.Now()
+				d.lastTimestampMutex.Unlock()
+
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+
 				d.wsClient.Reconnect()
 			}
 		}
@@ -172,7 +189,7 @@ func (d *MexcClient) setLastTickerWatcher() {
 }
 
 func (d *MexcClient) setPing() {
-	ticker := time.NewTicker(time.Duration(d.pingInterval) * time.Second)
+	ticker := time.NewTicker(d.pingInterval)
 	go func() {
 		defer ticker.Stop()
 		for range ticker.C {

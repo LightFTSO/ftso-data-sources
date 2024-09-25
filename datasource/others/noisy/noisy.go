@@ -15,7 +15,6 @@ import (
 )
 
 type NoisySourceOptions struct {
-	Name     string `mapstructure:"name"`
 	Interval string `mapstructure:"interval"`
 }
 
@@ -32,6 +31,7 @@ type NoisySource struct {
 
 func (n *NoisySource) Connect() error {
 	n.isRunning = true
+	n.SubscribeTickers()
 	n.W.Add(1)
 	return nil
 }
@@ -41,6 +41,7 @@ func (n *NoisySource) Reconnect() error {
 }
 
 func (n *NoisySource) SubscribeTickers() error {
+	n.log.Debug("starting fake ticker generation every %d", n.Interval)
 	go func(br *broadcast.Broadcaster) {
 		n.timeInterval = *time.NewTicker(n.Interval)
 
@@ -56,7 +57,6 @@ func (n *NoisySource) SubscribeTickers() error {
 				Source:    n.GetName(),
 				Timestamp: t,
 			}
-
 			br.Send(&fakeTicker)
 		}
 	}(n.TickerTopic)
@@ -86,21 +86,18 @@ func (n *NoisySource) GetName() string {
 func NewNoisySource(options *NoisySourceOptions, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*NoisySource, error) {
 	d, err := time.ParseDuration(options.Interval)
 	if err != nil {
-		slog.Warn("Using default duration", "datasource", "noisy", "name", options.Name)
+		slog.Warn("Using default duration", "datasource", "noisy")
 		d = time.Second
 	}
-	if options.Name == "" {
-		options.Name = "noisy" + d.String()
-	}
 	noisy := NoisySource{
-		name:        options.Name,
-		log:         slog.Default().With(slog.String("datasource", "noisy"), slog.String("name", options.Name)),
+		name:        "noisy",
+		log:         slog.Default().With(slog.String("datasource", "noisy")),
 		Interval:    d,
 		W:           w,
 		TickerTopic: tickerTopic,
 		SymbolList:  symbolList.Flatten(),
 	}
 
-	noisy.log.Debug("Created new datasource", "name", noisy.GetName(), "interval", d.String())
+	noisy.log.Debug("Created new datasource", "interval", d.String())
 	return &noisy, nil
 }

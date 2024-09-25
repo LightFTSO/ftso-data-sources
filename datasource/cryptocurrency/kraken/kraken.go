@@ -23,17 +23,18 @@ import (
 )
 
 type KrakenClient struct {
-	name          string
-	W             *sync.WaitGroup
-	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebSocketClient
-	wsEndpoint    string
-	apiEndpoint   string
-	SymbolList    []model.Symbol
-	lastTimestamp time.Time
-	log           *slog.Logger
+	name               string
+	W                  *sync.WaitGroup
+	TickerTopic        *broadcast.Broadcaster
+	wsClient           *internal.WebSocketClient
+	wsEndpoint         string
+	apiEndpoint        string
+	SymbolList         []model.Symbol
+	lastTimestamp      time.Time
+	lastTimestampMutex sync.Mutex
+	log                *slog.Logger
 
-	pingInterval int
+	pingInterval time.Duration
 
 	isRunning bool
 }
@@ -46,11 +47,11 @@ func NewKrakenClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 		log:          slog.Default().With(slog.String("datasource", "kraken")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebSocketClient(wsEndpoint),
+		wsClient:     internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://api.kraken.com/0",
 		SymbolList:   symbolList.Crypto,
-		pingInterval: 20,
+		pingInterval: 20 * time.Second,
 	}
 
 	kraken.wsClient.SetMessageHandler(kraken.onMessage)
@@ -109,7 +110,10 @@ func (d *KrakenClient) onMessage(message internal.WsMessage) {
 					"ticker", ticker, "error", err.Error())
 				return
 			}
+			d.lastTimestampMutex.Lock()
 			d.lastTimestamp = time.Now()
+			d.lastTimestampMutex.Unlock()
+
 			d.TickerTopic.Send(ticker)
 		}
 
@@ -133,7 +137,10 @@ func (d *KrakenClient) parseTicker(message []byte) (*model.Ticker, error) {
 			Quote: symbol.Quote},
 		d.GetName(),
 		time.Now())
-
+	if err != nil {
+		d.log.Error("Error parsing ticker", "error", err)
+		return nil, err
+	}
 	return ticker, err
 }
 
@@ -232,17 +239,27 @@ func (d *KrakenClient) GetName() string {
 
 func (d *KrakenClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
+	d.lastTimestampMutex.Lock()
 	d.lastTimestamp = time.Now()
+	d.lastTimestampMutex.Unlock()
+
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
+			d.lastTimestampMutex.Lock()
 			diff := now.Sub(d.lastTimestamp)
+			d.lastTimestampMutex.Unlock()
+
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				d.lastTimestampMutex.Lock()
 				d.lastTimestamp = time.Now()
+				d.lastTimestampMutex.Unlock()
+
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+
 				d.wsClient.Reconnect()
 			}
 		}
@@ -250,7 +267,7 @@ func (d *KrakenClient) setLastTickerWatcher() {
 }
 
 func (d *KrakenClient) setPing() {
-	ticker := time.NewTicker(time.Duration(d.pingInterval) * time.Second)
+	ticker := time.NewTicker(d.pingInterval)
 	go func() {
 		defer ticker.Stop()
 		for range ticker.C {

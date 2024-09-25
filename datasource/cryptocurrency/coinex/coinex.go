@@ -22,18 +22,19 @@ import (
 )
 
 type CoinexClient struct {
-	name           string
-	W              *sync.WaitGroup
-	TickerTopic    *broadcast.Broadcaster
-	wsClient       internal.WebSocketClient
-	wsEndpoint     string
-	apiEndpoint    string
-	SymbolList     []model.Symbol
-	lastTimestamp  time.Time
-	log            *slog.Logger
-	subscriptionId atomic.Uint64
-	pingInterval   int
-	isRunning      bool
+	name               string
+	W                  *sync.WaitGroup
+	TickerTopic        *broadcast.Broadcaster
+	wsClient           *internal.WebSocketClient
+	wsEndpoint         string
+	apiEndpoint        string
+	SymbolList         []model.Symbol
+	lastTimestamp      time.Time
+	lastTimestampMutex sync.Mutex
+	log                *slog.Logger
+	subscriptionId     atomic.Uint64
+	pingInterval       time.Duration
+	isRunning          bool
 }
 
 func NewCoinexClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*CoinexClient, error) {
@@ -44,11 +45,11 @@ func NewCoinexClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 		log:          slog.Default().With(slog.String("datasource", "coinex")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebSocketClient(wsEndpoint),
+		wsClient:     internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://api.coinex.com/v2",
 		SymbolList:   symbolList.Crypto,
-		pingInterval: 35,
+		pingInterval: 35 * time.Second,
 	}
 	coinex.wsClient.SetMessageHandler(coinex.onMessage)
 	coinex.wsClient.SetOnConnect(coinex.onConnect)
@@ -109,7 +110,9 @@ func (d *CoinexClient) onMessage(message internal.WsMessage) {
 				"error", err.Error())
 			return
 		}
+		d.lastTimestampMutex.Lock()
 		d.lastTimestamp = time.Now()
+		d.lastTimestampMutex.Unlock()
 
 		for _, v := range tickers {
 			d.TickerTopic.Send(v)
@@ -236,17 +239,27 @@ func (d *CoinexClient) GetName() string {
 
 func (d *CoinexClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
+	d.lastTimestampMutex.Lock()
 	d.lastTimestamp = time.Now()
+	d.lastTimestampMutex.Unlock()
+
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
+			d.lastTimestampMutex.Lock()
 			diff := now.Sub(d.lastTimestamp)
+			d.lastTimestampMutex.Unlock()
+
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				d.lastTimestampMutex.Lock()
 				d.lastTimestamp = time.Now()
+				d.lastTimestampMutex.Unlock()
+
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+
 				d.wsClient.Reconnect()
 			}
 		}
@@ -254,7 +267,7 @@ func (d *CoinexClient) setLastTickerWatcher() {
 }
 
 func (d *CoinexClient) setPing() {
-	ticker := time.NewTicker(time.Duration(d.pingInterval) * time.Second)
+	ticker := time.NewTicker(d.pingInterval)
 	go func() {
 		defer ticker.Stop()
 		for range ticker.C {

@@ -31,13 +31,15 @@ import (
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/whitebit"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/xt"
 	"roselabs.mx/ftso-data-sources/datasource/others/noisy"
-	metalsdev "roselabs.mx/ftso-data-sources/datasource/tradfi/metals.dev"
+	"roselabs.mx/ftso-data-sources/datasource/tradfi/metalsdev"
 	"roselabs.mx/ftso-data-sources/datasource/tradfi/tiingo"
+	"roselabs.mx/ftso-data-sources/internal"
+	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
 )
 
 type FtsoDataSource interface {
-	SubscribeTickers() error
+	SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error
 	Connect() error
 	Close() error
 	GetName() string
@@ -49,47 +51,6 @@ type DataSourceList []FtsoDataSource
 type DataSourceOptions struct {
 	Source  string                 `mapstructure:"source"`
 	Options map[string]interface{} `mapstructure:",remain"`
-}
-
-func AllDataSources() []DataSourceOptions {
-	allDataSourcesNames := []string{
-		"binance",
-		"binanceus",
-		"bitfinex",
-		"bitget",
-		"bitmart",
-		"bitrue",
-		"bitstamp",
-		"bybit",
-		"coinbase",
-		"coinex",
-		"cryptocom",
-		"digifinex",
-		"fmfw",
-		"gateio",
-		"hitbtc",
-		"huobi",
-		"kraken",
-		"kucoin",
-		"lbank",
-		"mexc",
-		"okx",
-		"pionex",
-		"toobit",
-		"whitebit",
-		"xt",
-		"tiingo",
-		"metalsdev",
-		"noisy",
-	}
-
-	var allDataSources []DataSourceOptions
-
-	for _, v := range allDataSourcesNames {
-		allDataSources = append(allDataSources, DataSourceOptions{Source: v})
-	}
-
-	return allDataSources
 }
 
 func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (FtsoDataSource, error) {

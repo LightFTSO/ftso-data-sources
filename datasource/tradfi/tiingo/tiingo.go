@@ -22,9 +22,10 @@ type TiingoClient struct {
 	name           string
 	W              *sync.WaitGroup
 	TickerTopic    *broadcast.Broadcaster
-	wsClient       *internal.WebSocketClient
+	wsClients      []*internal.WebSocketClient
 	wsEndpoint     string
-	SymbolList     []model.Symbol
+	SymbolList     model.SymbolList
+	symbolChunks   []model.SymbolList
 	apiToken       string
 	thresholdLevel int
 
@@ -52,15 +53,15 @@ func NewTiingoFxClient(options map[string]interface{}, symbolList symbols.AllSym
 		log:            slog.Default().With(slog.String("datasource", "tiingo_fx")),
 		W:              w,
 		TickerTopic:    tickerTopic,
-		wsClient:       internal.NewWebSocketClient(wsEndpoint),
+		wsClients:      []*internal.WebSocketClient{},
 		wsEndpoint:     wsEndpoint,
 		SymbolList:     symbolList.Forex,
 		pingInterval:   20 * time.Second,
 		apiToken:       apiToken,
 		thresholdLevel: 5,
 	}
-	tiingo.wsClient.SetMessageHandler(tiingo.onMessage)
-	tiingo.wsClient.SetOnConnect(tiingo.onConnect)
+	tiingo.symbolChunks = tiingo.SymbolList.ChunkSymbols(1024)
+	tiingo.log.Debug("Created new datasource")
 
 	tiingo.log.Info("Created new tiingo datasource")
 	return &tiingo, nil
@@ -74,15 +75,15 @@ func NewTiingoIexClient(options map[string]interface{}, symbolList symbols.AllSy
 		log:            slog.Default().With(slog.String("datasource", "tiingo_iex")),
 		W:              w,
 		TickerTopic:    tickerTopic,
-		wsClient:       internal.NewWebSocketClient(wsEndpoint),
+		wsClients:      []*internal.WebSocketClient{},
 		wsEndpoint:     wsEndpoint,
 		SymbolList:     symbolList.Forex,
 		pingInterval:   20 * time.Second,
 		apiToken:       options["api_token"].(string),
 		thresholdLevel: 5,
 	}
-	tiingo.wsClient.SetMessageHandler(tiingo.onMessage)
-	tiingo.wsClient.SetOnConnect(tiingo.onConnect)
+	tiingo.symbolChunks = tiingo.SymbolList.ChunkSymbols(1024)
+	tiingo.log.Debug("Created new datasource")
 
 	tiingo.log.Info("Created new tiingo datasource")
 	return &tiingo, nil
@@ -93,21 +94,23 @@ func (d *TiingoClient) Connect() error {
 	d.W.Add(1)
 	d.log.Info("Connecting...")
 
-	d.wsClient.Start()
-
-	d.setPing()
-
-	return nil
-}
-
-func (d *TiingoClient) onConnect() error {
-	err := d.SubscribeTickers()
-	if err != nil {
-		d.log.Error("Error subscribing to tickers")
-		return err
+	for _, chunk := range d.symbolChunks {
+		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
+		wsClient.SetMessageHandler(d.onMessage)
+		wsClient.SetLogger(d.log)
+		wsClient.SetOnConnect(func() error {
+			err := d.SubscribeTickers(wsClient, chunk)
+			if err != nil {
+				d.log.Error("Error subscribing to tickers")
+				return err
+			}
+			return err
+		})
+		d.wsClients = append(d.wsClients, wsClient)
+		wsClient.Start()
 	}
-
 	d.setLastTickerWatcher()
+	d.setPing()
 
 	return nil
 }
@@ -116,7 +119,9 @@ func (d *TiingoClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
-	d.wsClient.Close()
+	for _, wsClient := range d.wsClients {
+		wsClient.Close()
+	}
 	d.isRunning = false
 	d.W.Done()
 
@@ -178,9 +183,9 @@ func (d *TiingoClient) parseTicker(message []byte) (*model.Ticker, error) {
 	return ticker, nil
 }
 
-func (d *TiingoClient) SubscribeTickers() error {
-	subscribedSymbols := []model.Symbol{}
-	for _, v := range d.SymbolList {
+func (d *TiingoClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
+	subscribedSymbols := model.SymbolList{}
+	for _, v := range symbols {
 		subscribedSymbols = append(subscribedSymbols, model.Symbol{
 			Base:  v.Base,
 			Quote: v.Quote})
@@ -205,7 +210,7 @@ func (d *TiingoClient) SubscribeTickers() error {
 			"thresholdLevel": d.thresholdLevel,
 			"tickers":        s,
 		}
-		d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+		wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 	}
 
 	d.log.Debug("Subscribed ticker symbols", "symbols", len(subscribedSymbols))
@@ -239,7 +244,9 @@ func (d *TiingoClient) setLastTickerWatcher() {
 
 				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 
-				d.wsClient.Reconnect()
+				for _, wsClient := range d.wsClients {
+					wsClient.Reconnect()
+				}
 			}
 		}
 	}()
@@ -250,7 +257,9 @@ func (d *TiingoClient) setPing() {
 	go func() {
 		defer ticker.Stop()
 		for range ticker.C {
-			d.wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte("ping")})
+			for _, wsClient := range d.wsClients {
+				wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte("ping")})
+			}
 		}
 	}()
 }

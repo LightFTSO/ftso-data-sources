@@ -25,10 +25,11 @@ type CoinexClient struct {
 	name               string
 	W                  *sync.WaitGroup
 	TickerTopic        *broadcast.Broadcaster
-	wsClient           *internal.WebSocketClient
+	wsClients          []*internal.WebSocketClient
 	wsEndpoint         string
 	apiEndpoint        string
-	SymbolList         []model.Symbol
+	SymbolList         model.SymbolList
+	symbolChunks       []model.SymbolList
 	lastTimestamp      time.Time
 	lastTimestampMutex sync.Mutex
 	log                *slog.Logger
@@ -45,16 +46,13 @@ func NewCoinexClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 		log:          slog.Default().With(slog.String("datasource", "coinex")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     internal.NewWebSocketClient(wsEndpoint),
+		wsClients:    []*internal.WebSocketClient{},
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://api.coinex.com/v2",
 		SymbolList:   symbolList.Crypto,
 		pingInterval: 35 * time.Second,
 	}
-	coinex.wsClient.SetMessageHandler(coinex.onMessage)
-	coinex.wsClient.SetOnConnect(coinex.onConnect)
-
-	coinex.wsClient.SetLogger(coinex.log)
+	coinex.symbolChunks = coinex.SymbolList.ChunkSymbols(2048)
 	coinex.log.Debug("Created new datasource")
 	return &coinex, nil
 }
@@ -63,7 +61,21 @@ func (d *CoinexClient) Connect() error {
 	d.isRunning = true
 	d.W.Add(1)
 
-	d.wsClient.Start()
+	for _, chunk := range d.symbolChunks {
+		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
+		wsClient.SetMessageHandler(d.onMessage)
+		wsClient.SetLogger(d.log)
+		wsClient.SetOnConnect(func() error {
+			err := d.SubscribeTickers(wsClient, chunk)
+			if err != nil {
+				d.log.Error("Error subscribing to tickers")
+				return err
+			}
+			return err
+		})
+		d.wsClients = append(d.wsClients, wsClient)
+		wsClient.Start()
+	}
 
 	d.setPing()
 	d.setLastTickerWatcher()
@@ -71,21 +83,13 @@ func (d *CoinexClient) Connect() error {
 	return nil
 }
 
-func (d *CoinexClient) onConnect() error {
-	err := d.SubscribeTickers()
-	if err != nil {
-		d.log.Error("Error subscribing to tickers")
-		return err
-	}
-	d.setPing()
-
-	return nil
-}
 func (d *CoinexClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
-	d.wsClient.Close()
+	for _, wsClient := range d.wsClients {
+		wsClient.Close()
+	}
 	d.isRunning = false
 	d.W.Done()
 
@@ -153,7 +157,7 @@ func (d *CoinexClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	return tickers, nil
 }
 
-func (d *CoinexClient) getAvailableSymbols() ([]model.Symbol, error) {
+func (d *CoinexClient) getAvailableSymbols() (model.SymbolList, error) {
 	reqUrl := d.apiEndpoint + "/spot/ticker"
 
 	req, err := http.NewRequest(http.MethodGet, reqUrl, nil)
@@ -177,7 +181,7 @@ func (d *CoinexClient) getAvailableSymbols() ([]model.Symbol, error) {
 		return nil, err
 	}
 
-	availableMarkets := []model.Symbol{}
+	availableMarkets := model.SymbolList{}
 	for _, v := range exchangeInfo.Data {
 		availableMarkets = append(availableMarkets, model.ParseSymbol(v.Market))
 	}
@@ -185,7 +189,7 @@ func (d *CoinexClient) getAvailableSymbols() ([]model.Symbol, error) {
 	return availableMarkets, nil
 }
 
-func (d *CoinexClient) SubscribeTickers() error {
+func (d *CoinexClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
 	availableSymbols, err := d.getAvailableSymbols()
 	if err != nil {
 		d.W.Done()
@@ -193,8 +197,8 @@ func (d *CoinexClient) SubscribeTickers() error {
 		return err
 	}
 
-	subscribedSymbols := []model.Symbol{}
-	for _, v1 := range d.SymbolList {
+	subscribedSymbols := model.SymbolList{}
+	for _, v1 := range symbols {
 		for _, v2 := range availableSymbols {
 			if strings.EqualFold(strings.ToUpper(v1.Base), strings.ToUpper(v2.Base)) && strings.EqualFold(strings.ToUpper(v1.Quote), strings.ToUpper(v2.Quote)) {
 				subscribedSymbols = append(subscribedSymbols, model.Symbol{
@@ -223,7 +227,7 @@ func (d *CoinexClient) SubscribeTickers() error {
 		subMessage["params"] = map[string]interface{}{
 			"market_list": s,
 		}
-		d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+		wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 
 		// sleep a bit to avoid rate limits
 		time.Sleep(100 * time.Millisecond)
@@ -260,7 +264,9 @@ func (d *CoinexClient) setLastTickerWatcher() {
 
 				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 
-				d.wsClient.Reconnect()
+				for _, wsClient := range d.wsClients {
+					wsClient.Reconnect()
+				}
 			}
 		}
 	}()
@@ -276,7 +282,9 @@ func (d *CoinexClient) setPing() {
 				"params": map[string]interface{}{},
 				"id":     d.subscriptionId.Add(1),
 			}
-			d.wsClient.SendMessageJSON(websocket.PingMessage, ping)
+			for _, wsClient := range d.wsClients {
+				wsClient.SendMessageJSON(websocket.PingMessage, ping)
+			}
 		}
 	}()
 }

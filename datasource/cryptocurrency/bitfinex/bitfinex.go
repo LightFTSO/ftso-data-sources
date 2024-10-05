@@ -24,10 +24,11 @@ type BitfinexClient struct {
 	name               string
 	W                  *sync.WaitGroup
 	TickerTopic        *broadcast.Broadcaster
-	wsClient           *internal.WebSocketClient
+	wsClients          []*internal.WebSocketClient
 	wsEndpoint         string
 	apiEndpoint        string
-	SymbolList         []model.Symbol
+	SymbolList         model.SymbolList
+	symbolChunks       []model.SymbolList
 	lastTimestamp      time.Time
 	lastTimestampMutex sync.Mutex
 	log                *slog.Logger
@@ -48,18 +49,16 @@ func NewBitfinexClient(options interface{}, symbolList symbols.AllSymbols, ticke
 		log:          slog.Default().With(slog.String("datasource", "bitfinex")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     internal.NewWebSocketClient(wsEndpoint),
+		wsClients:    []*internal.WebSocketClient{},
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://api-pud.bitfinex.com",
 		SymbolList:   symbolList.Crypto,
 		pingInterval: 35 * time.Second,
 	}
-	bitfinex.wsClient.SetMessageHandler(bitfinex.onMessage)
-	bitfinex.wsClient.SetOnConnect(bitfinex.onConnect)
 
-	bitfinex.wsClient.SetLogger(bitfinex.log)
 	bitfinex.fetchApiSymbolMap()
 	bitfinex.channelSymbolMap = make(ChannelSymbolMap)
+	bitfinex.symbolChunks = bitfinex.SymbolList.ChunkSymbols(30)
 	bitfinex.log.Debug("Created new datasource")
 	return &bitfinex, nil
 }
@@ -68,20 +67,18 @@ func (d *BitfinexClient) Connect() error {
 	d.isRunning = true
 	d.W.Add(1)
 
-	d.wsClient.Start()
-
+	for _, chunk := range d.symbolChunks {
+		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
+		wsClient.SetMessageHandler(d.onMessage)
+		wsClient.SetLogger(d.log)
+		wsClient.SetOnConnect(func() error {
+			return d.SubscribeTickers(wsClient, chunk)
+		})
+		d.wsClients = append(d.wsClients, wsClient)
+		wsClient.Start()
+	}
 	d.setPing()
 	d.setLastTickerWatcher()
-
-	return nil
-}
-
-func (d *BitfinexClient) onConnect() error {
-	err := d.SubscribeTickers()
-	if err != nil {
-		d.log.Error("Error subscribing to tickers")
-		return err
-	}
 
 	return nil
 }
@@ -90,7 +87,9 @@ func (d *BitfinexClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
-	d.wsClient.Close()
+	for _, wsClient := range d.wsClients {
+		wsClient.Close()
+	}
 	d.isRunning = false
 	d.W.Done()
 
@@ -177,7 +176,7 @@ func (d *BitfinexClient) parseTicker(message []byte) (*model.Ticker, error) {
 	return nil, errors.New("")
 }
 
-func (d *BitfinexClient) getAvailableSymbols() ([]model.Symbol, error) {
+func (d *BitfinexClient) getAvailableSymbols() (model.SymbolList, error) {
 	reqUrl := d.apiEndpoint + "/v2/conf/pub:list:pair:exchange"
 
 	req, err := http.NewRequest(http.MethodGet, reqUrl, nil)
@@ -201,7 +200,7 @@ func (d *BitfinexClient) getAvailableSymbols() ([]model.Symbol, error) {
 		return nil, err
 	}
 
-	availableMarkets := []model.Symbol{}
+	availableMarkets := model.SymbolList{}
 	for _, v := range bitfinexMarkets[0] {
 		s := d.mapApiSymbolToNormalSymbol(v)
 		availableMarkets = append(availableMarkets, model.ParseSymbol(s))
@@ -210,7 +209,7 @@ func (d *BitfinexClient) getAvailableSymbols() ([]model.Symbol, error) {
 	return availableMarkets, nil
 }
 
-func (d *BitfinexClient) SubscribeTickers() error {
+func (d *BitfinexClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
 	availableSymbols, err := d.getAvailableSymbols()
 	if err != nil {
 		d.W.Done()
@@ -218,8 +217,8 @@ func (d *BitfinexClient) SubscribeTickers() error {
 		return err
 	}
 
-	subscribedSymbols := []model.Symbol{}
-	for _, v1 := range d.SymbolList {
+	subscribedSymbols := model.SymbolList{}
+	for _, v1 := range symbols {
 		for _, v2 := range availableSymbols {
 			if strings.EqualFold(strings.ToUpper(v1.Base), strings.ToUpper(v2.Base)) && strings.EqualFold(strings.ToUpper(v1.Quote), strings.ToUpper(v2.Quote)) {
 				subscribedSymbols = append(subscribedSymbols, model.Symbol{
@@ -240,7 +239,7 @@ func (d *BitfinexClient) SubscribeTickers() error {
 			"symbol":  fmt.Sprintf("t%s%s", base, d.mapNormalSymbolToApiSymbol(strings.ToUpper(v.Quote))),
 		}
 
-		d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+		wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 	}
 
 	d.log.Debug("Subscribed ticker symbols", "symbols", len(subscribedSymbols))
@@ -274,7 +273,9 @@ func (d *BitfinexClient) setLastTickerWatcher() {
 
 				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 
-				d.wsClient.Reconnect()
+				for _, wsClient := range d.wsClients {
+					wsClient.Reconnect()
+				}
 			}
 		}
 	}()
@@ -290,7 +291,10 @@ func (d *BitfinexClient) setPing() {
 				"params": map[string]interface{}{},
 				"id":     d.subscriptionId.Add(1),
 			}
-			d.wsClient.SendMessageJSON(websocket.PingMessage, ping)
+			for _, wsClient := range d.wsClients {
+				wsClient.SendMessageJSON(websocket.PingMessage, ping)
+			}
+
 		}
 	}()
 }

@@ -21,9 +21,10 @@ type FmfwClient struct {
 	name               string
 	W                  *sync.WaitGroup
 	TickerTopic        *broadcast.Broadcaster
-	wsClient           *internal.WebSocketClient
+	wsClients          []*internal.WebSocketClient
 	wsEndpoint         string
-	SymbolList         []model.Symbol
+	SymbolList         model.SymbolList
+	symbolChunks       []model.SymbolList
 	lastTimestamp      time.Time
 	lastTimestampMutex sync.Mutex
 	log                *slog.Logger
@@ -41,15 +42,12 @@ func NewFmfwClient(options interface{}, symbolList symbols.AllSymbols, tickerTop
 		log:          slog.Default().With(slog.String("datasource", "fmfw")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     internal.NewWebSocketClient(wsEndpoint),
+		wsClients:    []*internal.WebSocketClient{},
 		wsEndpoint:   wsEndpoint,
 		SymbolList:   symbolList.Crypto,
 		pingInterval: 15 * time.Second,
 	}
-	fmfw.wsClient.SetMessageHandler(fmfw.onMessage)
-	fmfw.wsClient.SetOnConnect(fmfw.onConnect)
-
-	fmfw.wsClient.SetLogger(fmfw.log)
+	fmfw.symbolChunks = fmfw.SymbolList.ChunkSymbols(1024)
 	fmfw.log.Debug("Created new datasource")
 	return &fmfw, nil
 }
@@ -58,7 +56,21 @@ func (d *FmfwClient) Connect() error {
 	d.isRunning = true
 	d.W.Add(1)
 
-	d.wsClient.Start()
+	for _, chunk := range d.symbolChunks {
+		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
+		wsClient.SetMessageHandler(d.onMessage)
+		wsClient.SetLogger(d.log)
+		wsClient.SetOnConnect(func() error {
+			err := d.SubscribeTickers(wsClient, chunk)
+			if err != nil {
+				d.log.Error("Error subscribing to tickers")
+				return err
+			}
+			return err
+		})
+		d.wsClients = append(d.wsClients, wsClient)
+		wsClient.Start()
+	}
 
 	d.setPing()
 	d.setLastTickerWatcher()
@@ -66,19 +78,13 @@ func (d *FmfwClient) Connect() error {
 	return nil
 }
 
-func (d *FmfwClient) onConnect() error {
-	err := d.SubscribeTickers()
-	if err != nil {
-		d.log.Error("Error subscribing to tickers")
-		return err
-	}
-	return nil
-}
 func (d *FmfwClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
-	d.wsClient.Close()
+	for _, wsClient := range d.wsClients {
+		wsClient.Close()
+	}
 	d.isRunning = false
 	d.W.Done()
 
@@ -142,10 +148,10 @@ func (d *FmfwClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	return tickers, nil
 }
 
-func (d *FmfwClient) SubscribeTickers() error {
+func (d *FmfwClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
 	// batch subscriptions in packets
-	chunksize := len(d.SymbolList)
-	for i := 0; i < len(d.SymbolList); i += chunksize {
+	chunksize := len(symbols)
+	for i := 0; i < len(symbols); i += chunksize {
 		subMessage := map[string]interface{}{
 			"ch":     "ticker/price/1s/batch",
 			"method": "subscribe",
@@ -154,7 +160,7 @@ func (d *FmfwClient) SubscribeTickers() error {
 		}
 		s := []string{}
 		for j := range chunksize {
-			if i+j >= len(d.SymbolList) {
+			if i+j >= len(symbols) {
 				continue
 			}
 			v := d.SymbolList[i+j]
@@ -166,10 +172,10 @@ func (d *FmfwClient) SubscribeTickers() error {
 
 		// sleep a bit to avoid rate limits
 		time.Sleep(10 * time.Millisecond)
-		d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+		wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 	}
 
-	d.log.Debug("Subscribed ticker symbols")
+	d.log.Debug("Subscribed ticker symbols", "symbols", len(symbols))
 
 	return nil
 }
@@ -201,7 +207,9 @@ func (d *FmfwClient) setLastTickerWatcher() {
 
 				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 
-				d.wsClient.Reconnect()
+				for _, wsClient := range d.wsClients {
+					wsClient.Reconnect()
+				}
 			}
 		}
 	}()
@@ -212,7 +220,9 @@ func (d *FmfwClient) setPing() {
 	go func() {
 		defer ticker.Stop()
 		for range ticker.C {
-			d.wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte("ping")})
+			for _, wsClient := range d.wsClients {
+				wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte("ping")})
+			}
 		}
 	}()
 }

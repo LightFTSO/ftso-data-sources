@@ -13,6 +13,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/textileio/go-threads/broadcast"
+	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
 )
@@ -27,8 +28,8 @@ type MetalsDevClient struct {
 	W                *sync.WaitGroup
 	TickerTopic      *broadcast.Broadcaster
 	Interval         time.Duration
-	CommoditySymbols []model.Symbol
-	ForexSymbols     []model.Symbol
+	CommoditySymbols model.SymbolList
+	ForexSymbols     model.SymbolList
 	apiEndpoint      string
 	apiToken         string
 	log              *slog.Logger
@@ -67,7 +68,7 @@ func (d *MetalsDevClient) Connect() error {
 	d.W.Add(1)
 	d.log.Info("Connecting...")
 
-	err := d.SubscribeTickers()
+	err := d.SubscribeTickers(nil, nil)
 	if err != nil {
 		d.log.Error("Error subscribing to tickers")
 		return err
@@ -135,7 +136,7 @@ func (d *MetalsDevClient) getLatest(useSample bool) (*LatestEndpointResponse, er
 
 }
 
-func (d *MetalsDevClient) SubscribeTickers() error {
+func (d *MetalsDevClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
 	go func(br *broadcast.Broadcaster) {
 		d.timeInterval = time.NewTicker(d.Interval)
 

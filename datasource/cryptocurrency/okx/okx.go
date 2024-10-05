@@ -22,9 +22,10 @@ type OkxClient struct {
 	name               string
 	W                  *sync.WaitGroup
 	TickerTopic        *broadcast.Broadcaster
-	wsClient           *internal.WebSocketClient
+	wsClients          []*internal.WebSocketClient
 	wsEndpoint         string
-	SymbolList         []model.Symbol
+	SymbolList         model.SymbolList
+	symbolChunks       []model.SymbolList
 	lastTimestamp      time.Time
 	lastTimestampMutex sync.Mutex
 	log                *slog.Logger
@@ -42,16 +43,13 @@ func NewOkxClient(options interface{}, symbolList symbols.AllSymbols, tickerTopi
 		log:         slog.Default().With(slog.String("datasource", "okx")),
 		W:           w,
 		TickerTopic: tickerTopic,
-		wsClient:    internal.NewWebSocketClient(wsEndpoint),
+		wsClients:   []*internal.WebSocketClient{},
 		wsEndpoint:  wsEndpoint,
 		SymbolList:  symbolList.Crypto,
 
 		pingInterval: 29 * time.Second,
 	}
-	okx.wsClient.SetMessageHandler(okx.onMessage)
-	okx.wsClient.SetOnConnect(okx.onConnect)
-
-	okx.wsClient.SetLogger(okx.log)
+	okx.symbolChunks = okx.SymbolList.ChunkSymbols(1024)
 	okx.log.Debug("Created new datasource")
 	return &okx, nil
 }
@@ -59,19 +57,24 @@ func NewOkxClient(options interface{}, symbolList symbols.AllSymbols, tickerTopi
 func (d *OkxClient) Connect() error {
 	d.isRunning = true
 	d.W.Add(1)
-	d.wsClient.Start()
+	for _, chunk := range d.symbolChunks {
+		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
+		wsClient.SetMessageHandler(d.onMessage)
+		wsClient.SetLogger(d.log)
+		wsClient.SetOnConnect(func() error {
+			err := d.SubscribeTickers(wsClient, chunk)
+			if err != nil {
+				d.log.Error("Error subscribing to tickers")
+				return err
+			}
+			return err
+		})
+		d.wsClients = append(d.wsClients, wsClient)
+		wsClient.Start()
+	}
 	d.setPing()
 	d.setLastTickerWatcher()
 
-	return nil
-}
-
-func (d *OkxClient) onConnect() error {
-	err := d.SubscribeTickers()
-	if err != nil {
-		d.log.Error("Error subscribing to tickers")
-		return err
-	}
 	return nil
 }
 
@@ -79,7 +82,9 @@ func (d *OkxClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
-	d.wsClient.Close()
+	for _, wsClient := range d.wsClients {
+		wsClient.Close()
+	}
 	d.isRunning = false
 	d.W.Done()
 
@@ -145,9 +150,9 @@ func (d *OkxClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	return tickers, nil
 }
 
-func (d *OkxClient) SubscribeTickers() error {
+func (d *OkxClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
 	s := []map[string]interface{}{}
-	for _, v := range d.SymbolList {
+	for _, v := range symbols {
 		s = append(s, map[string]interface{}{
 			"channel": "index-tickers",
 			"instId": fmt.Sprintf("%s-%s",
@@ -159,7 +164,7 @@ func (d *OkxClient) SubscribeTickers() error {
 		"args": s,
 	}
 
-	d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+	wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 
 	return nil
 }
@@ -169,7 +174,9 @@ func (d *OkxClient) setPing() {
 	go func() {
 		defer ticker.Stop()
 		for range ticker.C {
-			d.wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte(`ping`)})
+			for _, wsClient := range d.wsClients {
+				wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte(`ping`)})
+			}
 		}
 	}()
 }
@@ -201,7 +208,9 @@ func (d *OkxClient) setLastTickerWatcher() {
 
 				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 
-				d.wsClient.Reconnect()
+				for _, wsClient := range d.wsClients {
+					wsClient.Reconnect()
+				}
 			}
 		}
 	}()

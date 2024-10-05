@@ -24,16 +24,17 @@ type DigifinexClient struct {
 	name               string
 	W                  *sync.WaitGroup
 	TickerTopic        *broadcast.Broadcaster
-	wsClient           *internal.WebSocketClient
+	wsClients          []*internal.WebSocketClient
 	wsEndpoint         string
 	apiEndpoint        string
-	SymbolList         []model.Symbol
+	SymbolList         model.SymbolList
+	symbolChunks       []model.SymbolList
 	lastTimestamp      time.Time
 	lastTimestampMutex sync.Mutex
 	log                *slog.Logger
 
 	pingInterval     time.Duration
-	availableMarkets []model.Symbol
+	availableMarkets model.SymbolList
 
 	isRunning bool
 }
@@ -46,16 +47,16 @@ func NewDigifinexClient(options interface{}, symbolList symbols.AllSymbols, tick
 		log:          slog.Default().With(slog.String("datasource", "digifinex")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     internal.NewWebSocketClient(wsEndpoint),
+		wsClients:    []*internal.WebSocketClient{},
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://openapi.digifinex.com",
 		SymbolList:   symbolList.Crypto,
 		pingInterval: 15 * time.Second,
 	}
-	digifinex.wsClient.SetMessageHandler(digifinex.onMessage)
-	digifinex.wsClient.SetOnConnect(digifinex.onConnect)
-
-	digifinex.wsClient.SetLogger(digifinex.log)
+	digifinex.symbolChunks = digifinex.SymbolList.ChunkSymbols(30)
+	for _, v := range digifinex.symbolChunks {
+		fmt.Println(len(v))
+	}
 	digifinex.log.Debug("Created new datasource")
 	return &digifinex, nil
 }
@@ -64,7 +65,22 @@ func (d *DigifinexClient) Connect() error {
 	d.isRunning = true
 	d.W.Add(1)
 
-	d.wsClient.Start()
+	for _, chunk := range d.symbolChunks {
+		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
+		wsClient.SetMessageHandler(d.onMessage)
+		wsClient.SetLogger(d.log)
+		wsClient.SetOnConnect(func() error {
+			time.Sleep(500 * time.Millisecond)
+			err := d.SubscribeTickers(wsClient, chunk)
+			if err != nil {
+				d.log.Error("Error subscribing to tickers")
+				return err
+			}
+			return err
+		})
+		d.wsClients = append(d.wsClients, wsClient)
+		wsClient.Start()
+	}
 
 	d.setPing()
 	d.setLastTickerWatcher()
@@ -72,20 +88,13 @@ func (d *DigifinexClient) Connect() error {
 	return nil
 }
 
-func (d *DigifinexClient) onConnect() error {
-	err := d.SubscribeTickers()
-	if err != nil {
-		d.log.Error("Error subscribing to tickers")
-		return err
-	}
-
-	return nil
-}
 func (d *DigifinexClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
-	d.wsClient.Close()
+	for _, wsClient := range d.wsClients {
+		wsClient.Close()
+	}
 	d.isRunning = false
 	d.W.Done()
 
@@ -161,7 +170,7 @@ func (d *DigifinexClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	return tickers, nil
 }
 
-func (b *DigifinexClient) getAvailableSymbols() ([]model.Symbol, error) {
+func (b *DigifinexClient) getAvailableSymbols() (model.SymbolList, error) {
 	if b.availableMarkets != nil {
 		return b.availableMarkets, nil
 	}
@@ -189,7 +198,7 @@ func (b *DigifinexClient) getAvailableSymbols() ([]model.Symbol, error) {
 		return nil, err
 	}
 
-	availableMarkets := []model.Symbol{}
+	availableMarkets := model.SymbolList{}
 	for _, v := range exchangeInfo.Data {
 		availableMarkets = append(availableMarkets, model.ParseSymbol(v.Market))
 	}
@@ -198,7 +207,7 @@ func (b *DigifinexClient) getAvailableSymbols() ([]model.Symbol, error) {
 	return availableMarkets, nil
 }
 
-func (d *DigifinexClient) SubscribeTickers() error {
+func (d *DigifinexClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
 	availableSymbols, err := d.getAvailableSymbols()
 	if err != nil {
 		d.W.Done()
@@ -207,7 +216,7 @@ func (d *DigifinexClient) SubscribeTickers() error {
 	}
 
 	subscribedSymbols := []string{}
-	for _, v1 := range d.SymbolList {
+	for _, v1 := range symbols {
 		for _, v2 := range availableSymbols {
 			if strings.EqualFold(strings.ToUpper(v1.Base), strings.ToUpper(string(v2.Base))) &&
 				strings.EqualFold(strings.ToUpper(v1.Quote), strings.ToUpper(string(v2.Quote))) {
@@ -222,7 +231,7 @@ func (d *DigifinexClient) SubscribeTickers() error {
 	for i := 0; i < len(subscribedSymbols); i += chunksize {
 		subMessage := map[string]interface{}{
 			"method": "ticker.subscribe",
-			"id":     fmt.Sprint(rand.Uint32() % 999999),
+			"id":     fmt.Sprint(rand.Uint32() % 9999),
 		}
 		s := []string{}
 		for j := range chunksize {
@@ -233,7 +242,8 @@ func (d *DigifinexClient) SubscribeTickers() error {
 			s = append(s, v)
 		}
 		subMessage["params"] = s
-		d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+		wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+
 	}
 
 	d.log.Debug("Subscribed ticker symbols", "symbols", len(subscribedSymbols))
@@ -267,7 +277,9 @@ func (d *DigifinexClient) setLastTickerWatcher() {
 
 				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 
-				d.wsClient.Reconnect()
+				for _, wsClient := range d.wsClients {
+					wsClient.Reconnect()
+				}
 			}
 		}
 	}()
@@ -283,9 +295,12 @@ func (d *DigifinexClient) setPing() {
 				"method": "ping",
 				"params": []string{},
 			}
-			if err := d.wsClient.SendMessageJSON(websocket.TextMessage, msg); err != nil {
-				d.log.Warn("Failed to send ping", "error", err)
+			for _, wsClient := range d.wsClients {
+				if err := wsClient.SendMessageJSON(websocket.TextMessage, msg); err != nil {
+					d.log.Warn("Failed to send ping", "error", err)
+				}
 			}
+
 		}
 	}()
 }

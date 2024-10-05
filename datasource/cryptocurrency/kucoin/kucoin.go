@@ -12,6 +12,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/textileio/go-threads/broadcast"
+	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
 )
@@ -97,7 +98,7 @@ func (d *KucoinClient) IsRunning() bool {
 	return d.isRunning
 }
 
-func (d *KucoinClient) SubscribeTickers() error {
+func (d *KucoinClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
 	return nil
 }
 

@@ -194,8 +194,6 @@ func (m *RPCManager) ReloadDataSources(args struct{}, reply *DataSourceReply) er
 
 // Initialize data sources from the global configuration
 func (m *RPCManager) InitDataSources() error {
-	//allDataSources := datasource.AllDataSources()
-
 	enabledDataSources := m.GlobalConfig.Datasources
 
 	if len(enabledDataSources) < 1 {

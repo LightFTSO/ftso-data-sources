@@ -21,10 +21,11 @@ type CryptoComClient struct {
 	name               string
 	W                  *sync.WaitGroup
 	TickerTopic        *broadcast.Broadcaster
-	wsClient           *internal.WebSocketClient
+	wsClients          []*internal.WebSocketClient
 	wsEndpoint         string
 	apiEndpoint        string
-	SymbolList         []model.Symbol
+	SymbolList         model.SymbolList
+	symbolChunks       []model.SymbolList
 	lastTimestamp      time.Time
 	lastTimestampMutex sync.Mutex
 	log                *slog.Logger
@@ -44,16 +45,13 @@ func NewCryptoComClient(options interface{}, symbolList symbols.AllSymbols, tick
 		log:          slog.Default().With(slog.String("datasource", "cryptocom")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     internal.NewWebSocketClient(wsEndpoint),
+		wsClients:    []*internal.WebSocketClient{},
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://api.crypto.com/v2",
 		SymbolList:   symbolList.Crypto,
 		pingInterval: 20 * time.Second,
 	}
-	cryptocom.wsClient.SetMessageHandler(cryptocom.onMessage)
-	cryptocom.wsClient.SetOnConnect(cryptocom.onConnect)
-
-	cryptocom.wsClient.SetLogger(cryptocom.log)
+	cryptocom.symbolChunks = cryptocom.SymbolList.ChunkSymbols(399)
 	cryptocom.log.Debug("Created new datasource")
 	return &cryptocom, nil
 }
@@ -62,26 +60,34 @@ func (d *CryptoComClient) Connect() error {
 	d.isRunning = true
 	d.W.Add(1)
 
-	d.wsClient.Start()
-
-	return nil
-}
-
-func (d *CryptoComClient) onConnect() error {
-	err := d.SubscribeTickers()
-	if err != nil {
-		d.log.Error("Error subscribing to tickers")
-		return err
+	for _, chunk := range d.symbolChunks {
+		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
+		wsClient.SetMessageHandler(d.onMessage)
+		wsClient.SetLogger(d.log)
+		wsClient.SetOnConnect(func() error {
+			time.Sleep(time.Second)
+			err := d.SubscribeTickers(wsClient, chunk)
+			if err != nil {
+				d.log.Error("Error subscribing to tickers")
+				return err
+			}
+			return err
+		})
+		d.wsClients = append(d.wsClients, wsClient)
+		wsClient.Start()
 	}
 	d.setLastTickerWatcher()
 
 	return nil
 }
+
 func (d *CryptoComClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
-	d.wsClient.Close()
+	for _, wsClient := range d.wsClients {
+		wsClient.Close()
+	}
 	d.isRunning = false
 	d.W.Done()
 
@@ -151,10 +157,10 @@ func (d *CryptoComClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	return tickers, nil
 }
 
-func (d *CryptoComClient) SubscribeTickers() error {
+func (d *CryptoComClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
 	// batch subscriptions in packets of 5
 	chunksize := 10
-	for i := 0; i < len(d.SymbolList); i += chunksize {
+	for i := 0; i < len(symbols); i += chunksize {
 		subMessage := map[string]interface{}{
 			"id":     d.subscriptionId.Add(1),
 			"method": "subscribe",
@@ -175,10 +181,11 @@ func (d *CryptoComClient) SubscribeTickers() error {
 
 		// sleep a bit to avoid rate limits
 		time.Sleep(20 * time.Millisecond)
-		d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+		wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+
 	}
 
-	d.log.Debug("Subscribed ticker symbols")
+	d.log.Debug("Subscribed ticker symbols", "symbols", len(symbols))
 
 	return nil
 }
@@ -210,7 +217,9 @@ func (d *CryptoComClient) setLastTickerWatcher() {
 
 				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 
-				d.wsClient.Reconnect()
+				for _, wsClient := range d.wsClients {
+					wsClient.Reconnect()
+				}
 			}
 		}
 	}()
@@ -228,8 +237,11 @@ func (d *CryptoComClient) pong(pingMessage []byte) {
 	pong := ping
 	pong.Method = "public/respond-heartbeat"
 
-	if err := d.wsClient.SendMessageJSON(websocket.TextMessage, pong); err != nil {
-		d.log.Warn("Failed to send ping", "error", err)
-		return
+	for _, wsClient := range d.wsClients {
+		if err := wsClient.SendMessageJSON(websocket.TextMessage, pong); err != nil {
+			d.log.Warn("Failed to send ping", "error", err)
+			continue
+		}
 	}
+
 }

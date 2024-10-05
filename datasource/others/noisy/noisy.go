@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/textileio/go-threads/broadcast"
+	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
 )
@@ -23,7 +24,7 @@ type NoisySource struct {
 	W            *sync.WaitGroup
 	TickerTopic  *broadcast.Broadcaster
 	Interval     time.Duration
-	SymbolList   []model.Symbol
+	SymbolList   model.SymbolList
 	timeInterval time.Ticker
 	log          *slog.Logger
 	isRunning    bool
@@ -31,7 +32,7 @@ type NoisySource struct {
 
 func (n *NoisySource) Connect() error {
 	n.isRunning = true
-	n.SubscribeTickers()
+	n.SubscribeTickers(nil, nil)
 	n.W.Add(1)
 	return nil
 }
@@ -40,8 +41,8 @@ func (n *NoisySource) Reconnect() error {
 	return nil
 }
 
-func (n *NoisySource) SubscribeTickers() error {
-	n.log.Debug("starting fake ticker generation every %d", n.Interval)
+func (n *NoisySource) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
+	n.log.Debug("starting fake ticker generation", "interval", n.Interval.String())
 	go func(br *broadcast.Broadcaster) {
 		n.timeInterval = *time.NewTicker(n.Interval)
 

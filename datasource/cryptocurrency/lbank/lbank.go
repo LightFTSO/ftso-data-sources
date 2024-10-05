@@ -23,9 +23,10 @@ type LbankClient struct {
 	name               string
 	W                  *sync.WaitGroup
 	TickerTopic        *broadcast.Broadcaster
-	wsClient           *internal.WebSocketClient
+	wsClients          []*internal.WebSocketClient
 	wsEndpoint         string
-	SymbolList         []model.Symbol
+	SymbolList         model.SymbolList
+	symbolChunks       []model.SymbolList
 	lastTimestamp      time.Time
 	lastTimestampMutex sync.Mutex
 	log                *slog.Logger
@@ -51,16 +52,13 @@ func NewLbankClient(options interface{}, symbolList symbols.AllSymbols, tickerTo
 		log:          slog.Default().With(slog.String("datasource", "lbank")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     internal.NewWebSocketClient(wsEndpoint),
+		wsClients:    []*internal.WebSocketClient{},
 		wsEndpoint:   wsEndpoint,
 		SymbolList:   symbolList.Crypto,
 		pingInterval: 30 * time.Second,
 		tzInfo:       shanghaiTimezone,
 	}
-	lbank.wsClient.SetMessageHandler(lbank.onMessage)
-	lbank.wsClient.SetOnConnect(lbank.onConnect)
-
-	lbank.wsClient.SetLogger(lbank.log)
+	lbank.symbolChunks = lbank.SymbolList.ChunkSymbols(1024)
 	lbank.log.Debug("Created new datasource")
 	return &lbank, nil
 }
@@ -69,7 +67,21 @@ func (d *LbankClient) Connect() error {
 	d.isRunning = true
 	d.W.Add(1)
 
-	d.wsClient.Start()
+	for _, chunk := range d.symbolChunks {
+		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
+		wsClient.SetMessageHandler(d.onMessage)
+		wsClient.SetLogger(d.log)
+		wsClient.SetOnConnect(func() error {
+			err := d.SubscribeTickers(wsClient, chunk)
+			if err != nil {
+				d.log.Error("Error subscribing to tickers")
+				return err
+			}
+			return err
+		})
+		d.wsClients = append(d.wsClients, wsClient)
+		wsClient.Start()
+	}
 
 	d.setPing()
 	d.setLastTickerWatcher()
@@ -77,19 +89,13 @@ func (d *LbankClient) Connect() error {
 	return nil
 }
 
-func (d *LbankClient) onConnect() error {
-	err := d.SubscribeTickers()
-	if err != nil {
-		d.log.Error("Error subscribing to tickers")
-		return err
-	}
-	return nil
-}
 func (d *LbankClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
-	d.wsClient.Close()
+	for _, wsClient := range d.wsClients {
+		wsClient.Close()
+	}
 	d.isRunning = false
 	d.W.Done()
 
@@ -146,19 +152,17 @@ func (d *LbankClient) parseTicker(message []byte) (*model.Ticker, error) {
 	return ticker, err
 }
 
-func (d *LbankClient) SubscribeTickers() error {
-	for _, v := range d.SymbolList {
+func (d *LbankClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
+	for _, v := range symbols {
 		subMessage := map[string]interface{}{
 			"action":    "subscribe",
 			"subscribe": "tick",
 			"pair":      fmt.Sprintf("%s_%s", strings.ToUpper(v.Base), strings.ToUpper(v.Quote)),
 		}
-		d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
-		d.log.Debug("Subscribed ticker symbol", "symbols", v.GetSymbol())
+		wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 	}
 
-	d.log.Debug("Subscribed ticker symbols")
-
+	d.log.Debug("Subscribed ticker symbols", "symbols", len(symbols))
 	return nil
 }
 
@@ -189,7 +193,9 @@ func (d *LbankClient) setLastTickerWatcher() {
 
 				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 
-				d.wsClient.Reconnect()
+				for _, wsClient := range d.wsClients {
+					wsClient.Reconnect()
+				}
 			}
 		}
 	}()
@@ -201,15 +207,16 @@ func (d *LbankClient) setPing() {
 		for {
 			select {
 			case <-ticker.C:
-				id := d.subscriptionId.Add(1)
-				msg := map[string]interface{}{
-					"ping":   fmt.Sprintf("%d", id),
-					"action": "ping",
+				for _, wsClient := range d.wsClients {
+					id := d.subscriptionId.Add(1)
+					msg := map[string]interface{}{
+						"ping":   fmt.Sprintf("%d", id),
+						"action": "ping",
+					}
+					if err := wsClient.SendMessageJSON(websocket.TextMessage, msg); err != nil {
+						d.log.Warn("Failed to send ping", "error", err)
+					}
 				}
-				if err := d.wsClient.SendMessageJSON(websocket.TextMessage, msg); err != nil {
-					d.log.Warn("Failed to send ping", "error", err)
-				}
-
 			}
 		}
 	}()

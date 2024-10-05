@@ -33,7 +33,7 @@ func iterate(channel chan []interface{}, topLevel, result []interface{}, needUnp
 	}
 }
 
-func createSymbolList(bases, quotes []string) ([]model.Symbol, error) {
+func createSymbolList(bases, quotes []string) (model.SymbolList, error) {
 
 	a := make([]interface{}, len(bases))
 	for i, v := range bases {
@@ -48,7 +48,7 @@ func createSymbolList(bases, quotes []string) ([]model.Symbol, error) {
 	c := cartesianProduct(a, b)
 
 	// receive products through channel
-	symbols := []model.Symbol{}
+	symbols := model.SymbolList{}
 	for product := range c {
 		symbols = append(symbols, model.Symbol{
 			Base:  product[0].(string),
@@ -59,13 +59,13 @@ func createSymbolList(bases, quotes []string) ([]model.Symbol, error) {
 }
 
 type AllSymbols struct {
-	Crypto      []model.Symbol `mapstructure:"crypto"`
-	Forex       []model.Symbol `mapstructure:"forex"`
-	Commodities []model.Symbol `mapstructure:"commodities"`
-	Stocks      []model.Symbol `mapstructure:"stocks"`
+	Crypto      model.SymbolList `mapstructure:"crypto"`
+	Forex       model.SymbolList `mapstructure:"forex"`
+	Commodities model.SymbolList `mapstructure:"commodities"`
+	Stocks      model.SymbolList `mapstructure:"stocks"`
 }
 
-func (s *AllSymbols) Flatten() []model.Symbol {
+func (s *AllSymbols) Flatten() model.SymbolList {
 	return slices.Concat(s.Crypto, s.Forex, s.Commodities, s.Stocks)
 }
 

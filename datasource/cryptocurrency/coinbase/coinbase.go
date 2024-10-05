@@ -21,9 +21,10 @@ type CoinbaseClient struct {
 	name               string
 	W                  *sync.WaitGroup
 	TickerTopic        *broadcast.Broadcaster
-	wsClient           *internal.WebSocketClient
+	wsClients          []*internal.WebSocketClient
 	wsEndpoint         string
-	SymbolList         []model.Symbol
+	SymbolList         model.SymbolList
+	symbolChunks       []model.SymbolList
 	lastTimestamp      time.Time
 	lastTimestampMutex sync.Mutex
 	log                *slog.Logger
@@ -38,14 +39,11 @@ func NewCoinbaseClient(options interface{}, symbolList symbols.AllSymbols, ticke
 		log:         slog.Default().With(slog.String("datasource", "coinbase")),
 		W:           w,
 		TickerTopic: tickerTopic,
-		wsClient:    internal.NewWebSocketClient(wsEndpoint),
+		wsClients:   []*internal.WebSocketClient{},
 		wsEndpoint:  wsEndpoint,
 		SymbolList:  symbolList.Crypto,
 	}
-	coinbase.wsClient.SetMessageHandler(coinbase.onMessage)
-	coinbase.wsClient.SetOnConnect(coinbase.onConnect)
-
-	coinbase.wsClient.SetLogger(coinbase.log)
+	coinbase.symbolChunks = coinbase.SymbolList.ChunkSymbols(2048)
 	coinbase.log.Debug("Created new datasource")
 	return &coinbase, nil
 }
@@ -54,19 +52,23 @@ func (d *CoinbaseClient) Connect() error {
 	d.isRunning = true
 	d.W.Add(1)
 
-	d.wsClient.Start()
+	for _, chunk := range d.symbolChunks {
+		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
+		wsClient.SetMessageHandler(d.onMessage)
+		wsClient.SetLogger(d.log)
+		wsClient.SetOnConnect(func() error {
+			err := d.SubscribeTickers(wsClient, chunk)
+			if err != nil {
+				d.log.Error("Error subscribing to tickers")
+				return err
+			}
+			return err
+		})
+		d.wsClients = append(d.wsClients, wsClient)
+		wsClient.Start()
+	}
 
 	d.setLastTickerWatcher()
-
-	return nil
-}
-
-func (d *CoinbaseClient) onConnect() error {
-	err := d.SubscribeTickers()
-	if err != nil {
-		d.log.Error("Error subscribing to tickers")
-		return err
-	}
 
 	return nil
 }
@@ -75,7 +77,9 @@ func (d *CoinbaseClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
-	d.wsClient.Close()
+	for _, wsClient := range d.wsClients {
+		wsClient.Close()
+	}
 	d.isRunning = false
 	d.W.Done()
 
@@ -147,9 +151,9 @@ func (d *CoinbaseClient) parseSubscriptions(message []byte) {
 		"symbols", len(subscrSuccessMessage.Channels[0].ProductIds))
 }
 
-func (d *CoinbaseClient) SubscribeTickers() error {
+func (d *CoinbaseClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
 	s := []string{}
-	for _, v := range d.SymbolList {
+	for _, v := range symbols {
 		s = append(s, fmt.Sprintf("%s-%s", strings.ToUpper(v.Base), strings.ToUpper(v.Quote)))
 	}
 	subMessage := map[string]interface{}{
@@ -157,8 +161,7 @@ func (d *CoinbaseClient) SubscribeTickers() error {
 		"product_ids": s,
 		"channels":    []string{"ticker"},
 	}
-
-	d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+	wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 
 	return nil
 }
@@ -190,7 +193,9 @@ func (d *CoinbaseClient) setLastTickerWatcher() {
 
 				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 
-				d.wsClient.Reconnect()
+				for _, wsClient := range d.wsClients {
+					wsClient.Reconnect()
+				}
 			}
 		}
 	}()

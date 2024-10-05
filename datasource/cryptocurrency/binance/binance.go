@@ -23,10 +23,11 @@ type BinanceClient struct {
 	name               string
 	W                  *sync.WaitGroup
 	TickerTopic        *broadcast.Broadcaster
-	wsClient           *internal.WebSocketClient
+	wsClients          []*internal.WebSocketClient
 	wsEndpoint         string
 	apiEndpoint        string
-	SymbolList         []model.Symbol
+	SymbolList         model.SymbolList
+	symbolChunks       []model.SymbolList
 	lastTimestamp      time.Time
 	lastTimestampMutex sync.Mutex
 	log                *slog.Logger
@@ -41,15 +42,12 @@ func NewBinanceClient(options interface{}, symbolList symbols.AllSymbols, ticker
 		log:         slog.Default().With(slog.String("datasource", "binance")),
 		W:           w,
 		TickerTopic: tickerTopic,
-		wsClient:    internal.NewWebSocketClient(wsEndpoint),
+		wsClients:   []*internal.WebSocketClient{},
 		wsEndpoint:  wsEndpoint,
 		apiEndpoint: "https://api.binance.com",
 		SymbolList:  symbolList.Crypto,
 	}
-	binance.wsClient.SetMessageHandler(binance.onMessage)
-	binance.wsClient.SetOnConnect(binance.onConnect)
-
-	binance.wsClient.SetLogger(binance.log)
+	binance.symbolChunks = binance.SymbolList.ChunkSymbols(1024)
 	binance.log.Debug("Created new datasource")
 	return &binance, nil
 }
@@ -57,18 +55,22 @@ func NewBinanceClient(options interface{}, symbolList symbols.AllSymbols, ticker
 func (d *BinanceClient) Connect() error {
 	d.isRunning = true
 	d.W.Add(1)
-	d.wsClient.Start()
-	d.setLastTickerWatcher()
-
-	return nil
-}
-
-func (d *BinanceClient) onConnect() error {
-	err := d.SubscribeTickers()
-	if err != nil {
-		d.log.Error("Error subscribing to tickers")
-		return err
+	for _, chunk := range d.symbolChunks {
+		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
+		wsClient.SetMessageHandler(d.onMessage)
+		wsClient.SetLogger(d.log)
+		wsClient.SetOnConnect(func() error {
+			err := d.SubscribeTickers(wsClient, chunk)
+			if err != nil {
+				d.log.Error("Error subscribing to tickers")
+				return err
+			}
+			return err
+		})
+		d.wsClients = append(d.wsClients, wsClient)
+		wsClient.Start()
 	}
+	d.setLastTickerWatcher()
 
 	return nil
 }
@@ -77,7 +79,9 @@ func (d *BinanceClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
-	d.wsClient.Close()
+	for _, wsClient := range d.wsClients {
+		wsClient.Close()
+	}
 	d.W.Done()
 	d.isRunning = false
 	d.log.Info("Binance closing")
@@ -168,7 +172,7 @@ func (d *BinanceClient) getAvailableSymbols() ([]BinanceSymbol, error) {
 
 *
 */
-func (d *BinanceClient) SubscribeTickers() error {
+func (d *BinanceClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
 	availableSymbols, err := d.getAvailableSymbols()
 	if err != nil {
 		d.W.Done()
@@ -176,8 +180,8 @@ func (d *BinanceClient) SubscribeTickers() error {
 		return err
 	}
 
-	subscribedSymbols := []model.Symbol{}
-	for _, v1 := range d.SymbolList {
+	subscribedSymbols := model.SymbolList{}
+	for _, v1 := range symbols {
 		for _, v2 := range availableSymbols {
 			if strings.EqualFold(strings.ToUpper(v1.Base), strings.ToUpper(v2.BaseAsset)) && strings.EqualFold(strings.ToUpper(v1.Quote), strings.ToUpper(v2.QuoteAsset)) {
 				subscribedSymbols = append(subscribedSymbols, model.Symbol{
@@ -197,7 +201,7 @@ func (d *BinanceClient) SubscribeTickers() error {
 		"params": s,
 	}
 
-	d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+	wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 
 	d.log.Debug("Subscribed ticker symbols", "symbols", len(subscribedSymbols))
 	return nil
@@ -230,7 +234,9 @@ func (d *BinanceClient) setLastTickerWatcher() {
 
 				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 
-				d.wsClient.Reconnect()
+				for _, wsClient := range d.wsClients {
+					wsClient.Reconnect()
+				}
 			}
 		}
 	}()

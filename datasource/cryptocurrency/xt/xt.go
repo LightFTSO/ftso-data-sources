@@ -22,10 +22,11 @@ type XtClient struct {
 	name               string
 	W                  *sync.WaitGroup
 	TickerTopic        *broadcast.Broadcaster
-	wsClient           *internal.WebSocketClient
+	wsClients          []*internal.WebSocketClient
 	wsEndpoint         string
 	apiEndpoint        string
-	SymbolList         []model.Symbol
+	SymbolList         model.SymbolList
+	symbolChunks       []model.SymbolList
 	lastTimestamp      time.Time
 	lastTimestampMutex sync.Mutex
 	log                *slog.Logger
@@ -45,16 +46,13 @@ func NewXtClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic
 		log:          slog.Default().With(slog.String("datasource", "xt")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     internal.NewWebSocketClient(wsEndpoint),
+		wsClients:    []*internal.WebSocketClient{},
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://api.xt.com",
 		SymbolList:   symbolList.Crypto,
 		pingInterval: 20 * time.Second,
 	}
-	xt.wsClient.SetMessageHandler(xt.onMessage)
-	xt.wsClient.SetOnConnect(xt.onConnect)
-
-	xt.wsClient.SetLogger(xt.log)
+	xt.symbolChunks = xt.SymbolList.ChunkSymbols(1024)
 	xt.log.Debug("Created new datasource")
 	return &xt, nil
 }
@@ -63,7 +61,21 @@ func (d *XtClient) Connect() error {
 	d.isRunning = true
 	d.W.Add(1)
 
-	d.wsClient.Start()
+	for _, chunk := range d.symbolChunks {
+		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
+		wsClient.SetMessageHandler(d.onMessage)
+		wsClient.SetLogger(d.log)
+		wsClient.SetOnConnect(func() error {
+			err := d.SubscribeTickers(wsClient, chunk)
+			if err != nil {
+				d.log.Error("Error subscribing to tickers")
+				return err
+			}
+			return err
+		})
+		d.wsClients = append(d.wsClients, wsClient)
+		wsClient.Start()
+	}
 
 	d.setPing()
 	d.setLastTickerWatcher()
@@ -71,19 +83,13 @@ func (d *XtClient) Connect() error {
 	return nil
 }
 
-func (d *XtClient) onConnect() error {
-	err := d.SubscribeTickers()
-	if err != nil {
-		d.log.Error("Error subscribing to tickers")
-		return err
-	}
-	return nil
-}
 func (d *XtClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
-	d.wsClient.Close()
+	for _, wsClient := range d.wsClients {
+		wsClient.Close()
+	}
 	d.isRunning = false
 	d.W.Done()
 
@@ -132,20 +138,20 @@ func (d *XtClient) parseTicker(message []byte) (*model.Ticker, error) {
 	return ticker, err
 }
 
-func (d *XtClient) SubscribeTickers() error {
+func (d *XtClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
 	for _, v := range d.SymbolList {
 		subMessage := map[string]interface{}{
 			"id":     d.subscriptionId.Add(1),
 			"method": "subscribe",
 			"params": []string{fmt.Sprintf("ticker@%s_%s", strings.ToLower(v.Base), strings.ToLower(v.Quote))},
 		}
-		d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
-		d.log.Debug("Subscribed ticker symbol", "symbols", v.GetSymbol())
+		for _, wsClient := range d.wsClients {
+			wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+		}
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	d.log.Debug("Subscribed ticker symbols")
-
+	d.log.Debug("Subscribed ticker symbols", "symbols", len(symbols))
 	return nil
 }
 
@@ -176,7 +182,9 @@ func (d *XtClient) setLastTickerWatcher() {
 
 				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 
-				d.wsClient.Reconnect()
+				for _, wsClient := range d.wsClients {
+					wsClient.Reconnect()
+				}
 			}
 		}
 	}()
@@ -187,7 +195,9 @@ func (d *XtClient) setPing() {
 	go func() {
 		defer ticker.Stop()
 		for range ticker.C {
-			d.wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte(`ping`)})
+			for _, wsClient := range d.wsClients {
+				wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte(`ping`)})
+			}
 		}
 	}()
 }

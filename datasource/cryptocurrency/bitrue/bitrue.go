@@ -22,10 +22,11 @@ type BitrueClient struct {
 	name               string
 	W                  *sync.WaitGroup
 	TickerTopic        *broadcast.Broadcaster
-	wsClient           *internal.WebSocketClient
+	wsClients          []*internal.WebSocketClient
 	wsEndpoint         string
 	apiEndpoint        string
-	SymbolList         []model.Symbol
+	SymbolList         model.SymbolList
+	symbolChunks       []model.SymbolList
 	lastTimestamp      time.Time
 	lastTimestampMutex sync.Mutex
 	log                *slog.Logger
@@ -44,16 +45,13 @@ func NewBitrueClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 		log:          slog.Default().With(slog.String("datasource", "bitrue")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     internal.NewWebSocketClient(wsEndpoint),
+		wsClients:    []*internal.WebSocketClient{},
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://api.bitrue.com",
 		SymbolList:   symbolList.Crypto,
 		pingInterval: 20 * time.Second,
 	}
-	bitrue.wsClient.SetMessageHandler(bitrue.onMessage)
-	bitrue.wsClient.SetOnConnect(bitrue.onConnect)
-
-	bitrue.wsClient.SetLogger(bitrue.log)
+	bitrue.symbolChunks = bitrue.SymbolList.ChunkSymbols(2048)
 	bitrue.log.Debug("Created new datasource")
 	return &bitrue, nil
 }
@@ -61,28 +59,33 @@ func NewBitrueClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 func (d *BitrueClient) Connect() error {
 	d.isRunning = true
 	d.W.Add(1)
-
-	d.wsClient.Start()
-
+	for _, chunk := range d.symbolChunks {
+		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
+		wsClient.SetMessageHandler(d.onMessage)
+		wsClient.SetLogger(d.log)
+		wsClient.SetOnConnect(func() error {
+			err := d.SubscribeTickers(wsClient, chunk)
+			if err != nil {
+				d.log.Error("Error subscribing to tickers")
+				return err
+			}
+			return err
+		})
+		d.wsClients = append(d.wsClients, wsClient)
+		wsClient.Start()
+	}
 	d.setLastTickerWatcher()
 
 	return nil
 }
 
-func (d *BitrueClient) onConnect() error {
-	err := d.SubscribeTickers()
-	if err != nil {
-		d.log.Error("Error subscribing to tickers")
-		return err
-	}
-
-	return nil
-}
 func (d *BitrueClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
-	d.wsClient.Close()
+	for _, wsClient := range d.wsClients {
+		wsClient.Close()
+	}
 	d.W.Done()
 	d.isRunning = false
 
@@ -119,7 +122,9 @@ func (d *BitrueClient) onMessage(message internal.WsMessage) {
 
 		if strings.Contains(data, "ping") {
 			pong := strings.ReplaceAll(data, "ping", "pong")
-			d.wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte(pong)})
+			for _, wsClient := range d.wsClients {
+				wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte(pong)})
+			}
 			d.log.Debug("Pong received")
 			return
 		}
@@ -148,8 +153,8 @@ func (d *BitrueClient) parseTicker(message []byte) (*model.Ticker, error) {
 	return newTicker, err
 }
 
-func (d *BitrueClient) SubscribeTickers() error {
-	for _, v := range d.SymbolList {
+func (d *BitrueClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
+	for _, v := range symbols {
 		cb_id := fmt.Sprintf("%s%s", strings.ToLower(v.Base), strings.ToLower(v.Quote))
 
 		subMessage := map[string]interface{}{
@@ -159,9 +164,10 @@ func (d *BitrueClient) SubscribeTickers() error {
 				"cb_id":   cb_id,
 			},
 		}
-		d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
-		d.log.Debug("Subscribed ticker symbol", "symbols", v.GetSymbol())
+		wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 	}
+
+	d.log.Debug("Subscribed ticker symbols", "symbols", len(symbols))
 
 	return nil
 }
@@ -193,7 +199,9 @@ func (d *BitrueClient) setLastTickerWatcher() {
 
 				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 
-				d.wsClient.Reconnect()
+				for _, wsClient := range d.wsClients {
+					wsClient.Reconnect()
+				}
 			}
 		}
 	}()

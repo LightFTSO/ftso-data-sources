@@ -33,14 +33,13 @@ type WebSocketClient struct {
 	mu           sync.Mutex
 	once         sync.Once
 	reconnecting bool
-	closed       bool
+	Closed       bool
 	onConnect    func() error
 	onDisconnect func() error
 	onMessage    func(WsMessage)
 	log          *slog.Logger
 	ctx          context.Context
 	cancel       context.CancelFunc
-	wg           sync.WaitGroup
 }
 
 func NewWebSocketClient(url string) *WebSocketClient {
@@ -59,7 +58,7 @@ func NewWebSocketClient(url string) *WebSocketClient {
 func (c *WebSocketClient) SendMessage(message WsMessage) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed {
+	if c.Closed {
 		return
 	}
 	select {
@@ -112,11 +111,10 @@ func (c *WebSocketClient) Start() {
 func (c *WebSocketClient) Close() {
 	c.once.Do(func() {
 		c.mu.Lock()
-		c.closed = true
+		c.Closed = true
 		c.mu.Unlock()
 		c.cancel()
 		c.handleDisconnect()
-		c.wg.Wait()
 	})
 }
 
@@ -174,8 +172,6 @@ func (c *WebSocketClient) connect() error {
 		return fmt.Errorf("onMessage handler not set")
 	}
 
-	c.wg.Add(3) // We are starting three goroutines
-
 	go c.startListening()
 	go c.writePump()
 	go c.readPump()
@@ -190,10 +186,7 @@ func (c *WebSocketClient) connect() error {
 }
 
 func (c *WebSocketClient) readPump() {
-	defer func() {
-		c.wg.Done()
-		c.handleReconnection()
-	}()
+	defer c.handleReconnection()
 
 	for {
 		select {
@@ -216,10 +209,7 @@ func (c *WebSocketClient) readPump() {
 }
 
 func (c *WebSocketClient) writePump() {
-	defer func() {
-		c.wg.Done()
-		c.handleReconnection()
-	}()
+	defer c.handleReconnection()
 
 	for {
 		select {
@@ -248,7 +238,7 @@ func (c *WebSocketClient) write(messageType int, data []byte) error {
 func (c *WebSocketClient) handleReconnection() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.closed {
+	if c.Closed {
 		return
 	}
 	if !c.reconnecting {
@@ -273,8 +263,6 @@ func (c *WebSocketClient) handleDisconnect() {
 }
 
 func (c *WebSocketClient) startListening() {
-	defer c.wg.Done()
-
 	for {
 		select {
 		case <-c.ctx.Done():

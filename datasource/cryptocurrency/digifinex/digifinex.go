@@ -54,9 +54,6 @@ func NewDigifinexClient(options interface{}, symbolList symbols.AllSymbols, tick
 		pingInterval: 15 * time.Second,
 	}
 	digifinex.symbolChunks = digifinex.SymbolList.ChunkSymbols(30)
-	for _, v := range digifinex.symbolChunks {
-		fmt.Println(len(v))
-	}
 	digifinex.log.Debug("Created new datasource")
 	return &digifinex, nil
 }

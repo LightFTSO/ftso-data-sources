@@ -67,7 +67,7 @@ func (s *WebsocketServerConsumer) processTickerSbe(ticker *model.Ticker, sbeMars
 func (s *WebsocketServerConsumer) StartTickerListener(tickerTopic *broadcast.Broadcaster) {
 	// Listen for tickers and sends them to a Websocket connection
 	s.TickerListener = tickerTopic.Listen()
-	log.Debug("Websocker ticker listening for tickers now", "consumer", "websocket", "address", s.wsServer.Address)
+	log.Debug("Websocket ticker listening for tickers now", "consumer", "websocket", "address", s.wsServer.Address)
 	if s.config.UseSbeEncoding {
 		go func() {
 			sbeMarshaller := internal.NewSbeGoMarshaller()

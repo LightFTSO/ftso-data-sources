@@ -203,8 +203,8 @@ func (d *PionexClient) getAvailableSymbols() (model.SymbolList, error) {
 func (d *PionexClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
 	availableSymbols, err := d.getAvailableSymbols()
 	if err != nil {
-		d.W.Done()
 		d.log.Error("error obtaining available symbols. Closing bybit datasource", "error", err.Error())
+		d.W.Done()
 		return err
 	}
 

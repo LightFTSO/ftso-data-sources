@@ -175,8 +175,8 @@ func (d *BinanceClient) getAvailableSymbols() ([]BinanceSymbol, error) {
 func (d *BinanceClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
 	availableSymbols, err := d.getAvailableSymbols()
 	if err != nil {
-		d.W.Done()
 		d.log.Error("Error obtaining available symbols. Closing binance datasource %s", "error", err.Error())
+		d.W.Done()
 		return err
 	}
 

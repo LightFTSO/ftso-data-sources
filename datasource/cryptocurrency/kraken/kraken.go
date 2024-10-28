@@ -196,8 +196,8 @@ func (d *KrakenClient) getAvailableSymbols() ([]AssetPairInfo, error) {
 func (d *KrakenClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
 	availableSymbols, err := d.getAvailableSymbols()
 	if err != nil {
-		d.W.Done()
 		d.log.Error("error obtaining available symbols. Closing kraken datasource", "error", err.Error())
+		d.W.Done()
 		return err
 	}
 

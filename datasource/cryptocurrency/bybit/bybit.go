@@ -1,6 +1,7 @@
 package bybit
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -21,17 +22,21 @@ import (
 )
 
 type BybitClient struct {
-	name          string
-	W             *sync.WaitGroup
-	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebSocketClient
-	wsEndpoint    string
-	apiEndpoint   string
-	SymbolList    []model.Symbol
-	lastTimestamp time.Time
-	log           *slog.Logger
+	name               string
+	W                  *sync.WaitGroup
+	TickerTopic        *broadcast.Broadcaster
+	wsClients          []*internal.WebSocketClient
+	wsEndpoint         string
+	apiEndpoint        string
+	SymbolList         model.SymbolList
+	symbolChunks       []model.SymbolList
+	lastTimestamp      time.Time
+	lastTimestampMutex sync.Mutex
+	log                *slog.Logger
 
-	pingInterval int
+	pingInterval time.Duration
+
+	isRunning bool
 }
 
 func NewBybitClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BybitClient, error) {
@@ -42,83 +47,99 @@ func NewBybitClient(options interface{}, symbolList symbols.AllSymbols, tickerTo
 		log:          slog.Default().With(slog.String("datasource", "bybit")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebSocketClient(wsEndpoint),
+		wsClients:    []*internal.WebSocketClient{},
 		wsEndpoint:   wsEndpoint,
 		apiEndpoint:  "https://api.bybit.com",
 		SymbolList:   symbolList.Crypto,
-		pingInterval: 20,
+		pingInterval: 20 * time.Second,
 	}
-	bybit.wsClient.SetMessageHandler(bybit.onMessage)
-	bybit.wsClient.SetOnConnect(bybit.onConnect)
-
-	bybit.wsClient.SetLogger(bybit.log)
+	bybit.symbolChunks = bybit.SymbolList.ChunkSymbols(2048)
 	bybit.log.Debug("Created new datasource")
 	return &bybit, nil
 }
 
-func (b *BybitClient) Connect() error {
-	b.W.Add(1)
-
-	b.wsClient.Start()
-
-	b.setPing()
-	b.setLastTickerWatcher()
-
-	return nil
-}
-
-func (b *BybitClient) onConnect() error {
-	err := b.SubscribeTickers()
-	if err != nil {
-		b.log.Error("Error subscribing to tickers")
-		return err
+func (d *BybitClient) Connect() error {
+	d.isRunning = true
+	d.W.Add(1)
+	for _, chunk := range d.symbolChunks {
+		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
+		wsClient.SetMessageHandler(d.onMessage)
+		wsClient.SetLogger(d.log)
+		wsClient.SetOnConnect(func() error {
+			err := d.SubscribeTickers(wsClient, chunk)
+			if err != nil {
+				d.log.Error("Error subscribing to tickers")
+				return err
+			}
+			return err
+		})
+		d.wsClients = append(d.wsClients, wsClient)
+		wsClient.Start()
 	}
-	b.setPing()
-
-	return nil
-}
-func (b *BybitClient) Close() error {
-	b.wsClient.Close()
-	b.W.Done()
+	d.setPing()
+	d.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *BybitClient) onMessage(message internal.WsMessage) {
+func (d *BybitClient) Close() error {
+	if !d.IsRunning() {
+		return errors.New("datasource is not running")
+	}
+	for _, wsClient := range d.wsClients {
+		wsClient.Close()
+	}
+	d.isRunning = false
+	d.W.Done()
+
+	return nil
+}
+
+func (d *BybitClient) IsRunning() bool {
+	return d.isRunning
+}
+
+func (d *BybitClient) onMessage(message internal.WsMessage) {
 	if message.Type == websocket.TextMessage {
 		if strings.Contains(string(message.Message), "tickers.") {
-			ticker, err := b.parseTicker(message.Message)
+			ticker, err := d.parseTicker(message.Message)
 			if err != nil {
-				b.log.Error("Error parsing ticker",
+				d.log.Error("Error parsing ticker",
 					"ticker", ticker, "error", err.Error())
 				return
 			}
 
-			b.lastTimestamp = time.Now()
-			b.TickerTopic.Send(ticker)
+			d.lastTimestampMutex.Lock()
+			d.lastTimestamp = time.Now()
+			d.lastTimestampMutex.Unlock()
+
+			d.TickerTopic.Send(ticker)
 		}
 	}
 }
 
-func (b *BybitClient) parseTicker(message []byte) (*model.Ticker, error) {
+func (d *BybitClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var newTickerEvent WsTickerMessage
 	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
-		b.log.Error(err.Error())
+		d.log.Error(err.Error())
 		return &model.Ticker{}, err
 	}
 
 	symbol := model.ParseSymbol(newTickerEvent.Data.Symbol)
 	ticker, err := model.NewTicker(newTickerEvent.Data.LastPrice,
 		symbol,
-		b.GetName(),
+		d.GetName(),
 		time.UnixMilli(newTickerEvent.Time))
-
+	if err != nil {
+		d.log.Error("Error parsing ticker", "error", err)
+		return nil, err
+	}
 	return ticker, err
 }
 
-func (b *BybitClient) getAvailableSymbols() ([]BybitSymbol, error) {
-	reqUrl := b.apiEndpoint + "/v5/market/instruments-info?category=spot"
+func (d *BybitClient) getAvailableSymbols() ([]BybitSymbol, error) {
+	reqUrl := d.apiEndpoint + "/v5/market/instruments-info?category=spot"
 
 	req, err := http.NewRequest(http.MethodGet, reqUrl, nil)
 	if err != nil {
@@ -147,16 +168,16 @@ func (b *BybitClient) getAvailableSymbols() ([]BybitSymbol, error) {
 
 }
 
-func (b *BybitClient) SubscribeTickers() error {
-	availableSymbols, err := b.getAvailableSymbols()
+func (d *BybitClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
+	availableSymbols, err := d.getAvailableSymbols()
 	if err != nil {
-		b.W.Done()
-		b.log.Error("error obtaining available symbols. Closing bybit datasource", "error", err.Error())
+		d.log.Error("error obtaining available symbols. Closing bybit datasource", "error", err.Error())
+		d.W.Done()
 		return err
 	}
 
-	subscribedSymbols := []model.Symbol{}
-	for _, v1 := range b.SymbolList {
+	subscribedSymbols := model.SymbolList{}
+	for _, v1 := range symbols {
 		for _, v2 := range availableSymbols {
 			if strings.EqualFold(strings.ToUpper(v1.Base), strings.ToUpper(v2.BaseCoin)) && strings.EqualFold(strings.ToUpper(v1.Quote), strings.ToUpper(v2.QuoteCoin)) {
 				subscribedSymbols = append(subscribedSymbols, model.Symbol{
@@ -182,42 +203,56 @@ func (b *BybitClient) SubscribeTickers() error {
 			s = append(s, fmt.Sprintf("tickers.%s%s", strings.ToUpper(v.Base), strings.ToUpper(v.Quote)))
 		}
 		subMessage["args"] = s
-		b.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+		wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 	}
 
-	b.log.Debug("Subscribed ticker symbols", "symbols", len(subscribedSymbols))
+	d.log.Debug("Subscribed ticker symbols", "symbols", len(subscribedSymbols))
 	return nil
 }
 
-func (b *BybitClient) GetName() string {
-	return b.name
+func (d *BybitClient) GetName() string {
+	return d.name
 }
 
-func (b *BybitClient) setLastTickerWatcher() {
+func (d *BybitClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	b.lastTimestamp = time.Now()
+	d.lastTimestampMutex.Lock()
+	d.lastTimestamp = time.Now()
+	d.lastTimestampMutex.Unlock()
+
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
-			diff := now.Sub(b.lastTimestamp)
+			d.lastTimestampMutex.Lock()
+			diff := now.Sub(d.lastTimestamp)
+			d.lastTimestampMutex.Unlock()
+
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-				b.lastTimestamp = time.Now()
-				b.wsClient.Reconnect()
+				d.lastTimestampMutex.Lock()
+				d.lastTimestamp = time.Now()
+				d.lastTimestampMutex.Unlock()
+
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+
+				for _, wsClient := range d.wsClients {
+					wsClient.Reconnect()
+				}
 			}
 		}
 	}()
 }
 
-func (b *BybitClient) setPing() {
-	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
+func (d *BybitClient) setPing() {
+	ticker := time.NewTicker(d.pingInterval)
 	go func() {
 		defer ticker.Stop()
 		for range ticker.C {
-			b.wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte(`{"op":"ping"}`)})
+			for _, wsClient := range d.wsClients {
+				wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte(`{"op":"ping"}`)})
+			}
 		}
 	}()
 }

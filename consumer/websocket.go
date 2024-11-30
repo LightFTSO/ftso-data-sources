@@ -13,12 +13,11 @@ import (
 )
 
 type WebsocketConsumerOptions struct {
-	Enabled             bool   `mapstructure:"enabled"`
-	Host                string `mapstructure:"host"`
-	Port                int    `mapstructure:"port"`
-	TickersEndpoint     string `mapstructure:"ticker_endpoint"`
-	UseSbeEncoding      bool   `mapstructure:"use_sbe_encoding"`
-	IndividualFeedTable bool   `mapstructure:"individual_feed_table"`
+	Enabled         bool   `mapstructure:"enabled"`
+	TickersEndpoint string `mapstructure:"ticker_endpoint"`
+	UseSbeEncoding  bool   `mapstructure:"use_sbe_encoding"`
+
+	Port int
 }
 
 type WebsocketServerConsumer struct {
@@ -33,7 +32,7 @@ func (s *WebsocketServerConsumer) setup() error {
 	if err := s.wsServer.Connect(); err != nil {
 		panic(err)
 	}
-	log.Info("Websocket Consumer started.", "host", s.config.Host, "port", s.config.Port, "sbe_encoding", s.config.UseSbeEncoding)
+	log.Info("Websocket Consumer started.", "port", s.config.Port, "sbe_encoding", s.config.UseSbeEncoding)
 
 	return nil
 }
@@ -68,7 +67,7 @@ func (s *WebsocketServerConsumer) processTickerSbe(ticker *model.Ticker, sbeMars
 func (s *WebsocketServerConsumer) StartTickerListener(tickerTopic *broadcast.Broadcaster) {
 	// Listen for tickers and sends them to a Websocket connection
 	s.TickerListener = tickerTopic.Listen()
-	log.Debug("Websocker ticker listening for tickers now", "consumer", "websocket", "address", s.wsServer.Address)
+	log.Debug("Websocket ticker listening for tickers now", "consumer", "websocket", "address", s.wsServer.Address)
 	if s.config.UseSbeEncoding {
 		go func() {
 			sbeMarshaller := internal.NewSbeGoMarshaller()
@@ -91,7 +90,7 @@ func (s *WebsocketServerConsumer) CloseTickerListener() {
 }
 
 func NewWebsocketConsumer(options WebsocketConsumerOptions, useExchangeTimestamp bool) *WebsocketServerConsumer {
-	server := websocket_server.NewWebsocketServer(options.Host, options.Port, options.TickersEndpoint)
+	server := websocket_server.NewWebsocketServer(options.Port, options.TickersEndpoint)
 
 	newConsumer := &WebsocketServerConsumer{
 		wsServer:             *server,

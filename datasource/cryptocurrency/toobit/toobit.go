@@ -1,6 +1,7 @@
 package toobit
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -18,18 +19,22 @@ import (
 )
 
 type ToobitClient struct {
-	name          string
-	W             *sync.WaitGroup
-	TickerTopic   *broadcast.Broadcaster
-	wsClient      internal.WebSocketClient
-	wsEndpoint    string
-	SymbolList    []model.Symbol
-	lastTimestamp time.Time
-	log           *slog.Logger
+	name               string
+	W                  *sync.WaitGroup
+	TickerTopic        *broadcast.Broadcaster
+	wsClients          []*internal.WebSocketClient
+	wsEndpoint         string
+	SymbolList         model.SymbolList
+	symbolChunks       []model.SymbolList
+	lastTimestamp      time.Time
+	lastTimestampMutex sync.Mutex
+	log                *slog.Logger
 
-	pingInterval int
+	pingInterval time.Duration
 
 	subscriptionId atomic.Uint64
+
+	isRunning bool
 }
 
 func NewToobitClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*ToobitClient, error) {
@@ -40,69 +45,85 @@ func NewToobitClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 		log:          slog.Default().With(slog.String("datasource", "toobit")),
 		W:            w,
 		TickerTopic:  tickerTopic,
-		wsClient:     *internal.NewWebSocketClient(wsEndpoint),
+		wsClients:    []*internal.WebSocketClient{},
 		wsEndpoint:   wsEndpoint,
 		SymbolList:   symbolList.Crypto,
-		pingInterval: 60,
+		pingInterval: 60 * time.Second,
 	}
-	toobit.wsClient.SetMessageHandler(toobit.onMessage)
-	toobit.wsClient.SetOnConnect(toobit.onConnect)
-
-	toobit.wsClient.SetLogger(toobit.log)
+	toobit.symbolChunks = toobit.SymbolList.ChunkSymbols(1024)
 	toobit.log.Debug("Created new datasource")
 	return &toobit, nil
 }
 
-func (b *ToobitClient) Connect() error {
-	b.W.Add(1)
+func (d *ToobitClient) Connect() error {
+	d.isRunning = true
+	d.W.Add(1)
 
-	b.wsClient.Start()
-
-	b.setPing()
-	b.setLastTickerWatcher()
-
-	return nil
-}
-
-func (b *ToobitClient) onConnect() error {
-	err := b.SubscribeTickers()
-	if err != nil {
-		b.log.Error("Error subscribing to tickers")
-		return err
+	for _, chunk := range d.symbolChunks {
+		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
+		wsClient.SetMessageHandler(d.onMessage)
+		wsClient.SetLogger(d.log)
+		wsClient.SetOnConnect(func() error {
+			err := d.SubscribeTickers(wsClient, chunk)
+			if err != nil {
+				d.log.Error("Error subscribing to tickers")
+				return err
+			}
+			return err
+		})
+		d.wsClients = append(d.wsClients, wsClient)
+		wsClient.Start()
 	}
-	return nil
-}
-func (b *ToobitClient) Close() error {
-	b.wsClient.Close()
-	b.W.Done()
+
+	d.setPing()
+	d.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *ToobitClient) onMessage(message internal.WsMessage) {
+func (d *ToobitClient) Close() error {
+	if !d.IsRunning() {
+		return errors.New("datasource is not running")
+	}
+	for _, wsClient := range d.wsClients {
+		wsClient.Close()
+	}
+	d.isRunning = false
+	d.W.Done()
+
+	return nil
+}
+
+func (d *ToobitClient) IsRunning() bool {
+	return d.isRunning
+}
+
+func (d *ToobitClient) onMessage(message internal.WsMessage) {
 	msg := string(message.Message)
 	if message.Type == websocket.TextMessage {
 		if strings.Contains(msg, "realtimes") {
-			tickers, err := b.parseTicker(message.Message)
+			tickers, err := d.parseTicker(message.Message)
 			if err != nil {
-				b.log.Error("Error parsing ticker",
+				d.log.Error("Error parsing ticker",
 					"error", err.Error())
 				return
 			}
-			b.lastTimestamp = time.Now()
+			d.lastTimestampMutex.Lock()
+			d.lastTimestamp = time.Now()
+			d.lastTimestampMutex.Unlock()
 
 			for _, v := range tickers {
-				b.TickerTopic.Send(v)
+				d.TickerTopic.Send(v)
 			}
 		}
 	}
 }
 
-func (b *ToobitClient) parseTicker(message []byte) ([]*model.Ticker, error) {
+func (d *ToobitClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	var newTickerEvent WsTickerMessage
 	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
-		b.log.Error(err.Error())
+		d.log.Error(err.Error())
 		return []*model.Ticker{}, err
 	}
 
@@ -111,10 +132,10 @@ func (b *ToobitClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 		symbol := model.ParseSymbol(t.Symbol)
 		newTicker, err := model.NewTicker(t.Close,
 			symbol,
-			b.GetName(),
+			d.GetName(),
 			time.UnixMilli(t.Timestamp))
 		if err != nil {
-			b.log.Error("Error parsing ticker",
+			d.log.Error("Error parsing ticker",
 				"ticker", newTicker, "error", err.Error())
 			continue
 		}
@@ -124,8 +145,8 @@ func (b *ToobitClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	return tickers, nil
 }
 
-func (b *ToobitClient) SubscribeTickers() error {
-	for _, v := range b.SymbolList {
+func (d *ToobitClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
+	for _, v := range symbols {
 		subMessage := map[string]interface{}{
 			"topic": "realtimes",
 			"event": "sub",
@@ -134,54 +155,63 @@ func (b *ToobitClient) SubscribeTickers() error {
 			},
 			"symbol": fmt.Sprintf("%s%s", strings.ToUpper(v.Base), strings.ToUpper(v.Quote)),
 		}
-		b.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
-		b.log.Debug("Subscribed ticker symbol", "symbols", v.GetSymbol())
+		wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 	}
 
-	b.log.Debug("Subscribed ticker symbols")
-
+	d.log.Debug("Subscribed ticker symbols", "symbols", len(symbols))
 	return nil
 }
 
-func (b *ToobitClient) GetName() string {
-	return b.name
+func (d *ToobitClient) GetName() string {
+	return d.name
 }
 
-func (b *ToobitClient) setLastTickerWatcher() {
+func (d *ToobitClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	b.lastTimestamp = time.Now()
+	d.lastTimestampMutex.Lock()
+	d.lastTimestamp = time.Now()
+	d.lastTimestampMutex.Unlock()
+
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
-			diff := now.Sub(b.lastTimestamp)
+			d.lastTimestampMutex.Lock()
+			diff := now.Sub(d.lastTimestamp)
+			d.lastTimestampMutex.Unlock()
+
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-				b.lastTimestamp = time.Now()
-				b.wsClient.Reconnect()
+				d.lastTimestampMutex.Lock()
+				d.lastTimestamp = time.Now()
+				d.lastTimestampMutex.Unlock()
+
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+
+				for _, wsClient := range d.wsClients {
+					wsClient.Reconnect()
+				}
 			}
 		}
 	}()
 }
 
-func (b *ToobitClient) setPing() {
-	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
+func (d *ToobitClient) setPing() {
+	ticker := time.NewTicker(d.pingInterval)
 	go func() {
 		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if err := b.wsClient.SendMessageJSON(websocket.TextMessage,
+		for range ticker.C {
+			for _, wsClient := range d.wsClients {
+				if err := wsClient.SendMessageJSON(websocket.TextMessage,
 					map[string]interface{}{
-						"ping": b.subscriptionId.Add(1),
+						"ping": d.subscriptionId.Add(1),
 					},
 				); err != nil {
-					b.log.Warn("Failed to send ping", "error", err)
+					d.log.Warn("Failed to send ping", "error", err)
 				}
-
 			}
+
 		}
 	}()
 }

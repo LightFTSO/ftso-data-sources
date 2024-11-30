@@ -3,10 +3,13 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	slog "log/slog"
-	"strings"
-	"sync"
+	"net"
+	"net/http"
+	"net/rpc"
+	"net/rpc/jsonrpc"
 
 	"github.com/textileio/go-threads/broadcast"
 
@@ -15,16 +18,13 @@ import (
 	"roselabs.mx/ftso-data-sources/datasource"
 	"roselabs.mx/ftso-data-sources/flags"
 	"roselabs.mx/ftso-data-sources/logging"
-	"roselabs.mx/ftso-data-sources/symbols"
+	"roselabs.mx/ftso-data-sources/rpcmanager"
 )
 
-func init() {
+func main() {
 	// Parse command-line flags
 	flag.Parse()
 
-}
-
-func main() {
 	config, err := config.LoadConfig(*flags.ConfigFile)
 	if err != nil {
 		log.Fatalf("%s\n", err)
@@ -49,8 +49,54 @@ func run(globalConfig config.ConfigOptions) {
 
 	tickerTopic := broadcast.NewBroadcaster(config.Config.MessageBufferSize)
 
+	// Initialize consumers
 	initConsumers(tickerTopic, globalConfig)
-	initDataSources(tickerTopic, globalConfig)
+
+	// Initialize RPC Manager
+	manager := &rpcmanager.RPCManager{
+		DataSources:   make(map[string]datasource.FtsoDataSource),
+		TickerTopic:   tickerTopic,
+		GlobalConfig:  globalConfig,
+		CurrentAssets: config.Config.Assets,
+	}
+
+	// Initialize data sources
+	err := manager.InitDataSources()
+	if err != nil {
+		log.Fatalf("Failed to initialize data sources: %v", err)
+	}
+
+	// Start RPC server
+	go startRpcManager(manager)
+
+	// Wait for all data sources to finish
+	manager.Wg.Wait()
+}
+
+func startRpcManager(manager *rpcmanager.RPCManager) {
+	rpc.Register(manager)
+	rpc.HandleHTTP()
+
+	http.HandleFunc("/rpc", func(w http.ResponseWriter, r *http.Request) {
+		var conn = struct {
+			io.Reader
+			io.Writer
+			io.Closer
+		}{r.Body, w, r.Body}
+
+		jsonrpc.ServeConn(conn)
+	})
+
+	// Listen on a TCP port, e.g., 1234
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", manager.GlobalConfig.Port))
+	if err != nil {
+		log.Fatalf("Error starting RPC server: %v", err)
+	}
+	defer listener.Close()
+
+	slog.Info(fmt.Sprintf("RPC server started on port :%d", manager.GlobalConfig.Port))
+
+	http.Serve(listener, nil)
 }
 
 func enableConsumer(c consumer.Consumer, tickerTopic *broadcast.Broadcaster) {
@@ -100,59 +146,4 @@ func initConsumers(tickerTopic *broadcast.Broadcaster, config config.ConfigOptio
 		stats := consumer.NewStatisticsGenerator(config.Stats)
 		enableConsumer(stats, tickerTopic)
 	}
-
-}
-
-func initDataSources(tickerTopic *broadcast.Broadcaster, config config.ConfigOptions) error {
-	var w sync.WaitGroup
-
-	allSymbols := symbols.GetAllSymbols(config.Assets.Crypto, config.Assets.Commodities, config.Assets.Forex, config.Assets.Stocks)
-	syms := []string{}
-	for _, s := range allSymbols.Flatten() {
-		syms = append(syms, strings.ToUpper(s.GetSymbol()))
-	}
-	slog.Debug(fmt.Sprintf("list of enabled feeds: %+v", syms))
-
-	if len(allSymbols.Flatten()) < 1 {
-		if config.Env != "development" {
-			panic("we aren't watching any assets!")
-		} else {
-			slog.Warn("No assets defined, no data will be obtained!")
-		}
-	}
-
-	dataSourceList := config.Datasources
-
-	if len(dataSourceList) < 1 {
-		if config.Env != "development" {
-			panic("we aren't connecting to any datasources!")
-		} else {
-			slog.Warn("No data sources enabled, where will get the data from?")
-		}
-	}
-
-	for _, source := range dataSourceList {
-		w.Add(1)
-		go func(source datasource.DataSourceOptions) {
-			src, err := datasource.BuilDataSource(source, allSymbols, tickerTopic, &w)
-			if err != nil {
-				slog.Error("Error creating data source", "datasource", source.Source, "error", err.Error())
-				w.Done()
-				return
-			}
-			err = src.Connect()
-			if err != nil {
-				slog.Error("Error connecting", "datasource", src.GetName())
-				w.Done()
-				return
-			}
-
-			w.Done()
-		}(source)
-	}
-
-	// wait for all datasources to exit
-	w.Wait()
-
-	return nil
 }

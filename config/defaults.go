@@ -45,6 +45,7 @@ func setDefaults() {
 	viper.SetDefault("websocket_server.ticker_endpoint", "/tickers")
 	viper.SetDefault("websocket_server.use_sbe_encoding", false)
 	viper.SetDefault("websocket_server.individual_feed_table", false)
+	viper.SetDefault("websocket_server.flush_interval", "500ms")
 
 	viper.SetDefault("questdb.enabled", false)
 	viper.SetDefault("questdb.flush_interval", "10s")

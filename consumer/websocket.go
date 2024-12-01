@@ -28,7 +28,7 @@ type WebsocketServerConsumer struct {
 	config               WebsocketConsumerOptions
 	useExchangeTimestamp bool
 
-	tickerBuffer []model.Ticker
+	tickerBuffer []*model.Ticker
 	mutex        sync.Mutex
 }
 
@@ -41,7 +41,7 @@ func (s *WebsocketServerConsumer) setup() error {
 	return nil
 }
 
-func (s *WebsocketServerConsumer) processTickerBatch(tickers []model.Ticker) {
+func (s *WebsocketServerConsumer) processTickerBatch(tickers []*model.Ticker) {
 
 	// Marshal the tickers
 	payload, err := sonic.Marshal(tickers)
@@ -57,10 +57,10 @@ func (s *WebsocketServerConsumer) processTickerBatch(tickers []model.Ticker) {
 	}
 }
 
-func (s *WebsocketServerConsumer) processTickerBatchSbe(tickers []model.Ticker, sbeMarshaller *internal.SbeMarshaller) {
+func (s *WebsocketServerConsumer) processTickerBatchSbe(tickers []*model.Ticker, sbeMarshaller *internal.SbeMarshaller) {
 	var payload []byte
 	for _, ticker := range tickers {
-		encodedTicker, err := sbeMarshaller.MarshalSbe(ticker)
+		encodedTicker, err := sbeMarshaller.MarshalSbe(*ticker)
 		if err != nil {
 			log.Error("error encoding ticker", "consumer", "websocket", "error", err)
 			continue
@@ -110,11 +110,9 @@ func (s *WebsocketServerConsumer) StartTickerListener(tickerTopic *broadcast.Bro
 	log.Debug("Websocket ticker listening for tickers now", "consumer", "websocket", "address", s.wsServer.Address)
 	go func() {
 		for t := range s.TickerListener.Channel() {
-			ticker := *(t.(*model.Ticker))
-			// Adjust timestamps if necessary
+			ticker := (t.(*model.Ticker))
 			if !s.useExchangeTimestamp {
-				now := time.Now().UTC()
-				ticker.Timestamp = now
+				ticker.Timestamp = time.Now().UTC()
 
 			}
 			s.mutex.Lock()

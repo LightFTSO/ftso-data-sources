@@ -18,11 +18,10 @@ const TICKERS_KEY string = "tickers"
 type RedisOptions struct {
 	Enabled       bool
 	ClientOptions rueidis.ClientOption `mapstructure:"client_options"`
-	IncludeStdout bool                 `mapstructure:"include_stdout"`
 	TsOptions     struct {
-		Retention time.Duration
-		ChunkSize int64
-		MaxMemory string
+		Retention time.Duration `mapstructure:"include_stdout"`
+		ChunkSize int64         `mapstructure:"chunksize"`
+		MaxMemory string        `mapstructure:"maxmemory"`
 	} `mapstructure:"ts"`
 }
 
@@ -43,13 +42,14 @@ type RedisConsumer struct {
 }
 
 func (s *RedisConsumer) setup() error {
-	log.Info("Setting maxmemory configuration value")
+	log.Info("Setting maxmemory configuration value", "maxmemory", s.instanceMaxMemory, "consumer", "redis")
 	maxMemCmd := s.redisClient.B().
 		ConfigSet().
 		ParameterValue().
 		ParameterValue("maxmemory", s.instanceMaxMemory).
 		Build()
-	_, err := s.redisClient.Do(context.Background(), maxMemCmd).ToString()
+	r, err := s.redisClient.Do(context.Background(), maxMemCmd).ToString()
+	log.Info(r)
 	if err != nil {
 		log.Error("Error setting maxmemory", "consumer", "redis", "error", err)
 		panic(err)
@@ -60,7 +60,7 @@ func (s *RedisConsumer) setup() error {
 
 	log.Info("Creating informational keys", "consumer", "redis")
 
-	cmd := s.redisClient.B().Keys().Pattern("ts:*").Build()
+	cmd := s.redisClient.B().Keys().Pattern(fmt.Sprintf("%s:*", TICKERS_KEY)).Build()
 	tsKeys, err := s.redisClient.Do(context.Background(), cmd).AsStrSlice()
 	if err != nil {
 		log.Error("Error creating meta informational keys", "consumer", "redis")

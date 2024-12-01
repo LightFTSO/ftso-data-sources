@@ -118,13 +118,13 @@ questdb:
 # See https://redis.io/docs/latest/develop/data-types/timeseries/
 redis_ts:
   enabled: false
-  include_stdout: false
-  num_threads: 12
+  include_stdout: False
   ts:
     retention: 1h
     chunksize: 2048
+    maxmemory: 4gb
   client_options:
-    initaddress: # list of redis instance or cluster nodes
+    initaddress:
       - "127.0.0.1:6379" 
     username:
     password:

@@ -188,6 +188,7 @@ func NewRedisConsumer(options RedisOptions, useExchangeTimestamp bool) *RedisCon
 		redisClient:          r,
 		tsRetention:          options.TsOptions.Retention,
 		tsChunkSize:          options.TsOptions.ChunkSize,
+		instanceMaxMemory:    options.TsOptions.MaxMemory,
 		useExchangeTimestamp: useExchangeTimestamp,
 	}
 	newConsumer.setup()

@@ -41,8 +41,6 @@ func UpdateConfig(newConfig ConfigOptions, saveCurrentConfig bool) {
 	viper.Set("redis.client_options.initaddress", newConfig.RedisOptions.ClientOptions.InitAddress)
 	viper.Set("redis.client_options.username", newConfig.RedisOptions.ClientOptions.Username)
 	viper.Set("redis.client_options.password", newConfig.RedisOptions.ClientOptions.Password)
-	viper.Set("redis.num_threads", newConfig.RedisOptions.NumThreads)
-	viper.Set("redis.include_stdout", newConfig.RedisOptions.IncludeStdout)
 	viper.Set("redis.ts.retention", newConfig.RedisOptions.TsOptions.Retention)
 	viper.Set("redis.ts.chunksize", newConfig.RedisOptions.TsOptions.ChunkSize)
 

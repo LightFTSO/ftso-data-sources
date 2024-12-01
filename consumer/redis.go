@@ -5,42 +5,61 @@ import (
 	"fmt"
 	log "log/slog"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/redis/rueidis"
 	"github.com/textileio/go-threads/broadcast"
-	"roselabs.mx/ftso-data-sources/constants"
 	"roselabs.mx/ftso-data-sources/model"
 )
 
+const TICKERS_KEY string = "tickers"
+
+type RedisOptions struct {
+	Enabled       bool
+	ClientOptions rueidis.ClientOption `mapstructure:"client_options"`
+	IncludeStdout bool                 `mapstructure:"include_stdout"`
+	TsOptions     struct {
+		Retention time.Duration
+		ChunkSize int64
+		MaxMemory string
+	} `mapstructure:"ts"`
+}
+
 type RedisConsumer struct {
 	TickerListener *broadcast.Listener
-
-	toStdout bool
-
-	numThreads int
 
 	redisClient rueidis.Client
 
 	tsRetention          time.Duration
 	tsChunkSize          int64
+	instanceMaxMemory    string
 	useExchangeTimestamp bool
-}
 
-type RedisOptions struct {
-	Enabled       bool
-	ClientOptions rueidis.ClientOption `mapstructure:"client_options"`
-	NumThreads    int                  `mapstructure:"num_threads"`
-	IncludeStdout bool                 `mapstructure:"include_stdout"`
-	TsOptions     struct {
-		Retention time.Duration
-		ChunkSize int64
-	} `mapstructure:"ts"`
+	tickerBuffer []*model.Ticker
+	mutex        sync.Mutex
+
+	timeSeriesKeys map[string]bool
 }
 
 func (s *RedisConsumer) setup() error {
+	log.Info("Setting maxmemory configuration value")
+	maxMemCmd := s.redisClient.B().
+		ConfigSet().
+		ParameterValue().
+		ParameterValue("maxmemory", s.instanceMaxMemory).
+		Build()
+	_, err := s.redisClient.Do(context.Background(), maxMemCmd).ToString()
+	if err != nil {
+		log.Error("Error setting maxmemory", "consumer", "redis", "error", err)
+		panic(err)
+	}
+
+	// initialize
+	s.timeSeriesKeys = make(map[string]bool)
+
 	log.Info("Creating informational keys", "consumer", "redis")
-	log.Info("Setting up regular info messages", "consumer", "redis")
+
 	cmd := s.redisClient.B().Keys().Pattern("ts:*").Build()
 	tsKeys, err := s.redisClient.Do(context.Background(), cmd).AsStrSlice()
 	if err != nil {
@@ -58,39 +77,99 @@ func (s *RedisConsumer) setup() error {
 
 }
 
-func (s *RedisConsumer) processTicker(ticker *model.Ticker) {
-	if !s.useExchangeTimestamp {
-		ticker.Timestamp = time.Now().UTC()
+func (s *RedisConsumer) processTickerBatch(tickers []*model.Ticker) {
+	tsMaddCommand := s.redisClient.B().TsMadd().KeyTimestampValue()
+
+	for _, ticker := range tickers {
+		val, err := strconv.ParseFloat(ticker.LastPrice, 64)
+		if err != nil {
+			log.Error("Error parsing float", "value", ticker.LastPrice, "consumer", "redis", "error", err)
+			continue
+		}
+		key := fmt.Sprintf("%s:%s:%s:%s", TICKERS_KEY, ticker.Source, ticker.Base, ticker.Quote)
+
+		// Check if the key exists in our map
+		if !s.timeSeriesKeys[key] {
+			// Check if key exists in Redis
+			cmd := s.redisClient.B().Exists().Key(key).Build()
+			exists, err := s.redisClient.Do(context.Background(), cmd).AsBool()
+			if err != nil {
+				log.Error("Error checking key existence", "consumer", "redis", "key", key, "error", err)
+				continue
+			}
+			if !exists {
+				// Create the time series
+				cmd := s.redisClient.B().
+					TsCreate().
+					Key(key).
+					Retention(s.tsRetention.Milliseconds()).
+					EncodingCompressed().
+					DuplicatePolicyFirst().
+					Labels().
+					Labels("source", ticker.Source).
+					Labels("base", ticker.Base).
+					Labels("quote", ticker.Quote).
+					Build()
+				err := s.redisClient.Do(context.Background(), cmd).Error()
+				if err != nil {
+					log.Error("Error creating time series", "consumer", "redis", "key", key, "error", err)
+					continue
+				}
+			}
+			// Mark the key as existing
+			s.timeSeriesKeys[key] = true
+		}
+
+		ts := ticker.Timestamp.UTC().UnixMilli()
+
+		tsMaddCommand = tsMaddCommand.KeyTimestampValue(key, ts, val)
 	}
 
-	if s.toStdout {
-		fmt.Printf(
-			"%s source=%s symbol=%s last_price=%s ts=%d\n",
-			time.Now().Format(constants.TS_FORMAT), ticker.Source, ticker.Symbol, ticker.LastPrice, ticker.Timestamp.UTC().UnixMilli())
-	}
-	key := fmt.Sprintf("ts:%s:%s", ticker.Source, ticker.Symbol)
-	val, _ := strconv.ParseFloat(ticker.LastPrice, 64)
-	cmd := s.redisClient.B().TsAdd().Key(key).Timestamp(strconv.FormatInt(ticker.Timestamp.UTC().UnixMilli(), 10)).
-		Value(val).Retention(s.tsRetention.Milliseconds()).EncodingCompressed().OnDuplicateLast().Labels().Labels("type", "ticker").
-		Labels("source", ticker.Source).Labels("base", ticker.Base).Labels("quote", ticker.Quote).Build()
-	err := s.redisClient.Do(context.Background(), cmd).Error()
+	err := s.redisClient.Do(context.Background(), tsMaddCommand.Build()).Error()
 	if err != nil {
-		log.Error("Error executing ts.ADD", "consumer", "redis", "error", err)
+		log.Error("Error executing TS.MADD", "consumer", "redis", "error", err)
+	}
+
+}
+
+func (s *RedisConsumer) flushTickers() {
+	tickerInterval := time.NewTicker(time.Duration(200 * time.Millisecond))
+	defer tickerInterval.Stop()
+
+	for range tickerInterval.C {
+		s.mutex.Lock()
+		if len(s.tickerBuffer) == 0 {
+			s.mutex.Unlock()
+			continue
+		}
+		tickersToProcess := s.tickerBuffer
+		s.tickerBuffer = nil // Reset the buffer
+		s.mutex.Unlock()
+
+		s.processTickerBatch(tickersToProcess)
+
 	}
 }
 
 func (s *RedisConsumer) StartTickerListener(tickerTopic *broadcast.Broadcaster) {
 	// Listen for tickers in the ch channel and sends them to a io.Writer
-	log.Debug(fmt.Sprintf("Redis ticker listener configured with %d consumer goroutines", s.numThreads), "consumer", "redis", "num_threads", s.numThreads)
+	log.Debug("Redis ticker listener started", "consumer", "redis")
 	s.TickerListener = tickerTopic.Listen()
-	for consumerId := 1; consumerId <= s.numThreads; consumerId++ {
-		go func(consumerId int) {
-			log.Debug(fmt.Sprintf("Redis ticker consumer %d listening for tickers now", consumerId), "consumer", "redis", "consumer_num", consumerId)
-			for ticker := range s.TickerListener.Channel() {
-				s.processTicker(ticker.(*model.Ticker))
+	go func() {
+		for t := range s.TickerListener.Channel() {
+			ticker := (t.(*model.Ticker))
+			if !s.useExchangeTimestamp {
+				ticker.Timestamp = time.Now().UTC()
 			}
-		}(consumerId)
-	}
+
+			s.mutex.Lock()
+			s.tickerBuffer = append(s.tickerBuffer, ticker)
+			s.mutex.Unlock()
+
+		}
+	}()
+	// Start the flush goroutine
+	go s.flushTickers()
 
 }
 func (s *RedisConsumer) CloseTickerListener() {
@@ -106,8 +185,6 @@ func NewRedisConsumer(options RedisOptions, useExchangeTimestamp bool) *RedisCon
 
 	newConsumer := &RedisConsumer{
 		redisClient:          r,
-		numThreads:           options.NumThreads,
-		toStdout:             options.IncludeStdout,
 		tsRetention:          options.TsOptions.Retention,
 		tsChunkSize:          options.TsOptions.ChunkSize,
 		useExchangeTimestamp: useExchangeTimestamp,

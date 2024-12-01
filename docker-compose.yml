@@ -9,20 +9,17 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml
     networks:
-      - lightftso-testing
+      - ftso-data-sources
     environment:
       - ENV=production
 
   redis:
     image: redis/redis-stack:latest
-    container_name: redis-instance-lightftso
+    container_name: redis-ftso-data-sources
     restart: unless-stopped
     ports:
       - 6379:6379
       - 8001:8001
-    volumes:
-      - ./redis_persistent_storage:/data
-      - ./redis.conf:/redis-stack.conf
     environment:
       #- REDIS_ARGS=""
       #- REDISEARCH_ARGS=""
@@ -30,7 +27,7 @@ services:
       - REDISTIMESERIES_ARGS="RETENTION_POLICY=86400000"
       #- REDISBLOOM_ARGS=""
     networks:
-      - lightftso-testing
+      - ftso-data-sources
 
   mosquitto:
     image: eclipse-mosquitto:latest
@@ -44,7 +41,7 @@ services:
       - ./mosquitto/storage/data:/mosquitto/data
       - ./mosquitto/storage/log:/mosquitto/log
     networks:
-      - lightftso-testing
+      - ftso-data-sources
 
   questdb:
     image: questdb/questdb:latest
@@ -58,7 +55,7 @@ services:
     volumes:
       - ./questdb:/root/.questdb
     networks:
-      - lightftso-testing
+      - ftso-data-sources
     environment:
       - QDB_LOG_W_STDOUT_LEVEL=ERROR
       - QDB_LOG_W_FILE_LEVEL=ERROR
@@ -73,6 +70,6 @@ services:
       - QBD_LINE_UDP_ENABLED=false # Disable influxdb udp server
 
 networks:
-  lightftso-testing:
+  ftso-data-sources:
 
 

@@ -5,9 +5,7 @@ import (
 	log "log/slog"
 	"time"
 
-	"github.com/bytedance/sonic"
 	"github.com/textileio/go-threads/broadcast"
-	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -18,20 +16,17 @@ type MqttConsumer struct {
 
 	numThreads int
 
-	useSbeEncoding bool
-
 	mqttClient           mqtt.Client
 	qosLevel             int
 	useExchangeTimestamp bool
 }
 
 type MqttConsumerOptions struct {
-	Enabled        bool
-	Url            string             `mapstructure:"url"`
-	ClientOptions  mqtt.ClientOptions `mapstructure:"client_options"`
-	NumThreads     int                `mapstructure:"num_threads"`
-	UseSbeEncoding bool               `mapstructure:"use_sbe_encoding"`
-	QOSLevel       int                `mapstructure:"qos_level"`
+	Enabled       bool
+	Url           string             `mapstructure:"url"`
+	ClientOptions mqtt.ClientOptions `mapstructure:"client_options"`
+	NumThreads    int                `mapstructure:"num_threads"`
+	QOSLevel      int                `mapstructure:"qos_level"`
 }
 
 func (s *MqttConsumer) setup() error {
@@ -45,28 +40,16 @@ func (s *MqttConsumer) setup() error {
 
 }
 
-func (s *MqttConsumer) processTicker(ticker *model.Ticker, sbeMarshaller *internal.SbeMarshaller) {
+func (s *MqttConsumer) processTicker(ticker *model.Ticker) {
 	if !s.useExchangeTimestamp {
 		ticker.Timestamp = time.Now().UTC()
 	}
 
 	channel := fmt.Sprintf("tickers/%s/%s/%s", ticker.Source, ticker.Base, ticker.Quote)
 
-	if s.useSbeEncoding {
-		payload, err := sbeMarshaller.MarshalSbe(*ticker)
-		if err != nil {
-			log.Error("error encoding ticker", "consumer", "mqtt", "error", err)
-		}
-		token := s.mqttClient.Publish(channel, byte(s.qosLevel), false, payload)
-		token.Wait()
-	} else {
-		payload, err := sonic.Marshal(ticker)
-		if err != nil {
-			log.Error("error encoding ticker", "consumer", "mqtt", "error", err)
-		}
-		token := s.mqttClient.Publish(channel, byte(s.qosLevel), false, payload)
-		token.Wait()
-	}
+	payload := fmt.Sprintf("%s,%d", ticker.LastPrice, ticker.Timestamp.UnixMilli())
+	token := s.mqttClient.Publish(channel, byte(s.qosLevel), false, payload)
+	token.Wait()
 }
 
 func (s *MqttConsumer) StartTickerListener(tickerTopic *broadcast.Broadcaster) {
@@ -75,10 +58,9 @@ func (s *MqttConsumer) StartTickerListener(tickerTopic *broadcast.Broadcaster) {
 	s.TickerListener = tickerTopic.Listen()
 	for consumerId := 1; consumerId <= s.numThreads; consumerId++ {
 		go func(consumerId int) {
-			sbeMarshaller := internal.NewSbeGoMarshaller()
-			log.Debug(fmt.Sprintf("MQTT ticker consumer %d listening for tickers now", consumerId), "consumer", "mqtt", "consumer_num", consumerId)
+			log.Debug(fmt.Sprintf("MQTT ticker consumer %d goroutine listening for tickers now", consumerId), "consumer", "mqtt", "consumer_num", consumerId)
 			for ticker := range s.TickerListener.Channel() {
-				s.processTicker(ticker.(*model.Ticker), &sbeMarshaller)
+				s.processTicker(ticker.(*model.Ticker))
 			}
 		}(consumerId)
 	}
@@ -102,7 +84,6 @@ func NewMqttConsumer(options MqttConsumerOptions, useExchangeTimestamp bool) *Mq
 	newConsumer := &MqttConsumer{
 		mqttClient:           mqtt.NewClient(opts),
 		numThreads:           options.NumThreads,
-		useSbeEncoding:       options.UseSbeEncoding,
 		qosLevel:             options.QOSLevel,
 		useExchangeTimestamp: useExchangeTimestamp,
 	}

@@ -27,8 +27,7 @@ func setDefaults() {
 	viper.SetDefault("file_consumer.filename", "")
 
 	viper.SetDefault("mqtt.enabled", false)
-	viper.SetDefault("mqtt.num_threads", 1)
-	viper.SetDefault("mqtt.use_sbe_encoding", true)
+	viper.SetDefault("mqtt.num_threads", 2)
 	viper.SetDefault("mqtt.qos_level", 0)
 
 	viper.SetDefault("redis.enabled", false)
@@ -41,9 +40,7 @@ func setDefaults() {
 	viper.SetDefault("redis.ts.chunksize", 4096)
 
 	viper.SetDefault("websocket_server.enabled", false)
-	viper.SetDefault("websocket_server.use_sbe_encoding", false)
 	viper.SetDefault("websocket_server.ticker_endpoint", "/tickers")
-	viper.SetDefault("websocket_server.use_sbe_encoding", false)
 	viper.SetDefault("websocket_server.individual_feed_table", false)
 	viper.SetDefault("websocket_server.flush_interval", "500ms")
 

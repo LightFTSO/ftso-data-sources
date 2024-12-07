@@ -8,7 +8,6 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/textileio/go-threads/broadcast"
 	"golang.org/x/net/websocket"
-	"roselabs.mx/ftso-data-sources/internal"
 	websocket_server "roselabs.mx/ftso-data-sources/internal/websocket_server"
 	"roselabs.mx/ftso-data-sources/model"
 )
@@ -16,7 +15,6 @@ import (
 type WebsocketConsumerOptions struct {
 	Enabled         bool          `mapstructure:"enabled"`
 	TickersEndpoint string        `mapstructure:"ticker_endpoint"`
-	UseSbeEncoding  bool          `mapstructure:"use_sbe_encoding"`
 	FlushInterval   time.Duration `mapstructure:"flush_interval"`
 	Port            int
 }
@@ -36,7 +34,7 @@ func (s *WebsocketServerConsumer) setup() error {
 	if err := s.wsServer.Connect(); err != nil {
 		panic(err)
 	}
-	log.Info("Websocket Consumer started.", "port", s.config.Port, "sbe_encoding", s.config.UseSbeEncoding)
+	log.Info("Websocket Consumer started.", "port", s.config.Port)
 
 	return nil
 }
@@ -57,33 +55,9 @@ func (s *WebsocketServerConsumer) processTickerBatch(tickers []*model.Ticker) {
 	}
 }
 
-func (s *WebsocketServerConsumer) processTickerBatchSbe(tickers []*model.Ticker, sbeMarshaller *internal.SbeMarshaller) {
-	var payload []byte
-	for _, ticker := range tickers {
-		encodedTicker, err := sbeMarshaller.MarshalSbe(*ticker)
-		if err != nil {
-			log.Error("error encoding ticker", "consumer", "websocket", "error", err)
-			continue
-		}
-		encodedTicker = append(encodedTicker, '\n')
-		payload = append(payload, encodedTicker...)
-	}
-
-	// Broadcast the payload
-	err := s.wsServer.BroadcastMessage(websocket.BinaryFrame, payload)
-	if err != nil {
-		log.Error("error broadcasting tickers", "consumer", "websocket", "error", err)
-	}
-}
-
 func (s *WebsocketServerConsumer) flushTickers() {
 	ticker := time.NewTicker(s.config.FlushInterval)
 	defer ticker.Stop()
-	var sbeMarshaller *internal.SbeMarshaller
-	if s.config.UseSbeEncoding {
-		marshaller := internal.NewSbeGoMarshaller()
-		sbeMarshaller = &marshaller
-	}
 
 	for range ticker.C {
 		s.mutex.Lock()
@@ -95,11 +69,7 @@ func (s *WebsocketServerConsumer) flushTickers() {
 		s.tickerBuffer = nil // Reset the buffer
 		s.mutex.Unlock()
 
-		if s.config.UseSbeEncoding {
-			s.processTickerBatchSbe(tickersToProcess, sbeMarshaller)
-		} else {
-			s.processTickerBatch(tickersToProcess)
-		}
+		s.processTickerBatch(tickersToProcess)
 
 	}
 }

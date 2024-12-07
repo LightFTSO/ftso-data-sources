@@ -34,7 +34,6 @@ func UpdateConfig(newConfig ConfigOptions, saveCurrentConfig bool) {
 
 	viper.Set("mqtt.enabled", newConfig.MQTTConsumerOptions.Enabled)
 	viper.Set("mqtt.num_threads", newConfig.MQTTConsumerOptions.NumThreads)
-	viper.Set("mqtt.use_sbe_encoding", newConfig.MQTTConsumerOptions.UseSbeEncoding)
 	viper.Set("mqtt.qos_level", newConfig.MQTTConsumerOptions.QOSLevel)
 
 	viper.Set("redis.enabled", newConfig.RedisOptions.Enabled)
@@ -45,10 +44,8 @@ func UpdateConfig(newConfig ConfigOptions, saveCurrentConfig bool) {
 	viper.Set("redis.ts.chunksize", newConfig.RedisOptions.TsOptions.ChunkSize)
 
 	viper.Set("websocket_server.enabled", newConfig.WebsocketConsumerOptions.Enabled)
-	viper.Set("websocket_server.use_sbe_encoding", newConfig.WebsocketConsumerOptions.UseSbeEncoding)
 	viper.Set("websocket_server.port", newConfig.WebsocketConsumerOptions.Port)
 	viper.Set("websocket_server.ticker_endpoint", newConfig.WebsocketConsumerOptions.TickersEndpoint)
-	viper.Set("websocket_server.use_sbe_encoding", newConfig.WebsocketConsumerOptions.UseSbeEncoding)
 
 	viper.Set("questdb.enabled", newConfig.QuestDBConsumerOptions.Enabled)
 	viper.Set("questdb.flush_interval", newConfig.QuestDBConsumerOptions.FlushInterval)

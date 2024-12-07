@@ -42,14 +42,16 @@ type RedisConsumer struct {
 }
 
 func (s *RedisConsumer) setup() error {
-	log.Info("Setting maxmemory configuration value", "maxmemory", s.instanceMaxMemory, "consumer", "redis")
+	log.Info("Setting maxmemory configuration value", "consumer", "redis", "maxmemory", s.instanceMaxMemory, "maxmemory-policy", "volatile-ttl")
 	if len(s.instanceMaxMemory) <= 0 {
 		log.Warn("Redis's config param maxmemory is empty. Please check memory usage", "consumer", "redis")
 	}
 	maxMemCmd := s.redisClient.B().
 		ConfigSet().
 		ParameterValue().
-		ParameterValue("maxmemory", s.instanceMaxMemory).Build()
+		ParameterValue("maxmemory", s.instanceMaxMemory).
+		ParameterValue("maxmemory-policy", "volatile-ttl").
+		Build()
 
 	if err := s.redisClient.Do(context.Background(), maxMemCmd).Error(); err != nil {
 		log.Error("Error setting maxmemory", "consumer", "redis", "error", err)

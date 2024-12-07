@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/textileio/go-threads/broadcast"
+	"golang.org/x/exp/rand"
 	"roselabs.mx/ftso-data-sources/model"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -74,12 +75,19 @@ func (s *MqttConsumer) CloseTickerListener() {
 func NewMqttConsumer(options MqttConsumerOptions, useExchangeTimestamp bool) *MqttConsumer {
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(options.Url)
-	opts.SetCleanSession(false)
+	opts.SetCleanSession(true)
 	//opts.SetDefaultPublishHandler()
 	opts.SetAutoReconnect(true)
 	opts.SetUsername("")
 	opts.SetPassword("")
-	opts.SetClientID("ftso-data-sources")
+	opts.SetClientID((func(n int) string {
+		const letterBytes = "abcdefghijklmnopqrstuvwxyz1234567890"
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = letterBytes[rand.Int63()%int64(len(letterBytes))]
+		}
+		return string(b)
+	})(12)) // create a random ClientID
 
 	newConsumer := &MqttConsumer{
 		mqttClient:           mqtt.NewClient(opts),

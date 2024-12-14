@@ -35,7 +35,7 @@ type ConfigOptions struct {
 
 	RedisOptions             consumer.RedisOptions             `mapstructure:"redis_ts"`
 	WebsocketConsumerOptions consumer.WebsocketConsumerOptions `mapstructure:"websocket_server"`
-	FileFileConsumerOptions  consumer.FileConsumerOptions      `mapstructure:"file_output"`
+	FileConsumerOptions      consumer.FileConsumerOptions      `mapstructure:"file_output"`
 	MQTTConsumerOptions      consumer.MqttConsumerOptions      `mapstructure:"mqtt"`
 	QuestDBConsumerOptions   consumer.QuestDbConsumerOptions   `mapstructure:"questdb"`
 }

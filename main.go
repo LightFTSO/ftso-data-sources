@@ -104,7 +104,7 @@ func enableConsumer(c consumer.Consumer, tickerTopic *broadcast.Broadcaster) {
 }
 
 func initConsumers(tickerTopic *broadcast.Broadcaster, config config.ConfigOptions) {
-	if !config.FileFileConsumerOptions.Enabled &&
+	if !config.FileConsumerOptions.Enabled &&
 		!config.RedisOptions.Enabled &&
 		!config.WebsocketConsumerOptions.Enabled &&
 		!config.MQTTConsumerOptions.Enabled &&
@@ -121,8 +121,8 @@ func initConsumers(tickerTopic *broadcast.Broadcaster, config config.ConfigOptio
 		enableConsumer(c, tickerTopic)
 	}
 
-	if config.FileFileConsumerOptions.Enabled {
-		c := consumer.NewFileConsumer(config.FileFileConsumerOptions.OutputFilename, config.UseExchangeTimestamp)
+	if config.FileConsumerOptions.Enabled {
+		c := consumer.NewFileConsumer(config.FileConsumerOptions.OutputFilename, config.UseExchangeTimestamp)
 		enableConsumer(c, tickerTopic)
 	}
 

@@ -50,7 +50,7 @@ func (s *MqttConsumer) processTicker(ticker *model.Ticker, sbeMarshaller *intern
 		ticker.Timestamp = time.Now().UTC()
 	}
 
-	channel := fmt.Sprintf("tickers/%s/%s/%s", ticker.Source, ticker.Base, ticker.Quote)
+	channel := fmt.Sprintf("tickers/%s/%s/%s", ticker.Base, ticker.Quote, ticker.Source)
 
 	if s.useSbeEncoding {
 		payload, err := sbeMarshaller.MarshalSbe(*ticker)

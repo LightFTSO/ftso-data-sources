@@ -42,7 +42,7 @@ func newKucoinInstanceClient(instanceServer InstanceServer, availableSymbols []m
 
 	kucoinInstance := kucoinInstanceClient{
 		name:             "kucoin",
-		log:              slog.Default().With(slog.String("datasource", "kucoin")),
+		log:              slog.Default().With(slog.String("datasource", "kucoin"), slog.String("instanceId", fmt.Sprintf("%d", instanceId))),
 		TickerTopic:      tickerTopic,
 		wsClient:         *internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:       wsEndpoint,
@@ -58,14 +58,12 @@ func newKucoinInstanceClient(instanceServer InstanceServer, availableSymbols []m
 	kucoinInstance.wsClient.SetMessageHandler(kucoinInstance.onMessage)
 	kucoinInstance.wsClient.SetOnDisconnect(kucoinInstance.onDisconnect)
 	kucoinInstance.wsClient.SetLogger(kucoinInstance.log)
-	kucoinInstance.log.Debug("Created new datasource")
 
 	return &kucoinInstance
 }
 
 func (d *kucoinInstanceClient) connect() error {
 	d.wsClient.Start()
-
 	d.setPing()
 	d.setLastTickerWatcher()
 
@@ -74,9 +72,9 @@ func (d *kucoinInstanceClient) connect() error {
 
 func (d *kucoinInstanceClient) onDisconnect() error {
 	d.closed = true
-	d.wsClient.Close()
 	d.cancel()
-
+	d.wsClient.Close()
+	d.log.Warn("Closing instance client")
 	return nil
 }
 
@@ -131,7 +129,7 @@ func (d *kucoinInstanceClient) parseTicker(message []byte) (*model.Ticker, error
 		d.log.Error("Error parsing ticker", "error", err)
 		return nil, err
 	}
-	return ticker, err
+	return ticker, nil
 }
 
 func (d *kucoinInstanceClient) subscribeTickers() error {
@@ -190,20 +188,20 @@ func (d *kucoinInstanceClient) setLastTickerWatcher() {
 				// no tickers received in a while, attempt to reconnect
 				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 				d.onDisconnect()
-				return
 			}
 		}
 	}()
 }
 
 func (d *kucoinInstanceClient) setPing() {
-	d.pingTicker = *time.NewTicker(time.Duration(d.pingInterval) * time.Millisecond)
+	d.pingTicker = *time.NewTicker(d.pingInterval)
 	go func() {
 		defer d.pingTicker.Stop()
 		for range d.pingTicker.C {
 			if d.closed {
 				return
 			}
+			d.log.Debug("Sending ping message")
 			d.wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte(fmt.Sprintf(`{"id":"%d","type":"ping"}`, time.Now().UnixMicro()))})
 		}
 	}()

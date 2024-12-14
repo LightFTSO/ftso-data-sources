@@ -47,6 +47,7 @@ func run(globalConfig config.ConfigOptions) {
 		slog.Info("Using local timestamp as ticker timestamp")
 	}
 
+	slog.Debug(fmt.Sprintf("Ticker broadcaster buffer size is %d", config.Config.MessageBufferSize))
 	tickerTopic := broadcast.NewBroadcaster(config.Config.MessageBufferSize)
 
 	// Initialize consumers

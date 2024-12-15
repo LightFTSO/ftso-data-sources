@@ -25,7 +25,7 @@ type NoisySource struct {
 	TickerTopic  *broadcast.Broadcaster
 	Interval     time.Duration
 	SymbolList   model.SymbolList
-	timeInterval time.Ticker
+	timeInterval *time.Ticker
 	log          *slog.Logger
 	isRunning    bool
 }
@@ -44,7 +44,7 @@ func (n *NoisySource) Reconnect() error {
 func (n *NoisySource) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
 	n.log.Debug("starting fake ticker generation", "interval", n.Interval.String())
 	go func(br *broadcast.Broadcaster) {
-		n.timeInterval = *time.NewTicker(n.Interval)
+		n.timeInterval = time.NewTicker(n.Interval)
 
 		defer n.timeInterval.Stop()
 

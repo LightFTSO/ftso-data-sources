@@ -31,8 +31,8 @@ type kucoinInstanceClient struct {
 	log                *slog.Logger
 	instanceToken      string
 	instanceId         string
-	pingTicker         time.Ticker
-	lastTickerTsTicker time.Ticker
+	pingTicker         *time.Ticker
+	lastTickerTsTicker *time.Ticker
 	closed             bool
 }
 
@@ -71,10 +71,10 @@ func (d *kucoinInstanceClient) connect() error {
 }
 
 func (d *kucoinInstanceClient) onDisconnect() error {
+	d.wsClient.ExplicitClose()
 	d.closed = true
 	d.cancel()
-	d.wsClient.Close()
-	d.log.Warn("Closing instance client")
+	d.log.Debug("closing instance client")
 	return nil
 }
 
@@ -166,7 +166,7 @@ func (d *kucoinInstanceClient) getName() string {
 }
 
 func (d *kucoinInstanceClient) setLastTickerWatcher() {
-	d.lastTickerTsTicker = *time.NewTicker(1 * time.Second)
+	d.lastTickerTsTicker = time.NewTicker(1 * time.Second)
 	d.lastTimestampMutex.Lock()
 	d.lastTimestamp = time.Now()
 	d.lastTimestampMutex.Unlock()
@@ -185,16 +185,17 @@ func (d *kucoinInstanceClient) setLastTickerWatcher() {
 			d.lastTimestampMutex.Unlock()
 
 			if diff > timeout {
-				// no tickers received in a while, attempt to reconnect
+				// no tickers received in a while, close this kucoin instance
 				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
 				d.onDisconnect()
+				return
 			}
 		}
 	}()
 }
 
 func (d *kucoinInstanceClient) setPing() {
-	d.pingTicker = *time.NewTicker(d.pingInterval)
+	d.pingTicker = time.NewTicker(d.pingInterval)
 	go func() {
 		defer d.pingTicker.Stop()
 		for range d.pingTicker.C {

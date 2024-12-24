@@ -29,8 +29,8 @@ func (s *FileConsumer) processTicker(ticker *model.Ticker) {
 	}
 
 	s.W.Write([]byte(fmt.Sprintf(
-		"%s source=%s symbol=%s last_price=%s ts=%d\n",
-		time.Now().Format(constants.TS_FORMAT), ticker.Source, ticker.Symbol, ticker.LastPrice, ticker.Timestamp.UTC().UnixMilli())))
+		"%s source=%s base=%s quote=%s last_price=%s ts=%d\n",
+		time.Now().Format(constants.TS_FORMAT), ticker.Source, ticker.Base, ticker.Quote, ticker.LastPrice, ticker.Timestamp.UTC().UnixMilli())))
 }
 
 // Listen for tickers in the ch channel and sends them to a io.Writer

@@ -2,6 +2,7 @@ package symbols
 
 import (
 	"slices"
+	"strings"
 
 	"roselabs.mx/ftso-data-sources/constants"
 	"roselabs.mx/ftso-data-sources/model"
@@ -51,8 +52,8 @@ func createSymbolList(bases, quotes []string) (model.SymbolList, error) {
 	symbols := model.SymbolList{}
 	for product := range c {
 		symbols = append(symbols, model.Symbol{
-			Base:  product[0].(string),
-			Quote: product[1].(string),
+			Base:  strings.ToUpper(product[0].(string)),
+			Quote: strings.ToUpper(product[1].(string)),
 		})
 	}
 	return symbols, nil

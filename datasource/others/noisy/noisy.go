@@ -55,7 +55,7 @@ func (n *NoisySource) SubscribeTickers(wsClient *internal.WebSocketClient, symbo
 					"ticker", fakeTicker, "error", err.Error())
 				continue
 			}
-			br.Send(&fakeTicker)
+			br.Send(fakeTicker)
 		}
 	}(n.TickerTopic)
 

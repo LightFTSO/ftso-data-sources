@@ -108,7 +108,7 @@ func (s *RedisConsumer) processTickerBatch(tickers []*model.Ticker) {
 					Retention(s.tsRetention.Milliseconds()).
 					EncodingCompressed().
 					ChunkSize(s.tsChunkSize).
-					DuplicatePolicyFirst().
+					DuplicatePolicyLast().
 					Labels().
 					Labels("source", ticker.Source).
 					Labels("base", ticker.Base).

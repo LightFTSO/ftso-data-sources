@@ -72,7 +72,7 @@ func (s *RedisConsumer) setup() error {
 
 	log.Info("Updating retention rules", "consumer", "redis")
 	for _, key := range tsKeys {
-		cmd := s.redisClient.B().TsAlter().Key(key).Retention(s.tsRetention.Milliseconds()).ChunkSize(s.tsChunkSize).Build()
+		cmd := s.redisClient.B().TsAlter().Key(key).Retention(s.tsRetention.Milliseconds()).ChunkSize(s.tsChunkSize).DuplicatePolicyLast().Build()
 		s.redisClient.Do(context.Background(), cmd)
 	}
 
@@ -107,6 +107,7 @@ func (s *RedisConsumer) processTickerBatch(tickers []*model.Ticker) {
 					Key(key).
 					Retention(s.tsRetention.Milliseconds()).
 					EncodingCompressed().
+					ChunkSize(s.tsChunkSize).
 					DuplicatePolicyFirst().
 					Labels().
 					Labels("source", ticker.Source).

@@ -155,13 +155,12 @@ func (d *MetalsDevClient) SubscribeTickers(wsClient *internal.WebSocketClient, s
 				}
 				ticker := model.Ticker{
 					LastPrice: strconv.FormatFloat(price, 'f', 8, 64),
-					Symbol:    strings.ToUpper(s.GetSymbol()),
 					Base:      strings.ToUpper(s.Base),
 					Quote:     strings.ToUpper(s.Quote),
 					Source:    d.GetName(),
 					Timestamp: t,
 				}
-				d.log.Info(fmt.Sprintf("metalsdev: symbol=%s price=%s", ticker.Symbol, ticker.LastPrice))
+				d.log.Info(fmt.Sprintf("metalsdev: base=%s quote=%s price=%s", ticker.Base, ticker.Quote, ticker.LastPrice))
 				br.Send(&ticker)
 			}
 			for _, s := range d.ForexSymbols {
@@ -169,16 +168,13 @@ func (d *MetalsDevClient) SubscribeTickers(wsClient *internal.WebSocketClient, s
 				if !present {
 					continue
 				}
-
-				ticker := model.Ticker{
-					LastPrice: strconv.FormatFloat(price, 'f', 8, 64),
-					Symbol:    strings.ToUpper(s.GetSymbol()),
-					Base:      strings.ToUpper(s.Base),
-					Quote:     strings.ToUpper(s.Quote),
-					Source:    d.GetName(),
-					Timestamp: t,
+				ticker, err := model.NewTicker(strconv.FormatFloat(price, 'f', 8, 64), s, d.GetName(), t)
+				if err != nil {
+					d.log.Error("Error creating ticker",
+						"ticker", ticker, "error", err.Error())
+					continue
 				}
-				d.log.Info(fmt.Sprintf("metalsdev: symbol=%s price=%s", ticker.Symbol, ticker.LastPrice))
+				d.log.Info(fmt.Sprintf("metalsdev: base=%s quote=%s price=%s", ticker.Base, ticker.Quote, ticker.LastPrice))
 				br.Send(&ticker)
 			}
 

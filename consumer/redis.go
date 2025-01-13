@@ -19,10 +19,10 @@ type RedisOptions struct {
 	Enabled       bool
 	ClientOptions rueidis.ClientOption `mapstructure:"client_options"`
 	TsOptions     struct {
-		Retention time.Duration `mapstructure:"include_stdout"`
+		Retention time.Duration `mapstructure:"retention"`
 		ChunkSize int64         `mapstructure:"chunksize"`
 		MaxMemory string        `mapstructure:"maxmemory"`
-	} `mapstructure:"ts"`
+	} `mapstructure:"timeseries"`
 }
 
 type RedisConsumer struct {

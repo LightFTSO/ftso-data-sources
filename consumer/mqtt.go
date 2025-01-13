@@ -46,7 +46,7 @@ func (s *MqttConsumer) processTicker(ticker *model.Ticker) {
 		ticker.Timestamp = time.Now().UTC()
 	}
 
-	channel := fmt.Sprintf("tickers/%s/%s/%s", ticker.Source, ticker.Base, ticker.Quote)
+	channel := fmt.Sprintf("tickers/%s/%s/%s", ticker.Base, ticker.Quote, ticker.Source)
 
 	payload := fmt.Sprintf("%s,%d", ticker.LastPrice, ticker.Timestamp.UnixMilli())
 	token := s.mqttClient.Publish(channel, byte(s.qosLevel), false, payload)

@@ -108,6 +108,11 @@ func (c *WebSocketClient) Start() {
 	}()
 }
 
+func (c *WebSocketClient) ExplicitClose() {
+	c.Closed = true
+	c.cancel()
+}
+
 func (c *WebSocketClient) Close() {
 	c.once.Do(func() {
 		c.mu.Lock()
@@ -236,11 +241,11 @@ func (c *WebSocketClient) write(messageType int, data []byte) error {
 }
 
 func (c *WebSocketClient) handleReconnection() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.Closed {
 		return
 	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if !c.reconnecting {
 		c.reconnecting = true
 		select {
@@ -251,6 +256,9 @@ func (c *WebSocketClient) handleReconnection() {
 }
 
 func (c *WebSocketClient) handleDisconnect() {
+	if c.Closed {
+		return
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.conn != nil {

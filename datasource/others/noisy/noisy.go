@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"math/rand"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -25,7 +24,7 @@ type NoisySource struct {
 	TickerTopic  *broadcast.Broadcaster
 	Interval     time.Duration
 	SymbolList   model.SymbolList
-	timeInterval time.Ticker
+	timeInterval *time.Ticker
 	log          *slog.Logger
 	isRunning    bool
 }
@@ -44,21 +43,19 @@ func (n *NoisySource) Reconnect() error {
 func (n *NoisySource) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
 	n.log.Debug("starting fake ticker generation", "interval", n.Interval.String())
 	go func(br *broadcast.Broadcaster) {
-		n.timeInterval = *time.NewTicker(n.Interval)
+		n.timeInterval = time.NewTicker(n.Interval)
 
 		defer n.timeInterval.Stop()
 
 		for t := range n.timeInterval.C {
 			randomSymbol := n.SymbolList[rand.Intn(len(n.SymbolList))]
-			fakeTicker := model.Ticker{
-				LastPrice: strconv.FormatFloat(float64(rand.Intn(1000))+rand.Float64(), 'f', 9, 64),
-				Base:      strings.ToUpper(randomSymbol.Base),
-				Quote:     strings.ToUpper(randomSymbol.Quote),
-				Symbol:    randomSymbol.GetSymbol(),
-				Source:    n.GetName(),
-				Timestamp: t,
+			fakeTicker, err := model.NewTicker(strconv.FormatFloat(float64(rand.Intn(1000))+rand.Float64(), 'f', 9, 64), randomSymbol, n.GetName(), t)
+			if err != nil {
+				n.log.Error("Error creating ticker",
+					"ticker", fakeTicker, "error", err.Error())
+				continue
 			}
-			br.Send(&fakeTicker)
+			br.Send(fakeTicker)
 		}
 	}(n.TickerTopic)
 

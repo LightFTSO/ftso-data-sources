@@ -10,7 +10,6 @@ import (
 )
 
 type Ticker struct {
-	Symbol           string    `json:"s"`
 	Base             string    `json:"b"`
 	Quote            string    `json:"q"`
 	Source           string    `json:"S"`
@@ -22,10 +21,6 @@ type Ticker struct {
 func (t *Ticker) Validate() error {
 	var errorList *multierror.Error
 	err := t.validateLastPrice()
-	if err != nil {
-		errorList = multierror.Append(errorList, err)
-	}
-	err = t.validateSymbol()
 	if err != nil {
 		errorList = multierror.Append(errorList, err)
 	}
@@ -56,14 +51,6 @@ func (t *Ticker) validateLastPrice() error {
 	}
 	t.LastPriceFloat64 = lastPrice
 
-	return nil
-}
-
-func (t *Ticker) validateSymbol() error {
-	symbol := t.Base + "/" + t.Quote
-	if t.Symbol != symbol {
-		return fmt.Errorf("ticker symbol %s doesn't match base and quote assets %s/%s", t.Symbol, t.Base, t.Quote)
-	}
 	return nil
 }
 
@@ -104,7 +91,6 @@ func NewTicker(lastPrice string,
 		LastPrice: lastPrice,
 		Base:      symbol.Base,
 		Quote:     symbol.Quote,
-		Symbol:    symbol.Base + "/" + symbol.Quote,
 		Source:    source,
 		Timestamp: timestamp,
 	}

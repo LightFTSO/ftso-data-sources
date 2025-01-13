@@ -58,14 +58,14 @@ func (d *KucoinClient) Connect() error {
 		// create new instance servers indefinitely as they're closed, until we get the close signal from the main function
 		for {
 			d.log.Info("Creating kucoin instance client...")
-			instanceContext, instanceCancelContext := context.WithCancel(context.Background())
+			instanceContext, instanceCancelFunc := context.WithCancel(context.Background())
 			instanceData, err := d.getNewInstanceData()
 			if err != nil {
 				d.log.Error("Error obtaining Kucoin instance client data", "error", err)
 				time.Sleep(5 * time.Second)
 				continue
 			}
-			instanceClient := newKucoinInstanceClient(*instanceData, availableSymbols, d.SymbolList, d.TickerTopic, instanceContext, instanceCancelContext)
+			instanceClient := newKucoinInstanceClient(*instanceData, availableSymbols, d.SymbolList, d.TickerTopic, instanceContext, instanceCancelFunc)
 
 			err = instanceClient.connect()
 			if err != nil {

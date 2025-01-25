@@ -2,6 +2,7 @@ package kucoin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bytedance/sonic"
+	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
 	"roselabs.mx/ftso-data-sources/tickertopic"
@@ -22,6 +24,7 @@ type KucoinClient struct {
 	apiEndpoint string
 	SymbolList  []model.Symbol
 	log         *slog.Logger
+	isRunning   bool
 }
 
 func NewKucoinClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*KucoinClient, error) {
@@ -38,34 +41,35 @@ func NewKucoinClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 	return &kucoin, nil
 }
 
-func (b *KucoinClient) Connect() error {
-	b.W.Add(1)
+func (d *KucoinClient) Connect() error {
+	d.isRunning = true
+	d.W.Add(1)
 
-	availableSymbols, err := b.getAvailableSymbols()
+	availableSymbols, err := d.getAvailableSymbols()
 	if err != nil {
-		b.log.Error("Error obtaining available symbols", "error", err)
-		b.W.Done()
+		d.log.Error("Error obtaining available symbols", "error", err)
+		d.W.Done()
 		return err
 	}
 
 	go func() {
-		defer b.W.Done()
+		defer d.W.Done()
 
 		// create new instance servers indefinitely as they're closed, until we get the close signal from the main function
 		for {
-			b.log.Info("Creating kucoin instance client...")
-			instanceContext, instanceCancelContext := context.WithCancel(context.Background())
-			instanceData, err := b.getNewInstanceData()
+			d.log.Info("Creating kucoin instance client...")
+			instanceContext, instanceCancelFunc := context.WithCancel(context.Background())
+			instanceData, err := d.getNewInstanceData()
 			if err != nil {
-				b.log.Error("Error obtaining Kucoin instance client data", "error", err)
+				d.log.Error("Error obtaining Kucoin instance client data", "error", err)
 				time.Sleep(5 * time.Second)
 				continue
 			}
-			instanceClient := newKucoinInstanceClient(*instanceData, availableSymbols, b.SymbolList, b.TickerTopic, instanceContext, instanceCancelContext)
+			instanceClient := newKucoinInstanceClient(*instanceData, availableSymbols, d.SymbolList, d.TickerTopic, instanceContext, instanceCancelFunc)
 
 			err = instanceClient.connect()
 			if err != nil {
-				b.log.Error("", "error", err)
+				d.log.Error("", "error", err)
 			}
 
 			<-instanceContext.Done()
@@ -76,22 +80,30 @@ func (b *KucoinClient) Connect() error {
 	return nil
 }
 
-func (b *KucoinClient) Reconnect() error {
+func (d *KucoinClient) Reconnect() error {
 	return nil
 }
 
-func (b *KucoinClient) Close() error {
-
-	b.W.Done()
+func (d *KucoinClient) Close() error {
+	if !d.IsRunning() {
+		return errors.New("datasource is not running")
+	}
+	d.isRunning = false
+	d.W.Done()
 
 	return nil
 }
-func (b *KucoinClient) SubscribeTickers() error {
+
+func (d *KucoinClient) IsRunning() bool {
+	return d.isRunning
+}
+
+func (d *KucoinClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
 	return nil
 }
 
-func (b *KucoinClient) getAvailableSymbols() ([]model.Symbol, error) {
-	reqUrl := b.apiEndpoint + "/api/v2/symbols"
+func (d *KucoinClient) getAvailableSymbols() ([]model.Symbol, error) {
+	reqUrl := d.apiEndpoint + "/api/v2/symbols"
 
 	req, err := http.NewRequest(http.MethodGet, reqUrl, nil)
 	if err != nil {
@@ -130,8 +142,8 @@ func (b *KucoinClient) getAvailableSymbols() ([]model.Symbol, error) {
 
 }
 
-func (b *KucoinClient) getNewInstanceData() (*InstanceServer, error) {
-	reqUrl := fmt.Sprintf("%s/api/v1/bullet-public", b.apiEndpoint)
+func (d *KucoinClient) getNewInstanceData() (*InstanceServer, error) {
+	reqUrl := fmt.Sprintf("%s/api/v1/bullet-public", d.apiEndpoint)
 	req, err := http.NewRequest(http.MethodPost, reqUrl, nil)
 	if err != nil {
 		return &InstanceServer{}, err
@@ -170,6 +182,6 @@ func (b *KucoinClient) getNewInstanceData() (*InstanceServer, error) {
 
 }
 
-func (b *KucoinClient) GetName() string {
-	return b.name
+func (d *KucoinClient) GetName() string {
+	return d.name
 }

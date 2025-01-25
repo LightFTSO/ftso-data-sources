@@ -7,5 +7,3 @@ type SubscribeMessage struct {
 }
 
 type TickerEvent []interface{}
-
-type ChannelSymbolMap map[int]string

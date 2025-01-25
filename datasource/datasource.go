@@ -30,17 +30,20 @@ import (
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/whitebit"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/xt"
 	"roselabs.mx/ftso-data-sources/datasource/others/noisy"
-	metalsdev "roselabs.mx/ftso-data-sources/datasource/tradfi/metals.dev"
+	"roselabs.mx/ftso-data-sources/datasource/tradfi/metalsdev"
 	"roselabs.mx/ftso-data-sources/datasource/tradfi/tiingo"
+	"roselabs.mx/ftso-data-sources/internal"
+	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
 	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type FtsoDataSource interface {
-	SubscribeTickers() error
+	SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error
 	Connect() error
 	Close() error
 	GetName() string
+	IsRunning() bool
 }
 
 type DataSourceList []FtsoDataSource
@@ -55,7 +58,7 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 	switch source.Source {
 	case "binance":
 		return binance.NewBinanceClient(source.Options, allSymbols, tickerTopic, w)
-	case "binance.us":
+	case "binanceus":
 		return binance.NewBinanceUSClient(source.Options, allSymbols, tickerTopic, w)
 	case "bitfinex":
 		return bitfinex.NewBitfinexClient(source.Options, allSymbols, tickerTopic, w)
@@ -73,16 +76,12 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 		return coinbase.NewCoinbaseClient(source.Options, allSymbols, tickerTopic, w)
 	case "coinex":
 		return coinex.NewCoinexClient(source.Options, allSymbols, tickerTopic, w)
-	case "crypto":
-		fallthrough
 	case "cryptocom":
 		return cryptocom.NewCryptoComClient(source.Options, allSymbols, tickerTopic, w)
 	case "digifinex":
 		return digifinex.NewDigifinexClient(source.Options, allSymbols, tickerTopic, w)
 	case "fmfw":
 		return fmfw.NewFmfwClient(source.Options, allSymbols, tickerTopic, w)
-	case "gate.io":
-		fallthrough
 	case "gateio":
 		return gateio.NewGateIoClient(source.Options, allSymbols, tickerTopic, w)
 	case "hitbtc":
@@ -97,8 +96,6 @@ func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tic
 		return lbank.NewLbankClient(source.Options, allSymbols, tickerTopic, w)
 	case "mexc":
 		return mexc.NewMexcClient(source.Options, allSymbols, tickerTopic, w)
-	case "okex":
-		fallthrough
 	case "okx":
 		return okx.NewOkxClient(source.Options, allSymbols, tickerTopic, w)
 	case "pionex":

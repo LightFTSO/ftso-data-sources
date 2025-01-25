@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bytedance/sonic"
@@ -23,14 +24,15 @@ type kucoinInstanceClient struct {
 	SymbolList         []model.Symbol
 	availableSymbols   []model.Symbol
 	lastTimestamp      time.Time
-	pingIntervalMs     int
+	lastTimestampMutex sync.Mutex
+	pingInterval       time.Duration
 	ctx                context.Context
 	cancel             context.CancelFunc
 	log                *slog.Logger
 	instanceToken      string
 	instanceId         string
-	pingTicker         time.Ticker
-	lastTickerTsTicker time.Ticker
+	pingTicker         *time.Ticker
+	lastTickerTsTicker *time.Ticker
 	closed             bool
 }
 
@@ -40,7 +42,7 @@ func newKucoinInstanceClient(instanceServer InstanceServer, availableSymbols []m
 
 	kucoinInstance := kucoinInstanceClient{
 		name:             "kucoin",
-		log:              slog.Default().With(slog.String("datasource", "kucoin")),
+		log:              slog.Default().With(slog.String("datasource", "kucoin"), slog.String("instanceId", fmt.Sprintf("%d", instanceId))),
 		TickerTopic:      tickerTopic,
 		wsClient:         *internal.NewWebSocketClient(wsEndpoint),
 		wsEndpoint:       wsEndpoint,
@@ -48,7 +50,7 @@ func newKucoinInstanceClient(instanceServer InstanceServer, availableSymbols []m
 		instanceId:       fmt.Sprintf("%x", instanceId),
 		SymbolList:       symbolList,
 		availableSymbols: availableSymbols,
-		pingIntervalMs:   instanceServer.PingIntervalMs,
+		pingInterval:     time.Duration(instanceServer.PingIntervalMs) * time.Millisecond,
 		ctx:              ctx,
 		cancel:           cancel,
 		closed:           false,
@@ -56,80 +58,84 @@ func newKucoinInstanceClient(instanceServer InstanceServer, availableSymbols []m
 	kucoinInstance.wsClient.SetMessageHandler(kucoinInstance.onMessage)
 	kucoinInstance.wsClient.SetOnDisconnect(kucoinInstance.onDisconnect)
 	kucoinInstance.wsClient.SetLogger(kucoinInstance.log)
-	kucoinInstance.log.Debug("Created new datasource")
 
 	return &kucoinInstance
 }
 
-func (b *kucoinInstanceClient) connect() error {
-	b.wsClient.Start()
-
-	b.setPing()
-	b.setLastTickerWatcher()
-
-	return nil
-}
-
-func (b *kucoinInstanceClient) onDisconnect() error {
-	b.closed = true
-	b.wsClient.Close()
-	b.cancel()
+func (d *kucoinInstanceClient) connect() error {
+	d.wsClient.Start()
+	d.setPing()
+	d.setLastTickerWatcher()
 
 	return nil
 }
 
-func (b *kucoinInstanceClient) onWelcomeMessage() error {
-	err := b.subscribeTickers()
+func (d *kucoinInstanceClient) onDisconnect() error {
+	d.wsClient.ExplicitClose()
+	d.closed = true
+	d.cancel()
+	d.log.Debug("closing instance client")
+	return nil
+}
+
+func (d *kucoinInstanceClient) onWelcomeMessage() error {
+	err := d.subscribeTickers()
 	if err != nil {
-		b.log.Error("Error subscribing to tickers")
+		d.log.Error("Error subscribing to tickers")
 		return err
 	}
 
 	return nil
 }
 
-func (b *kucoinInstanceClient) onMessage(message internal.WsMessage) {
+func (d *kucoinInstanceClient) onMessage(message internal.WsMessage) {
 	if message.Type == websocket.TextMessage {
 		msg := string(message.Message)
 
-		if strings.Contains(msg, "welcome") && strings.Contains(msg, b.instanceId) {
-			b.onWelcomeMessage()
+		if strings.Contains(msg, "welcome") && strings.Contains(msg, d.instanceId) {
+			d.onWelcomeMessage()
 		}
 
 		if strings.Contains(msg, "/market/ticker:") {
-			ticker, err := b.parseTicker(message.Message)
+			ticker, err := d.parseTicker(message.Message)
 			if err != nil {
-				b.log.Error("Error parsing ticker",
+				d.log.Error("Error parsing ticker",
 					"ticker", ticker, "error", err.Error())
 				return
 			}
-			b.lastTimestamp = time.Now()
-			b.TickerTopic.Send(ticker)
+			d.lastTimestampMutex.Lock()
+			d.lastTimestamp = time.Now()
+			d.lastTimestampMutex.Unlock()
+
+			d.TickerTopic.Send(ticker)
 		}
 	}
 }
 
-func (b *kucoinInstanceClient) parseTicker(message []byte) (*model.Ticker, error) {
+func (d *kucoinInstanceClient) parseTicker(message []byte) (*model.Ticker, error) {
 	var newTickerEvent WsTickerMessage
 	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
-		b.log.Error(err.Error())
+		d.log.Error(err.Error())
 		return &model.Ticker{}, err
 	}
 
 	symbol := model.ParseSymbol(strings.ReplaceAll(newTickerEvent.Topic, "/market/ticker:", ""))
 	ticker, err := model.NewTicker(newTickerEvent.Data.Price,
 		symbol,
-		b.getName(),
+		d.getName(),
 		time.UnixMilli(newTickerEvent.Data.Time))
-
-	return ticker, err
+	if err != nil {
+		d.log.Error("Error parsing ticker", "error", err)
+		return nil, err
+	}
+	return ticker, nil
 }
 
-func (b *kucoinInstanceClient) subscribeTickers() error {
+func (d *kucoinInstanceClient) subscribeTickers() error {
 	subscribedSymbols := []model.Symbol{}
-	for _, v1 := range b.SymbolList {
-		for _, v2 := range b.availableSymbols {
+	for _, v1 := range d.SymbolList {
+		for _, v2 := range d.availableSymbols {
 			if strings.EqualFold(strings.ToUpper(v1.Base), strings.ToUpper(v2.Base)) && strings.EqualFold(strings.ToUpper(v1.Quote), strings.ToUpper(v2.Quote)) {
 				subscribedSymbols = append(subscribedSymbols, model.Symbol{
 					Base:  v2.Base,
@@ -147,50 +153,57 @@ func (b *kucoinInstanceClient) subscribeTickers() error {
 		}
 
 		subMessage["topic"] = fmt.Sprintf("/market/ticker:%s-%s", strings.ToUpper(symbol.Base), strings.ToUpper(symbol.Quote))
-		b.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+		d.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 
 	}
 
-	b.log.Debug("Subscribed ticker symbols", "symbols", len(subscribedSymbols))
+	d.log.Debug("Subscribed ticker symbols", "symbols", len(subscribedSymbols))
 	return nil
 }
 
-func (b *kucoinInstanceClient) getName() string {
-	return b.name
+func (d *kucoinInstanceClient) getName() string {
+	return d.name
 }
 
-func (b *kucoinInstanceClient) setLastTickerWatcher() {
-	b.lastTickerTsTicker = *time.NewTicker(1 * time.Second)
-	b.lastTimestamp = time.Now()
+func (d *kucoinInstanceClient) setLastTickerWatcher() {
+	d.lastTickerTsTicker = time.NewTicker(1 * time.Second)
+	d.lastTimestampMutex.Lock()
+	d.lastTimestamp = time.Now()
+	d.lastTimestampMutex.Unlock()
+
 	timeout := (30 * time.Second)
 	go func() {
-		defer b.lastTickerTsTicker.Stop()
-		for range b.lastTickerTsTicker.C {
-			if b.closed {
+		defer d.lastTickerTsTicker.Stop()
+		for range d.lastTickerTsTicker.C {
+			if d.closed {
 				return
 			}
 
 			now := time.Now()
-			diff := now.Sub(b.lastTimestamp)
+			d.lastTimestampMutex.Lock()
+			diff := now.Sub(d.lastTimestamp)
+			d.lastTimestampMutex.Unlock()
+
 			if diff > timeout {
-				// no tickers received in a while, attempt to reconnect
-				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-				b.onDisconnect()
+				// no tickers received in a while, close this kucoin instance
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				d.onDisconnect()
 				return
 			}
 		}
 	}()
 }
 
-func (b *kucoinInstanceClient) setPing() {
-	b.pingTicker = *time.NewTicker(time.Duration(b.pingIntervalMs) * time.Millisecond)
+func (d *kucoinInstanceClient) setPing() {
+	d.pingTicker = time.NewTicker(d.pingInterval)
 	go func() {
-		defer b.pingTicker.Stop()
-		for range b.pingTicker.C {
-			if b.closed {
+		defer d.pingTicker.Stop()
+		for range d.pingTicker.C {
+			if d.closed {
 				return
 			}
-			b.wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte(fmt.Sprintf(`{"id":"%d","type":"ping"}`, time.Now().UnixMicro()))})
+			d.log.Debug("Sending ping message")
+			d.wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte(fmt.Sprintf(`{"id":"%d","type":"ping"}`, time.Now().UnixMicro()))})
 		}
 	}()
 }

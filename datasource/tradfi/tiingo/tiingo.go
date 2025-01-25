@@ -1,6 +1,7 @@
 package tiingo
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -21,35 +22,46 @@ type TiingoClient struct {
 	name           string
 	W              *sync.WaitGroup
 	TickerTopic    *tickertopic.TickerTopic
-	wsClient       internal.WebSocketClient
+	wsClients      []*internal.WebSocketClient
 	wsEndpoint     string
-	SymbolList     []model.Symbol
+	SymbolList     model.SymbolList
+	symbolChunks   []model.SymbolList
 	apiToken       string
 	thresholdLevel int
 
-	lastTimestamp time.Time
-	log           *slog.Logger
+	lastTimestamp      time.Time
+	lastTimestampMutex sync.Mutex
+	log                *slog.Logger
 
-	pingInterval int
+	pingInterval time.Duration
+
+	isRunning bool
 }
 
 func NewTiingoFxClient(options map[string]interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*TiingoClient, error) {
 	wsEndpoint := "wss://api.tiingo.com/fx"
+
+	apiToken := ""
+	if options["api_token"] == nil {
+		apiToken = ""
+	} else {
+		apiToken = options["api_token"].(string)
+	}
 
 	tiingo := TiingoClient{
 		name:           "tiingo_fx",
 		log:            slog.Default().With(slog.String("datasource", "tiingo_fx")),
 		W:              w,
 		TickerTopic:    tickerTopic,
-		wsClient:       *internal.NewWebSocketClient(wsEndpoint),
+		wsClients:      []*internal.WebSocketClient{},
 		wsEndpoint:     wsEndpoint,
 		SymbolList:     symbolList.Forex,
-		pingInterval:   20,
-		apiToken:       options["api_token"].(string),
+		pingInterval:   20 * time.Second,
+		apiToken:       apiToken,
 		thresholdLevel: 5,
 	}
-	tiingo.wsClient.SetMessageHandler(tiingo.onMessage)
-	tiingo.wsClient.SetOnConnect(tiingo.onConnect)
+	tiingo.symbolChunks = tiingo.SymbolList.ChunkSymbols(1024)
+	tiingo.log.Debug("Created new datasource")
 
 	tiingo.log.Info("Created new tiingo datasource")
 	return &tiingo, nil
@@ -63,67 +75,83 @@ func NewTiingoIexClient(options map[string]interface{}, symbolList symbols.AllSy
 		log:            slog.Default().With(slog.String("datasource", "tiingo_iex")),
 		W:              w,
 		TickerTopic:    tickerTopic,
-		wsClient:       *internal.NewWebSocketClient(wsEndpoint),
+		wsClients:      []*internal.WebSocketClient{},
 		wsEndpoint:     wsEndpoint,
 		SymbolList:     symbolList.Forex,
-		pingInterval:   20,
+		pingInterval:   20 * time.Second,
 		apiToken:       options["api_token"].(string),
 		thresholdLevel: 5,
 	}
-	tiingo.wsClient.SetMessageHandler(tiingo.onMessage)
-	tiingo.wsClient.SetOnConnect(tiingo.onConnect)
+	tiingo.symbolChunks = tiingo.SymbolList.ChunkSymbols(1024)
+	tiingo.log.Debug("Created new datasource")
 
 	tiingo.log.Info("Created new tiingo datasource")
 	return &tiingo, nil
 }
 
-func (b *TiingoClient) Connect() error {
-	b.W.Add(1)
-	b.log.Info("Connecting...")
+func (d *TiingoClient) Connect() error {
+	d.isRunning = true
+	d.W.Add(1)
+	d.log.Info("Connecting...")
 
-	b.wsClient.Start()
-
-	b.setPing()
-
-	return nil
-}
-
-func (b *TiingoClient) onConnect() error {
-	err := b.SubscribeTickers()
-	if err != nil {
-		b.log.Error("Error subscribing to tickers")
-		return err
+	for _, chunk := range d.symbolChunks {
+		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
+		wsClient.SetMessageHandler(d.onMessage)
+		wsClient.SetLogger(d.log)
+		wsClient.SetOnConnect(func() error {
+			err := d.SubscribeTickers(wsClient, chunk)
+			if err != nil {
+				d.log.Error("Error subscribing to tickers")
+				return err
+			}
+			return err
+		})
+		d.wsClients = append(d.wsClients, wsClient)
+		wsClient.Start()
 	}
-
-	b.setLastTickerWatcher()
-
-	return nil
-}
-
-func (b *TiingoClient) Close() error {
-	b.wsClient.Close()
-	b.W.Done()
+	d.setLastTickerWatcher()
+	d.setPing()
 
 	return nil
 }
 
-func (b *TiingoClient) onMessage(message internal.WsMessage) {
+func (d *TiingoClient) Close() error {
+	if !d.IsRunning() {
+		return errors.New("datasource is not running")
+	}
+	for _, wsClient := range d.wsClients {
+		wsClient.Close()
+	}
+	d.isRunning = false
+	d.W.Done()
+
+	return nil
+}
+
+func (d *TiingoClient) IsRunning() bool {
+	return d.isRunning
+}
+
+func (d *TiingoClient) onMessage(message internal.WsMessage) {
 	if message.Type == websocket.TextMessage {
 		if strings.Contains(string(message.Message), `"A"`) {
-			ticker, err := b.parseTicker(message.Message)
+			ticker, err := d.parseTicker(message.Message)
 			if err != nil {
-				b.log.Error("Error parsing ticker",
+				d.log.Error("Error parsing ticker",
 					"ticker", ticker, "error", err.Error())
 				return
 
 			}
-			b.lastTimestamp = time.Now()
-			b.TickerTopic.Send(ticker)
+			d.lastTimestampMutex.Lock()
+			d.lastTimestamp = time.Now()
+			d.lastTimestampMutex.Unlock()
+
+			d.TickerTopic.Send(ticker)
 		}
 	}
 }
 
-func (b *TiingoClient) parseTicker(message []byte) (*model.Ticker, error) {
+func (d *TiingoClient) parseTicker(message []byte) (*model.Ticker, error) {
 
 	var newTickerEvent WsFxEvent
 	err := sonic.Unmarshal(message, &newTickerEvent)
@@ -149,15 +177,15 @@ func (b *TiingoClient) parseTicker(message []byte) (*model.Ticker, error) {
 		Quote: symbol.Quote,
 
 		LastPrice: strconv.FormatFloat(price, 'f', 9, 64),
-		Source:    b.GetName(),
+		Source:    d.GetName(),
 		Timestamp: ts,
 	}
 	return ticker, nil
 }
 
-func (b *TiingoClient) SubscribeTickers() error {
-	subscribedSymbols := []model.Symbol{}
-	for _, v := range b.SymbolList {
+func (d *TiingoClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
+	subscribedSymbols := model.SymbolList{}
+	for _, v := range symbols {
 		subscribedSymbols = append(subscribedSymbols, model.Symbol{
 			Base:  v.Base,
 			Quote: v.Quote})
@@ -168,7 +196,7 @@ func (b *TiingoClient) SubscribeTickers() error {
 	for i := 0; i < len(subscribedSymbols); i += chunksize {
 		subMessage := map[string]interface{}{
 			"eventName":     "subscribe",
-			"authorization": b.apiToken,
+			"authorization": d.apiToken,
 		}
 		s := []string{}
 		for j := range chunksize {
@@ -179,45 +207,59 @@ func (b *TiingoClient) SubscribeTickers() error {
 			s = append(s, fmt.Sprintf("%s%s", strings.ToLower(v.Base), strings.ToLower(v.Quote)))
 		}
 		subMessage["eventData"] = map[string]interface{}{
-			"thresholdLevel": b.thresholdLevel,
+			"thresholdLevel": d.thresholdLevel,
 			"tickers":        s,
 		}
-		b.wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+		wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 	}
 
-	b.log.Debug("Subscribed ticker symbols", "symbols", len(subscribedSymbols))
+	d.log.Debug("Subscribed ticker symbols", "symbols", len(subscribedSymbols))
 	return nil
 }
 
-func (b *TiingoClient) GetName() string {
-	return b.name
+func (d *TiingoClient) GetName() string {
+	return d.name
 }
 
-func (b *TiingoClient) setLastTickerWatcher() {
+func (d *TiingoClient) setLastTickerWatcher() {
 	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	b.lastTimestamp = time.Now()
+	d.lastTimestampMutex.Lock()
+	d.lastTimestamp = time.Now()
+	d.lastTimestampMutex.Unlock()
+
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
 		for range lastTickerIntervalTimer.C {
 			now := time.Now()
-			diff := now.Sub(b.lastTimestamp)
+			d.lastTimestampMutex.Lock()
+			diff := now.Sub(d.lastTimestamp)
+			d.lastTimestampMutex.Unlock()
+
 			if diff > timeout {
 				// no tickers received in a while, attempt to reconnect
-				b.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-				b.lastTimestamp = time.Now()
-				b.wsClient.Reconnect()
+				d.lastTimestampMutex.Lock()
+				d.lastTimestamp = time.Now()
+				d.lastTimestampMutex.Unlock()
+
+				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+
+				for _, wsClient := range d.wsClients {
+					wsClient.Reconnect()
+				}
 			}
 		}
 	}()
 }
 
-func (b *TiingoClient) setPing() {
-	ticker := time.NewTicker(time.Duration(b.pingInterval) * time.Second)
+func (d *TiingoClient) setPing() {
+	ticker := time.NewTicker(d.pingInterval)
 	go func() {
 		defer ticker.Stop()
 		for range ticker.C {
-			b.wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte("ping")})
+			for _, wsClient := range d.wsClients {
+				wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte("ping")})
+			}
 		}
 	}()
 }

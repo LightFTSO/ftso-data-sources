@@ -2,6 +2,8 @@ package consumer
 
 import (
 	log "log/slog"
+	"sync"
+	"time"
 
 	"github.com/bytedance/sonic"
 	"github.com/textileio/go-threads/broadcast"
@@ -12,58 +14,93 @@ import (
 )
 
 type WebsocketConsumerOptions struct {
-	Enabled             bool   `mapstructure:"enabled"`
-	Host                string `mapstructure:"host"`
-	Port                int    `mapstructure:"port"`
-	TickersEndpoint     string `mapstructure:"ticker_endpoint"`
-	IndividualFeedTable bool   `mapstructure:"individual_feed_table"`
+	Enabled         bool          `mapstructure:"enabled"`
+	TickersEndpoint string        `mapstructure:"ticker_endpoint"`
+	FlushInterval   time.Duration `mapstructure:"flush_interval"`
+	Port            int
 }
 
 type WebsocketServerConsumer struct {
 	wsServer       websocket_server.WebsocketServer
 	TickerListener *broadcast.Listener
 
-	config WebsocketConsumerOptions
+	config               WebsocketConsumerOptions
+	useExchangeTimestamp bool
+
+	tickerBuffer []*model.Ticker
+	mutex        sync.Mutex
 }
 
 func (s *WebsocketServerConsumer) setup() error {
 	if err := s.wsServer.Connect(); err != nil {
 		panic(err)
 	}
-	log.Info("Websocket Consumer started.", "host", s.config.Host, "port", s.config.Port)
+	log.Info("Websocket Consumer started.", "port", s.config.Port)
 
 	return nil
 }
 
-func (s *WebsocketServerConsumer) processTicker(ticker *model.Ticker) {
-	payload, err := sonic.Marshal(ticker)
+func (s *WebsocketServerConsumer) processTickerBatch(tickers []*model.Ticker) {
+
+	// Marshal the tickers
+	payload, err := sonic.Marshal(tickers)
 	if err != nil {
-		log.Error("error encoding ticker", "consumer", "websocket", "error", err)
+		log.Error("error encoding tickers", "consumer", "websocket", "error", err)
+		return
 	}
+
+	// Broadcast the payload
 	err = s.wsServer.BroadcastMessage(websocket.TextFrame, payload)
 	if err != nil {
-		log.Error("error broadcasting ticker", "consumer", "websocket", "error", err)
+		log.Error("error broadcasting tickers", "consumer", "websocket", "error", err)
+	}
+}
+
+func (s *WebsocketServerConsumer) flushTickers() {
+	ticker := time.NewTicker(s.config.FlushInterval)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		s.mutex.Lock()
+		if len(s.tickerBuffer) == 0 {
+			s.mutex.Unlock()
+			continue
+		}
+		tickersToProcess := s.tickerBuffer
+		s.tickerBuffer = nil // Reset the buffer
+		s.mutex.Unlock()
+
+		s.processTickerBatch(tickersToProcess)
+
 	}
 }
 
 func (s *WebsocketServerConsumer) StartTickerListener(tickerTopic *tickertopic.TickerTopic) {
-	// Listen for tickers and sends them to a Websocket connection
+	// Listen for tickers and accumulate them
 	s.TickerListener = tickerTopic.Broadcaster.Listen()
-	log.Debug("Websocker ticker listening for tickers now", "consumer", "websocket", "address", s.wsServer.Address)
+	log.Debug("Websocket ticker listening for tickers now", "consumer", "websocket", "address", s.wsServer.Address)
 	go func() {
-		for ticker := range s.TickerListener.Channel() {
-			s.processTicker(ticker.(*model.Ticker))
+		for t := range s.TickerListener.Channel() {
+			ticker := (t.(*model.Ticker))
+			if !s.useExchangeTimestamp {
+				ticker.Timestamp = time.Now().UTC()
+
+			}
+			s.mutex.Lock()
+			s.tickerBuffer = append(s.tickerBuffer, ticker)
+			s.mutex.Unlock()
 		}
 	}()
-
+	// Start the flush goroutine
+	go s.flushTickers()
 }
 
 func (s *WebsocketServerConsumer) CloseTickerListener() {
-
+	s.TickerListener.Discard()
 }
 
 func NewWebsocketConsumer(options WebsocketConsumerOptions) *WebsocketServerConsumer {
-	server := websocket_server.NewWebsocketServer(options.Host, options.Port, options.TickersEndpoint)
+	server := websocket_server.NewWebsocketServer(options.Port, options.TickersEndpoint)
 
 	newConsumer := &WebsocketServerConsumer{
 		wsServer: *server,

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	log "log/slog"
 
-	"github.com/bytedance/sonic"
 	"github.com/textileio/go-threads/broadcast"
+	"golang.org/x/exp/rand"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/tickertopic"
 
@@ -41,12 +41,9 @@ func (s *MqttConsumer) setup() error {
 }
 
 func (s *MqttConsumer) processTicker(ticker *model.Ticker) {
-	channel := fmt.Sprintf("tickers/%s/%s/%s", ticker.Source, ticker.Base, ticker.Quote)
+	channel := fmt.Sprintf("tickers/%s/%s/%s", ticker.Base, ticker.Quote, ticker.Source)
 
-	payload, err := sonic.Marshal(ticker)
-	if err != nil {
-		log.Error("error encoding ticker", "consumer", "mqtt", "error", err)
-	}
+	payload := fmt.Sprintf("%s,%d", ticker.LastPrice, ticker.Timestamp.UnixMilli())
 	token := s.mqttClient.Publish(channel, byte(s.qosLevel), false, payload)
 	token.Wait()
 }
@@ -57,7 +54,7 @@ func (s *MqttConsumer) StartTickerListener(tickerTopic *tickertopic.TickerTopic)
 	s.TickerListener = tickerTopic.Broadcaster.Listen()
 	for consumerId := 1; consumerId <= s.numThreads; consumerId++ {
 		go func(consumerId int) {
-			log.Debug(fmt.Sprintf("MQTT ticker consumer %d listening for tickers now", consumerId), "consumer", "mqtt", "consumer_num", consumerId)
+			log.Debug(fmt.Sprintf("MQTT ticker consumer %d goroutine listening for tickers now", consumerId), "consumer", "mqtt", "consumer_num", consumerId)
 			for ticker := range s.TickerListener.Channel() {
 				s.processTicker(ticker.(*model.Ticker))
 			}
@@ -73,12 +70,19 @@ func (s *MqttConsumer) CloseTickerListener() {
 func NewMqttConsumer(options MqttConsumerOptions) *MqttConsumer {
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(options.Url)
-	opts.SetCleanSession(false)
+	opts.SetCleanSession(true)
 	//opts.SetDefaultPublishHandler()
 	opts.SetAutoReconnect(true)
 	opts.SetUsername("")
 	opts.SetPassword("")
-	opts.SetClientID("ftso-data-sources")
+	opts.SetClientID((func(n int) string {
+		const letterBytes = "abcdefghijklmnopqrstuvwxyz1234567890"
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = letterBytes[rand.Int63()%int64(len(letterBytes))]
+		}
+		return string(b)
+	})(12)) // create a random ClientID
 
 	newConsumer := &MqttConsumer{
 		mqttClient: mqtt.NewClient(opts),

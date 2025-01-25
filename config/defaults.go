@@ -9,17 +9,16 @@ import (
 func setDefaults() {
 	viper.SetDefault("env", "development")
 	viper.SetDefault("log_level", "info")
-
 	viper.SetDefault("message_buffer_size", 0)
-
 	viper.SetDefault("use_exchange_timestamp", true)
+	viper.SetDefault("port", 9999)
 
 	viper.SetDefault("assets.crypto", constants.BASES_CRYPTO)
 	viper.SetDefault("assets.commodities", constants.AssetList{})
 	viper.SetDefault("assets.forex", constants.AssetList{})
 	viper.SetDefault("assets.stocks", constants.AssetList{})
 
-	viper.SetDefault("stats.enabled", "true")
+	viper.SetDefault("stats.enabled", true)
 	viper.SetDefault("stats.interval", "60s")
 	viper.SetDefault("stats.num_threads", 1)
 
@@ -29,7 +28,7 @@ func setDefaults() {
 	viper.SetDefault("file_consumer.filename", "")
 
 	viper.SetDefault("mqtt.enabled", false)
-	viper.SetDefault("mqtt.num_threads", 1)
+	viper.SetDefault("mqtt.num_threads", 2)
 	viper.SetDefault("mqtt.qos_level", 0)
 
 	viper.SetDefault("redis.enabled", false)
@@ -42,10 +41,9 @@ func setDefaults() {
 	viper.SetDefault("redis.ts.chunksize", 4096)
 
 	viper.SetDefault("websocket_server.enabled", false)
-	viper.SetDefault("websocket_server.host", "127.0.0.1")
-	viper.SetDefault("websocket_server.port", 9999)
 	viper.SetDefault("websocket_server.ticker_endpoint", "/tickers")
 	viper.SetDefault("websocket_server.individual_feed_table", false)
+	viper.SetDefault("websocket_server.flush_interval", "500ms")
 
 	viper.SetDefault("questdb.enabled", false)
 	viper.SetDefault("questdb.flush_interval", "10s")

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log/slog"
 	"path"
 
 	"github.com/spf13/viper"
@@ -9,6 +10,13 @@ import (
 	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
+type AssetConfig struct {
+	Crypto      []string `mapstructure:"crypto" json:"crypto"`
+	Commodities []string `mapstructure:"commodities" json:"commodities"`
+	Forex       []string `mapstructure:"forex" json:"forex"`
+	Stocks      []string `mapstructure:"stocks" json:"stocks"`
+}
+
 type ConfigOptions struct {
 	Env string `mapstructure:"env"`
 
@@ -16,20 +24,19 @@ type ConfigOptions struct {
 
 	MessageBufferSize int `mapstructure:"message_buffer_size"`
 
+	UseExchangeTimestamp bool `mapstructure:"use_exchange_timestamp"`
+
+	Port int `mapstructure:"port"`
+
 	Datasources []datasource.DataSourceOptions `mapstructure:"datasources"`
 
-	Assets struct {
-		Crypto      []string `mapstructure:"crypto"`
-		Commodities []string `mapstructure:"commodities"`
-		Forex       []string `mapstructure:"forex"`
-		Stocks      []string `mapstructure:"stocks"`
-	} `mapstructure:"assets"`
+	Assets AssetConfig `mapstructure:"assets"`
 
 	Stats consumer.StatisticsGeneratorOptions `mapstructure:"stats"`
 
 	RedisOptions             consumer.RedisOptions             `mapstructure:"redis_ts"`
 	WebsocketConsumerOptions consumer.WebsocketConsumerOptions `mapstructure:"websocket_server"`
-	FileFileConsumerOptions  consumer.FileConsumerOptions      `mapstructure:"file_output"`
+	FileConsumerOptions      consumer.FileConsumerOptions      `mapstructure:"file_output"`
 	MQTTConsumerOptions      consumer.MqttConsumerOptions      `mapstructure:"mqtt"`
 	QuestDBConsumerOptions   consumer.QuestDbConsumerOptions   `mapstructure:"questdb"`
 
@@ -48,6 +55,7 @@ func LoadConfig(configFile string) (config ConfigOptions, err error) {
 
 	viper.AddConfigPath(path.Dir(configFile))
 	viper.SetConfigFile(path.Base(configFile))
+	viper.SetConfigType("yaml")
 
 	err = viper.ReadInConfig()
 	if err != nil {
@@ -59,6 +67,15 @@ func LoadConfig(configFile string) (config ConfigOptions, err error) {
 		return ConfigOptions{}, err
 	}
 
+	config.WebsocketConsumerOptions.Port = config.Port
+
 	Config = config
 	return config, nil
+}
+
+func SaveConfig() error {
+	slog.Info("Saving config")
+	err := viper.WriteConfigAs("config.original.yaml")
+
+	return err
 }

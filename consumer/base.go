@@ -1,11 +1,8 @@
 package consumer
 
-import (
-	"github.com/textileio/go-threads/broadcast"
-)
+import "roselabs.mx/ftso-data-sources/tickertopic"
 
 type Consumer interface {
-	StartTickerListener(*broadcast.Broadcaster)
+	StartTickerListener(*tickertopic.TickerTopic)
 	CloseTickerListener()
-	//processTicker(ticker *model.Ticker)
 }

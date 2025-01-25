@@ -100,7 +100,6 @@ mqtt:
   enabled: false
   url: "tcp://localhost:1883"
   num_threads: 4
-  use_sbe_encoding: true
   qos_level: 1
 
 # see https://questdb.io/
@@ -134,7 +133,6 @@ websocket_server:
   enabled: false
   host: 127.0.0.1
   port: 9999
-  use_sbe_encoding: false
   endpoints:
     tickers: /tickers
     volumes:

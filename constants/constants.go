@@ -7,32 +7,33 @@ import (
 type AssetName string
 type AssetList []string
 
-var BASES_CRYPTO = AssetList{"flr", "sgb", "btc", "xrp", "ltc", "xlm", "doge",
-	"ada", "algo", "eth", "fil", "arb", "avax", "bnb", "matic", "sol", "usdc", "usdt", "xdc",
-	"trx", "dot", "shib", "uni", "hbar", "near", "vet", "rndr", "strk", "aave", "qnt",
-	"xtz", "gala", "atom", "etc", "beam", "imx", "stx", "apt", "op", "icp", "inj", "tia", "grt", "sui", "ldo"}
+var BASES_CRYPTO = AssetList{"FLR", "SGB", "BTC", "XRP", "LTC", "XLM", "DOGE",
+	"ADA", "ALGO", "ETH", "FIL", "ARB", "AVAX", "BNB", "MATIC", "SOL", "USDC", "USDT", "XDC",
+	"TRX", "DOT", "SHIB", "UNI", "HBAR", "NEAR", "VET", "RNDR", "STRK", "AAVE", "QNT",
+	"XTZ", "GALA", "ATOM", "ETC", "BEAM", "IMX", "STX", "APT", "OP", "ICP", "INJ", "TIA", "GRT", "SUI", "LDO"}
 
 var BASES_FOREX = AssetList{
-	"eur",
-	"jpy",
-	"aud",
+	"EUR",
+	"JPY",
+	"AUD",
 }
 var BASES_COMMODITIES = AssetList{
-	"xau",
-	"xag",
-	"xpt",
+	"XAU",
+	"XAG",
+	"XPT",
 }
 
 var BASES_STOCKS = AssetList{}
 
-const USD = "usd"
+const USD = "USD"
 
-const USDT = "usdt"
-const USDC = "usdc"
-const DAI = "dai"
-const BUSD = "busd"
+const USDT = "USDT"
+const USDC = "USDC"
+const DAI = "DAI"
+const BUSD = "BUSD"
 
 var USD_USDT_USDC_DAI = AssetList{USD, USDT, USDC, DAI}
+var USD_USDT_USDC_DAI_BUSD = AssetList{USD, USDT, USDC, DAI, BUSD}
 var USD_USDT_USDC = AssetList{USD, USDT, USDC}
 var USDT_USDC_DAI = AssetList{USDT, USDC, DAI}
 var USDT_USDC = AssetList{USDT, USDC}

@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/mitchellh/mapstructure"
-	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/binance"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bitfinex"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/bitget"
@@ -34,6 +33,7 @@ import (
 	metalsdev "roselabs.mx/ftso-data-sources/datasource/tradfi/metals.dev"
 	"roselabs.mx/ftso-data-sources/datasource/tradfi/tiingo"
 	"roselabs.mx/ftso-data-sources/symbols"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type FtsoDataSource interface {
@@ -50,7 +50,7 @@ type DataSourceOptions struct {
 	Options map[string]interface{} `mapstructure:",remain"`
 }
 
-func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (FtsoDataSource, error) {
+func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (FtsoDataSource, error) {
 
 	switch source.Source {
 	case "binance":

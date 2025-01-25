@@ -11,16 +11,16 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
-	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type TiingoClient struct {
 	name           string
 	W              *sync.WaitGroup
-	TickerTopic    *broadcast.Broadcaster
+	TickerTopic    *tickertopic.TickerTopic
 	wsClient       internal.WebSocketClient
 	wsEndpoint     string
 	SymbolList     []model.Symbol
@@ -33,7 +33,7 @@ type TiingoClient struct {
 	pingInterval int
 }
 
-func NewTiingoFxClient(options map[string]interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*TiingoClient, error) {
+func NewTiingoFxClient(options map[string]interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*TiingoClient, error) {
 	wsEndpoint := "wss://api.tiingo.com/fx"
 
 	tiingo := TiingoClient{
@@ -55,7 +55,7 @@ func NewTiingoFxClient(options map[string]interface{}, symbolList symbols.AllSym
 	return &tiingo, nil
 }
 
-func NewTiingoIexClient(options map[string]interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*TiingoClient, error) {
+func NewTiingoIexClient(options map[string]interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*TiingoClient, error) {
 	wsEndpoint := "wss://api.tiingo.com/iex"
 
 	tiingo := TiingoClient{

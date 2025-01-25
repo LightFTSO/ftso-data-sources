@@ -4,12 +4,12 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/symbols"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
-func NewBinanceUSClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BinanceClient, error) {
+func NewBinanceUSClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*BinanceClient, error) {
 	wsEndpoint := "wss://stream.binance.us:9443/stream?streams="
 
 	binance := BinanceClient{

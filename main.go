@@ -8,14 +8,13 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/textileio/go-threads/broadcast"
-
 	"roselabs.mx/ftso-data-sources/config"
 	"roselabs.mx/ftso-data-sources/consumer"
 	"roselabs.mx/ftso-data-sources/datasource"
 	"roselabs.mx/ftso-data-sources/flags"
 	"roselabs.mx/ftso-data-sources/logging"
 	"roselabs.mx/ftso-data-sources/symbols"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 func init() {
@@ -41,23 +40,17 @@ func main() {
 }
 
 func run(globalConfig config.ConfigOptions) {
-	if globalConfig.UseExchangeTimestamp {
-		slog.Info("Using exchange timestamp as ticker timestamp")
-	} else {
-		slog.Info("Using local timestamp as ticker timestamp")
-	}
-
-	tickerTopic := broadcast.NewBroadcaster(config.Config.MessageBufferSize)
+	tickerTopic := tickertopic.NewTickerTopic(config.Config.TickerTransformationOptions, config.Config.MessageBufferSize)
 
 	initConsumers(tickerTopic, globalConfig)
 	initDataSources(tickerTopic, globalConfig)
 }
 
-func enableConsumer(c consumer.Consumer, tickerTopic *broadcast.Broadcaster) {
+func enableConsumer(c consumer.Consumer, tickerTopic *tickertopic.TickerTopic) {
 	c.StartTickerListener(tickerTopic)
 }
 
-func initConsumers(tickerTopic *broadcast.Broadcaster, config config.ConfigOptions) {
+func initConsumers(tickerTopic *tickertopic.TickerTopic, config config.ConfigOptions) {
 	if !config.FileFileConsumerOptions.Enabled &&
 		!config.RedisOptions.Enabled &&
 		!config.WebsocketConsumerOptions.Enabled &&
@@ -71,27 +64,27 @@ func initConsumers(tickerTopic *broadcast.Broadcaster, config config.ConfigOptio
 	}
 
 	if config.RedisOptions.Enabled {
-		c := consumer.NewRedisConsumer(config.RedisOptions, config.UseExchangeTimestamp)
+		c := consumer.NewRedisConsumer(config.RedisOptions)
 		enableConsumer(c, tickerTopic)
 	}
 
 	if config.FileFileConsumerOptions.Enabled {
-		c := consumer.NewFileConsumer(config.FileFileConsumerOptions.OutputFilename, config.UseExchangeTimestamp)
+		c := consumer.NewFileConsumer(config.FileFileConsumerOptions.OutputFilename)
 		enableConsumer(c, tickerTopic)
 	}
 
 	if config.MQTTConsumerOptions.Enabled {
-		c := consumer.NewMqttConsumer(config.MQTTConsumerOptions, config.UseExchangeTimestamp)
+		c := consumer.NewMqttConsumer(config.MQTTConsumerOptions)
 		enableConsumer(c, tickerTopic)
 	}
 
 	if config.QuestDBConsumerOptions.Enabled {
-		c := consumer.NewQuestDbConsumer(config.QuestDBConsumerOptions, config.UseExchangeTimestamp)
+		c := consumer.NewQuestDbConsumer(config.QuestDBConsumerOptions)
 		enableConsumer(c, tickerTopic)
 	}
 
 	if config.WebsocketConsumerOptions.Enabled {
-		c := consumer.NewWebsocketConsumer(config.WebsocketConsumerOptions, config.UseExchangeTimestamp)
+		c := consumer.NewWebsocketConsumer(config.WebsocketConsumerOptions)
 		enableConsumer(c, tickerTopic)
 	}
 
@@ -103,7 +96,7 @@ func initConsumers(tickerTopic *broadcast.Broadcaster, config config.ConfigOptio
 
 }
 
-func initDataSources(tickerTopic *broadcast.Broadcaster, config config.ConfigOptions) error {
+func initDataSources(tickerTopic *tickertopic.TickerTopic, config config.ConfigOptions) error {
 	var w sync.WaitGroup
 
 	allSymbols := symbols.GetAllSymbols(config.Assets.Crypto, config.Assets.Commodities, config.Assets.Forex, config.Assets.Stocks)

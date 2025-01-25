@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/bytedance/sonic"
-	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type MetalsDevOptions struct {
@@ -24,7 +24,7 @@ type MetalsDevOptions struct {
 type MetalsDevClient struct {
 	name             string
 	W                *sync.WaitGroup
-	TickerTopic      *broadcast.Broadcaster
+	TickerTopic      *tickertopic.TickerTopic
 	Interval         time.Duration
 	CommoditySymbols []model.Symbol
 	ForexSymbols     []model.Symbol
@@ -33,7 +33,7 @@ type MetalsDevClient struct {
 	log              *slog.Logger
 }
 
-func NewMetalsDevClient(options *MetalsDevOptions, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*MetalsDevClient, error) {
+func NewMetalsDevClient(options *MetalsDevOptions, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*MetalsDevClient, error) {
 
 	d, err := time.ParseDuration(options.Interval)
 	if err != nil {
@@ -121,7 +121,7 @@ func (b *MetalsDevClient) getLatest(useSample bool) (*LatestEndpointResponse, er
 }
 
 func (b *MetalsDevClient) SubscribeTickers() error {
-	go func(br *broadcast.Broadcaster) {
+	go func(br *tickertopic.TickerTopic) {
 		timeInterval := *time.NewTicker(b.Interval)
 
 		defer timeInterval.Stop()
@@ -139,13 +139,12 @@ func (b *MetalsDevClient) SubscribeTickers() error {
 				}
 				ticker := model.Ticker{
 					LastPrice: strconv.FormatFloat(price, 'f', 8, 64),
-					Symbol:    strings.ToUpper(s.GetSymbol()),
 					Base:      strings.ToUpper(s.Base),
 					Quote:     strings.ToUpper(s.Quote),
 					Source:    b.GetName(),
 					Timestamp: t,
 				}
-				b.log.Info(fmt.Sprintf("metalsdev: symbol=%s price=%s", ticker.Symbol, ticker.LastPrice))
+				b.log.Info(fmt.Sprintf("metalsdev: symbol=%s price=%s", ticker.Symbol(), ticker.LastPrice))
 				br.Send(&ticker)
 			}
 			for _, s := range b.ForexSymbols {
@@ -156,13 +155,12 @@ func (b *MetalsDevClient) SubscribeTickers() error {
 
 				ticker := model.Ticker{
 					LastPrice: strconv.FormatFloat(price, 'f', 8, 64),
-					Symbol:    strings.ToUpper(s.GetSymbol()),
 					Base:      strings.ToUpper(s.Base),
 					Quote:     strings.ToUpper(s.Quote),
 					Source:    b.GetName(),
 					Timestamp: t,
 				}
-				b.log.Info(fmt.Sprintf("metalsdev: symbol=%s price=%s", ticker.Symbol, ticker.LastPrice))
+				b.log.Info(fmt.Sprintf("metalsdev: symbol=%s price=%s", ticker.Symbol(), ticker.LastPrice))
 				br.Send(&ticker)
 			}
 

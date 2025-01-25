@@ -13,16 +13,16 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
-	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type DigifinexClient struct {
 	name          string
 	W             *sync.WaitGroup
-	TickerTopic   *broadcast.Broadcaster
+	TickerTopic   *tickertopic.TickerTopic
 	wsClient      internal.WebSocketClient
 	wsEndpoint    string
 	apiEndpoint   string
@@ -33,7 +33,7 @@ type DigifinexClient struct {
 	pingInterval int
 }
 
-func NewDigifinexClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*DigifinexClient, error) {
+func NewDigifinexClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*DigifinexClient, error) {
 	wsEndpoint := "wss://openapi.digifinex.com/ws/v1/"
 
 	digifinex := DigifinexClient{

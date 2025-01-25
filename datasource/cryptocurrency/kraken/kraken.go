@@ -16,16 +16,16 @@ import (
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
 	"github.com/hashicorp/go-multierror"
-	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type KrakenClient struct {
 	name          string
 	W             *sync.WaitGroup
-	TickerTopic   *broadcast.Broadcaster
+	TickerTopic   *tickertopic.TickerTopic
 	wsClient      internal.WebSocketClient
 	wsEndpoint    string
 	apiEndpoint   string
@@ -36,7 +36,7 @@ type KrakenClient struct {
 	pingInterval int
 }
 
-func NewKrakenClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*KrakenClient, error) {
+func NewKrakenClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*KrakenClient, error) {
 	wsEndpoint := "wss://ws.kraken.com/v2"
 
 	kraken := KrakenClient{

@@ -10,16 +10,16 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
-	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type HitbtcClient struct {
 	name          string
 	W             *sync.WaitGroup
-	TickerTopic   *broadcast.Broadcaster
+	TickerTopic   *tickertopic.TickerTopic
 	wsClient      internal.WebSocketClient
 	wsEndpoint    string
 	SymbolList    []model.Symbol
@@ -29,7 +29,7 @@ type HitbtcClient struct {
 	pingInterval int
 }
 
-func NewHitbtcClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*HitbtcClient, error) {
+func NewHitbtcClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*HitbtcClient, error) {
 	wsEndpoint := "wss://api.hitbtc.com/api/3/ws/public"
 
 	hitbtc := HitbtcClient{

@@ -10,14 +10,14 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
-	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type kucoinInstanceClient struct {
 	name               string
-	TickerTopic        *broadcast.Broadcaster
+	TickerTopic        *tickertopic.TickerTopic
 	wsClient           internal.WebSocketClient
 	wsEndpoint         string
 	SymbolList         []model.Symbol
@@ -34,7 +34,7 @@ type kucoinInstanceClient struct {
 	closed             bool
 }
 
-func newKucoinInstanceClient(instanceServer InstanceServer, availableSymbols []model.Symbol, symbolList []model.Symbol, tickerTopic *broadcast.Broadcaster, ctx context.Context, cancel context.CancelFunc) *kucoinInstanceClient {
+func newKucoinInstanceClient(instanceServer InstanceServer, availableSymbols []model.Symbol, symbolList []model.Symbol, tickerTopic *tickertopic.TickerTopic, ctx context.Context, cancel context.CancelFunc) *kucoinInstanceClient {
 	instanceId := rand.Uint64()
 	wsEndpoint := fmt.Sprintf("%s?token=%s&connectId=%x", instanceServer.Endpoint, instanceServer.Token, instanceId)
 

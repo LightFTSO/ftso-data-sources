@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type NoisySourceOptions struct {
@@ -21,7 +21,7 @@ type NoisySourceOptions struct {
 type NoisySource struct {
 	name         string
 	W            *sync.WaitGroup
-	TickerTopic  *broadcast.Broadcaster
+	TickerTopic  *tickertopic.TickerTopic
 	Interval     time.Duration
 	SymbolList   []model.Symbol
 	timeInterval time.Ticker
@@ -38,7 +38,7 @@ func (n *NoisySource) Reconnect() error {
 }
 
 func (n *NoisySource) SubscribeTickers() error {
-	go func(br *broadcast.Broadcaster) {
+	go func(br *tickertopic.TickerTopic) {
 		n.timeInterval = *time.NewTicker(n.Interval)
 
 		defer n.timeInterval.Stop()
@@ -49,7 +49,6 @@ func (n *NoisySource) SubscribeTickers() error {
 				LastPrice: strconv.FormatFloat(float64(rand.Intn(1000))+rand.Float64(), 'f', 9, 64),
 				Base:      strings.ToUpper(randomSymbol.Base),
 				Quote:     strings.ToUpper(randomSymbol.Quote),
-				Symbol:    randomSymbol.GetSymbol(),
 				Source:    n.GetName(),
 				Timestamp: t,
 			}
@@ -71,7 +70,7 @@ func (n *NoisySource) GetName() string {
 	return n.name
 }
 
-func NewNoisySource(options *NoisySourceOptions, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*NoisySource, error) {
+func NewNoisySource(options *NoisySourceOptions, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*NoisySource, error) {
 	d, err := time.ParseDuration(options.Interval)
 	if err != nil {
 		slog.Warn("Using default duration", "datasource", "noisy", "name", options.Name)

@@ -10,16 +10,16 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
-	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type BitgetClient struct {
 	name          string
 	W             *sync.WaitGroup
-	TickerTopic   *broadcast.Broadcaster
+	TickerTopic   *tickertopic.TickerTopic
 	wsClient      internal.WebSocketClient
 	wsEndpoint    string
 	SymbolList    []model.Symbol
@@ -29,7 +29,7 @@ type BitgetClient struct {
 	pingInterval int
 }
 
-func NewBitgetClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BitgetClient, error) {
+func NewBitgetClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*BitgetClient, error) {
 	wsEndpoint := "wss://ws.bitget.com/v2/ws/public"
 
 	bitget := BitgetClient{

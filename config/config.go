@@ -6,6 +6,7 @@ import (
 	"github.com/spf13/viper"
 	"roselabs.mx/ftso-data-sources/consumer"
 	"roselabs.mx/ftso-data-sources/datasource"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type ConfigOptions struct {
@@ -14,8 +15,6 @@ type ConfigOptions struct {
 	LogLevel string `mapstructure:"log_level"`
 
 	MessageBufferSize int `mapstructure:"message_buffer_size"`
-
-	UseExchangeTimestamp bool `mapstructure:"use_exchange_timestamp"`
 
 	Datasources []datasource.DataSourceOptions `mapstructure:"datasources"`
 
@@ -33,6 +32,8 @@ type ConfigOptions struct {
 	FileFileConsumerOptions  consumer.FileConsumerOptions      `mapstructure:"file_output"`
 	MQTTConsumerOptions      consumer.MqttConsumerOptions      `mapstructure:"mqtt"`
 	QuestDBConsumerOptions   consumer.QuestDbConsumerOptions   `mapstructure:"questdb"`
+
+	TickerTransformationOptions []tickertopic.TransformationOptions `mapstructure:"transformations"`
 }
 
 var Config ConfigOptions

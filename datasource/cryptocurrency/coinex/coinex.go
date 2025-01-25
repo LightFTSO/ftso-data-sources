@@ -13,17 +13,17 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
-	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/helpers"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type CoinexClient struct {
 	name           string
 	W              *sync.WaitGroup
-	TickerTopic    *broadcast.Broadcaster
+	TickerTopic    *tickertopic.TickerTopic
 	wsClient       internal.WebSocketClient
 	wsEndpoint     string
 	apiEndpoint    string
@@ -34,7 +34,7 @@ type CoinexClient struct {
 	pingInterval   int
 }
 
-func NewCoinexClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*CoinexClient, error) {
+func NewCoinexClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*CoinexClient, error) {
 	wsEndpoint := "wss://socket.coinex.com/v2/spot"
 
 	coinex := CoinexClient{

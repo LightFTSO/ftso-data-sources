@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/textileio/go-threads/broadcast"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type StatisticsGeneratorOptions struct {
@@ -27,9 +28,9 @@ type StatisticsGenerator struct {
 	Statistics map[string]interface{}
 }
 
-func (s *StatisticsGenerator) StartTickerListener(tickerTopic *broadcast.Broadcaster) {
+func (s *StatisticsGenerator) StartTickerListener(tickerTopic *tickertopic.TickerTopic) {
 	log.Debug(fmt.Sprintf("Ticker Statistics generator configured with %d consumer goroutines", s.numThreads), "consumer", "statistics", "num_threads", s.numThreads)
-	s.TickerListener = tickerTopic.Listen()
+	s.TickerListener = tickerTopic.Broadcaster.Listen()
 	for consumerId := 1; consumerId <= s.numThreads; consumerId++ {
 		go func(consumerId int) {
 			log.Debug(fmt.Sprintf("Ticker statistics generator %d listening now", consumerId), "consumer", "statistics", "consumer_num", consumerId)

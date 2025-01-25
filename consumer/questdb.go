@@ -10,6 +10,7 @@ import (
 	questdb "github.com/questdb/go-questdb-client/v3"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/model"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type QuestDbConsumerOptions struct {
@@ -27,21 +28,14 @@ type QuestDbConsumerOptions struct {
 }
 
 type QuestDbConsumer struct {
-	questdbSender        *questdb.LineSender
-	TickerListener       *broadcast.Listener
-	individualFeedTable  bool
-	flushInterval        time.Duration
-	txContext            *context.Context
-	useExchangeTimestamp bool
+	questdbSender       *questdb.LineSender
+	TickerListener      *broadcast.Listener
+	individualFeedTable bool
+	flushInterval       time.Duration
+	txContext           *context.Context
 }
 
 func (q *QuestDbConsumer) processTicker(ticker *model.Ticker) {
-	//fmt.Printf("tickers,%s,%s,%s,%s,%v,%v\n", ticker.Base, ticker.Quote, ticker.Source, ticker.LastPrice, constants.IsStablecoin(ticker.Base), ticker.Timestamp)
-
-	if !q.useExchangeTimestamp {
-		ticker.Timestamp = time.Now().UTC()
-	}
-
 	var err error
 	if q.individualFeedTable {
 		tableName := fmt.Sprintf("%s_tickers", ticker.Base)
@@ -64,10 +58,10 @@ func (q *QuestDbConsumer) processTicker(ticker *model.Ticker) {
 	}
 }
 
-func (q *QuestDbConsumer) StartTickerListener(tickerTopic *broadcast.Broadcaster) {
+func (q *QuestDbConsumer) StartTickerListener(tickerTopic *tickertopic.TickerTopic) {
 	// Listen for tickers in the ch channel and sends them to a io.Writer
 	log.Debug("QuestDB ILP ticker listener configured", "consumer", "questdb")
-	q.TickerListener = tickerTopic.Listen()
+	q.TickerListener = tickerTopic.Broadcaster.Listen()
 	go func() {
 		log.Debug("QuestDB ILP ticker consumer listening for tickers now", "consumer", "questdb")
 		for ticker := range q.TickerListener.Channel() {
@@ -80,7 +74,7 @@ func (q *QuestDbConsumer) CloseTickerListener() {
 	q.TickerListener.Discard()
 }
 
-func NewQuestDbConsumer(options QuestDbConsumerOptions, useExchangeTimestamp bool) *QuestDbConsumer {
+func NewQuestDbConsumer(options QuestDbConsumerOptions) *QuestDbConsumer {
 	schema := options.ClientOptions.Schema
 	if schema != "http" && schema != "https" && schema != "tcp" && schema != "tcps" {
 		panic("QuestDB schema must be one of http,https,tcp,tcps")
@@ -125,11 +119,10 @@ func NewQuestDbConsumer(options QuestDbConsumerOptions, useExchangeTimestamp boo
 	}
 
 	newConsumer := &QuestDbConsumer{
-		questdbSender:        &sender,
-		individualFeedTable:  options.IndividualFeedTable,
-		flushInterval:        options.FlushInterval,
-		txContext:            &ctx,
-		useExchangeTimestamp: useExchangeTimestamp,
+		questdbSender:       &sender,
+		individualFeedTable: options.IndividualFeedTable,
+		flushInterval:       options.FlushInterval,
+		txContext:           &ctx,
 	}
 	return newConsumer
 }

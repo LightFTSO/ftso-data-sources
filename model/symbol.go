@@ -37,27 +37,28 @@ func cleanRemotePair(s string) string {
 
 func getBaseCurrency(pair string) string {
 	for _, stablecoin := range constants.USDT_USDC_DAI {
-		upperSc := strings.ToUpper(stablecoin)
-		if strings.HasPrefix(pair, upperSc) {
-			return upperSc
+		if strings.HasPrefix(pair, stablecoin) {
+			return stablecoin
 		}
 	}
 
-	upperDAI := strings.ToUpper(constants.DAI)
-	if strings.HasSuffix(pair, upperDAI) {
-		return strings.Replace(pair, upperDAI, "", 1)
+	for _, quote := range constants.USD_USDT_USDC_DAI {
+		base, found := strings.CutSuffix(pair, quote)
+		if found {
+			return base
+		}
 	}
 
 	var quote = substr(pair, len(pair)-4, 6)
 
 	if !strings.HasPrefix(quote, "U") /*&& !strings.HasPrefix(quote, "B") */ {
-		quote = "USD"
+		quote = constants.USD
 	}
 
 	var base = strings.Replace(pair, quote, "", 1)
 
 	if len(base) == 2 {
-		quote = "USD"
+		quote = constants.USD
 		base = strings.Replace(pair, quote, "", 1)
 	}
 
@@ -90,5 +91,4 @@ func (s SymbolList) ChunkSymbols(chunkSize int) []SymbolList {
 		chunks = append(chunks, s[i:end])
 	}
 	return chunks
-
 }

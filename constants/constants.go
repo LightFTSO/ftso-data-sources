@@ -8,7 +8,7 @@ type AssetName string
 type AssetList []string
 
 var BASES_CRYPTO = AssetList{"FLR", "SGB", "BTC", "XRP", "LTC", "XLM", "DOGE",
-	"ADA", "ALGO", "ETH", "FIL", "ARB", "AVAX", "BNB", "MATIC", "POL", "SOL", "USDC", "USDT", "XDC",
+	"ADA", "ALGO", "ETH", "FIL", "ARB", "AVAX", "BNB", "MATIC", "SOL", "USDC", "USDT", "XDC",
 	"TRX", "DOT", "SHIB", "UNI", "HBAR", "NEAR", "VET", "RNDR", "STRK", "AAVE", "QNT",
 	"XTZ", "GALA", "ATOM", "ETC", "BEAM", "IMX", "STX", "APT", "OP", "ICP", "INJ", "TIA", "GRT", "SUI", "LDO"}
 
@@ -33,6 +33,7 @@ const DAI = "DAI"
 const BUSD = "BUSD"
 
 var USD_USDT_USDC_DAI = AssetList{USD, USDT, USDC, DAI}
+var USD_USDT_USDC_DAI_BUSD = AssetList{USD, USDT, USDC, DAI, BUSD}
 var USD_USDT_USDC = AssetList{USD, USDT, USDC}
 var USDT_USDC_DAI = AssetList{USDT, USDC, DAI}
 var USDT_USDC = AssetList{USDT, USDC}

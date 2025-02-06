@@ -71,7 +71,7 @@ func LoadConfig(configFile string) (config ConfigOptions, err error) {
 }
 
 func SaveConfig() error {
-	slog.Info("Saving config")
+	slog.Info("Saving current configuraton to backup file")
 	err := viper.WriteConfigAs("config.original.yaml")
 
 	return err

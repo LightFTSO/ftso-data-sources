@@ -13,14 +13,15 @@ func NewBinanceUSClient(options interface{}, symbolList symbols.AllSymbols, tick
 	wsEndpoint := "wss://stream.binance.us:9443/stream?streams="
 
 	binance := BinanceClient{
-		name:        "binanceus",
-		log:         slog.Default().With(slog.String("datasource", "binanceus")),
-		W:           w,
-		TickerTopic: tickerTopic,
-		wsClients:   []*internal.WebSocketClient{},
-		wsEndpoint:  wsEndpoint,
-		apiEndpoint: "https://api.binance.us",
-		SymbolList:  symbolList.Crypto,
+		name:             "binanceus",
+		log:              slog.Default().With(slog.String("datasource", "binanceus")),
+		W:                w,
+		TickerTopic:      tickerTopic,
+		wsClients:        []*internal.WebSocketClient{},
+		wsEndpoint:       wsEndpoint,
+		apiEndpoint:      "https://api.binance.us",
+		SymbolList:       symbolList.Crypto,
+		clientClosedChan: broadcast.NewBroadcaster(0),
 	}
 	binance.symbolChunks = binance.SymbolList.ChunkSymbols(1024)
 	binance.log.Debug("Created new datasource")

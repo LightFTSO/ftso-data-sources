@@ -35,22 +35,24 @@ type PionexClient struct {
 
 	pingInterval time.Duration
 
-	isRunning bool
+	isRunning        bool
+	clientClosedChan *broadcast.Broadcaster
 }
 
 func NewPionexClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*PionexClient, error) {
 	wsEndpoint := "wss://ws.pionex.com/wsPub"
 
 	pionex := PionexClient{
-		name:         "pionex",
-		log:          slog.Default().With(slog.String("datasource", "pionex")),
-		W:            w,
-		TickerTopic:  tickerTopic,
-		wsClients:    []*internal.WebSocketClient{},
-		wsEndpoint:   wsEndpoint,
-		SymbolList:   symbolList.Crypto,
-		pingInterval: 15 * time.Second,
-		apiEndpoint:  "https://api.pionex.com/api/v1",
+		name:             "pionex",
+		apiEndpoint:      "https://api.pionex.com/api/v1",
+		log:              slog.Default().With(slog.String("datasource", "pionex")),
+		W:                w,
+		TickerTopic:      tickerTopic,
+		wsClients:        []*internal.WebSocketClient{},
+		wsEndpoint:       wsEndpoint,
+		SymbolList:       symbolList.Crypto,
+		pingInterval:     15 * time.Second,
+		clientClosedChan: broadcast.NewBroadcaster(0),
 	}
 	pionex.symbolChunks = pionex.SymbolList.ChunkSymbols(1024)
 	pionex.log.Debug("Created new datasource")
@@ -90,6 +92,7 @@ func (d *PionexClient) Close() error {
 		wsClient.Close()
 	}
 	d.isRunning = false
+	d.clientClosedChan.Send(true)
 	d.W.Done()
 
 	return nil
@@ -245,22 +248,27 @@ func (d *PionexClient) setLastTickerWatcher() {
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
-		for range lastTickerIntervalTimer.C {
-			now := time.Now()
-			d.lastTimestampMutex.Lock()
-			diff := now.Sub(d.lastTimestamp)
-			d.lastTimestampMutex.Unlock()
-
-			if diff > timeout {
-				// no tickers received in a while, attempt to reconnect
+		for {
+			select {
+			case <-d.clientClosedChan.Listen().Channel():
+				return
+			case <-lastTickerIntervalTimer.C:
+				now := time.Now()
 				d.lastTimestampMutex.Lock()
-				d.lastTimestamp = time.Now()
+				diff := now.Sub(d.lastTimestamp)
 				d.lastTimestampMutex.Unlock()
 
-				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				if diff > timeout {
+					// no tickers received in a while, attempt to reconnect
+					d.lastTimestampMutex.Lock()
+					d.lastTimestamp = time.Now()
+					d.lastTimestampMutex.Unlock()
 
-				for _, wsClient := range d.wsClients {
-					wsClient.Reconnect()
+					d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+
+					for _, wsClient := range d.wsClients {
+						wsClient.Reconnect()
+					}
 				}
 			}
 		}

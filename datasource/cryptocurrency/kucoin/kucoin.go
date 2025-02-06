@@ -18,23 +18,25 @@ import (
 )
 
 type KucoinClient struct {
-	name        string
-	W           *sync.WaitGroup
-	TickerTopic *broadcast.Broadcaster
-	apiEndpoint string
-	SymbolList  []model.Symbol
-	log         *slog.Logger
-	isRunning   bool
+	name             string
+	W                *sync.WaitGroup
+	TickerTopic      *broadcast.Broadcaster
+	apiEndpoint      string
+	SymbolList       []model.Symbol
+	log              *slog.Logger
+	isRunning        bool
+	clientClosedChan *broadcast.Broadcaster
 }
 
 func NewKucoinClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*KucoinClient, error) {
 	kucoin := KucoinClient{
-		name:        "kucoin",
-		log:         slog.Default().With(slog.String("datasource", "kucoin")),
-		W:           w,
-		TickerTopic: tickerTopic,
-		apiEndpoint: "https://api.kucoin.com",
-		SymbolList:  symbolList.Crypto,
+		name:             "kucoin",
+		log:              slog.Default().With(slog.String("datasource", "kucoin")),
+		W:                w,
+		TickerTopic:      tickerTopic,
+		apiEndpoint:      "https://api.kucoin.com",
+		SymbolList:       symbolList.Crypto,
+		clientClosedChan: broadcast.NewBroadcaster(0),
 	}
 
 	kucoin.log.Debug("Created new datasource")
@@ -43,6 +45,7 @@ func NewKucoinClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 
 func (d *KucoinClient) Connect() error {
 	d.isRunning = true
+
 	d.W.Add(1)
 
 	availableSymbols, err := d.getAvailableSymbols()
@@ -56,25 +59,30 @@ func (d *KucoinClient) Connect() error {
 		defer d.W.Done()
 
 		// create new instance servers indefinitely as they're closed, until we get the close signal from the main function
+	main:
 		for {
-			d.log.Info("Creating kucoin instance client...")
-			instanceContext, instanceCancelFunc := context.WithCancel(context.Background())
-			instanceData, err := d.getNewInstanceData()
-			if err != nil {
-				d.log.Error("Error obtaining Kucoin instance client data", "error", err)
-				time.Sleep(5 * time.Second)
-				continue
-			}
-			instanceClient := newKucoinInstanceClient(*instanceData, availableSymbols, d.SymbolList, d.TickerTopic, instanceContext, instanceCancelFunc)
+			select {
+			case <-d.clientClosedChan.Listen().Channel():
+				break main
+			default:
+				d.log.Info("Creating kucoin instance client...")
+				instanceContext, instanceCancelFunc := context.WithCancel(context.Background())
+				instanceData, err := d.getNewInstanceData()
+				if err != nil {
+					d.log.Error("Error obtaining Kucoin instance client data", "error", err)
+					time.Sleep(5 * time.Second)
+					continue
+				}
+				instanceClient := newKucoinInstanceClient(*instanceData, availableSymbols, d.SymbolList, d.TickerTopic, instanceContext, instanceCancelFunc)
 
-			err = instanceClient.connect()
-			if err != nil {
-				d.log.Error("", "error", err)
-			}
+				err = instanceClient.connect()
+				if err != nil {
+					d.log.Error("", "error", err)
+				}
 
-			<-instanceContext.Done()
+				<-instanceContext.Done()
+			}
 		}
-
 	}()
 
 	return nil
@@ -89,6 +97,8 @@ func (d *KucoinClient) Close() error {
 		return errors.New("datasource is not running")
 	}
 	d.isRunning = false
+	d.clientClosedChan.Send(true)
+	d.clientClosedChan.Send(true)
 	d.W.Done()
 
 	return nil

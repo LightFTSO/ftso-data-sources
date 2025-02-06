@@ -34,6 +34,7 @@ type kucoinInstanceClient struct {
 	pingTicker         *time.Ticker
 	lastTickerTsTicker *time.Ticker
 	closed             bool
+	clientClosedChan   *broadcast.Broadcaster
 }
 
 func newKucoinInstanceClient(instanceServer InstanceServer, availableSymbols []model.Symbol, symbolList []model.Symbol, tickerTopic *broadcast.Broadcaster, ctx context.Context, cancel context.CancelFunc) *kucoinInstanceClient {
@@ -54,6 +55,7 @@ func newKucoinInstanceClient(instanceServer InstanceServer, availableSymbols []m
 		ctx:              ctx,
 		cancel:           cancel,
 		closed:           false,
+		clientClosedChan: broadcast.NewBroadcaster(0),
 	}
 	kucoinInstance.wsClient.SetMessageHandler(kucoinInstance.onMessage)
 	kucoinInstance.wsClient.SetOnDisconnect(kucoinInstance.onDisconnect)
@@ -73,6 +75,7 @@ func (d *kucoinInstanceClient) connect() error {
 func (d *kucoinInstanceClient) onDisconnect() error {
 	d.wsClient.ExplicitClose()
 	d.closed = true
+	d.clientClosedChan.Send(true)
 	d.cancel()
 	d.log.Debug("closing instance client")
 	return nil
@@ -174,21 +177,26 @@ func (d *kucoinInstanceClient) setLastTickerWatcher() {
 	timeout := (30 * time.Second)
 	go func() {
 		defer d.lastTickerTsTicker.Stop()
-		for range d.lastTickerTsTicker.C {
-			if d.closed {
+		for {
+			select {
+			case <-d.clientClosedChan.Listen().Channel():
 				return
-			}
+			case <-d.lastTickerTsTicker.C:
+				if d.closed {
+					return
+				}
 
-			now := time.Now()
-			d.lastTimestampMutex.Lock()
-			diff := now.Sub(d.lastTimestamp)
-			d.lastTimestampMutex.Unlock()
+				now := time.Now()
+				d.lastTimestampMutex.Lock()
+				diff := now.Sub(d.lastTimestamp)
+				d.lastTimestampMutex.Unlock()
 
-			if diff > timeout {
-				// no tickers received in a while, close this kucoin instance
-				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-				d.onDisconnect()
-				return
+				if diff > timeout {
+					// no tickers received in a while, close this kucoin instance
+					d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+					d.onDisconnect()
+					return
+				}
 			}
 		}
 	}()

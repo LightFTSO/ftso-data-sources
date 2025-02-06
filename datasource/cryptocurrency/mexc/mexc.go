@@ -33,9 +33,10 @@ type MexcClient struct {
 
 	pingInterval time.Duration
 
-	tzInfo         *time.Location
-	subscriptionId atomic.Uint64
-	isRunning      bool
+	tzInfo           *time.Location
+	subscriptionId   atomic.Uint64
+	isRunning        bool
+	clientClosedChan *broadcast.Broadcaster
 }
 
 func NewMexcClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*MexcClient, error) {
@@ -47,16 +48,17 @@ func NewMexcClient(options interface{}, symbolList symbols.AllSymbols, tickerTop
 	}
 
 	mexc := MexcClient{
-		name:         "mexc",
-		log:          slog.Default().With(slog.String("datasource", "mexc")),
-		W:            w,
-		TickerTopic:  tickerTopic,
-		wsClients:    []*internal.WebSocketClient{},
-		wsEndpoint:   wsEndpoint,
-		apiEndpoint:  "https://api.mexc.com",
-		SymbolList:   symbolList.Crypto,
-		pingInterval: 20 * time.Second,
-		tzInfo:       shanghaiTimezone,
+		name:             "mexc",
+		log:              slog.Default().With(slog.String("datasource", "mexc")),
+		W:                w,
+		TickerTopic:      tickerTopic,
+		wsClients:        []*internal.WebSocketClient{},
+		wsEndpoint:       wsEndpoint,
+		apiEndpoint:      "https://api.mexc.com",
+		SymbolList:       symbolList.Crypto,
+		pingInterval:     20 * time.Second,
+		tzInfo:           shanghaiTimezone,
+		clientClosedChan: broadcast.NewBroadcaster(0),
 	}
 	mexc.symbolChunks = mexc.SymbolList.ChunkSymbols(25)
 	mexc.log.Debug("Created new datasource")
@@ -92,6 +94,7 @@ func (d *MexcClient) Close() error {
 		wsClient.Close()
 	}
 	d.isRunning = false
+	d.clientClosedChan.Send(true)
 	d.W.Done()
 
 	return nil
@@ -167,20 +170,25 @@ func (d *MexcClient) setLastTickerWatcher() {
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
-		for range lastTickerIntervalTimer.C {
-			now := time.Now()
-			d.lastTimestampMutex.Lock()
-			diff := now.Sub(d.lastTimestamp)
-			d.lastTimestampMutex.Unlock()
-
-			if diff > timeout {
-				// no tickers received in a while, attempt to reconnect
+		for {
+			select {
+			case <-d.clientClosedChan.Listen().Channel():
+				return
+			case <-lastTickerIntervalTimer.C:
+				now := time.Now()
 				d.lastTimestampMutex.Lock()
-				d.lastTimestamp = time.Now()
+				diff := now.Sub(d.lastTimestamp)
 				d.lastTimestampMutex.Unlock()
-				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-				for _, wsClient := range d.wsClients {
-					wsClient.Reconnect()
+
+				if diff > timeout {
+					// no tickers received in a while, attempt to reconnect
+					d.lastTimestampMutex.Lock()
+					d.lastTimestamp = time.Now()
+					d.lastTimestampMutex.Unlock()
+					d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+					for _, wsClient := range d.wsClients {
+						wsClient.Reconnect()
+					}
 				}
 			}
 		}
@@ -191,9 +199,14 @@ func (d *MexcClient) setPing() {
 	ticker := time.NewTicker(d.pingInterval)
 	go func() {
 		defer ticker.Stop()
-		for range ticker.C {
-			for _, wsClient := range d.wsClients {
-				wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte(`{"method":"PING"}`)})
+		for {
+			select {
+			case <-d.clientClosedChan.Listen().Channel():
+				return
+			case <-ticker.C:
+				for _, wsClient := range d.wsClients {
+					wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte(`{"method":"PING"}`)})
+				}
 			}
 		}
 	}()

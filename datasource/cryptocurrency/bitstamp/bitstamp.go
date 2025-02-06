@@ -32,21 +32,23 @@ type BitstampClient struct {
 
 	pingInterval time.Duration
 
-	isRunning bool
+	isRunning        bool
+	clientClosedChan *broadcast.Broadcaster
 }
 
 func NewBitstampClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BitstampClient, error) {
 	wsEndpoint := "wss://ws.bitstamp.net"
 
 	bitstamp := BitstampClient{
-		name:         "bitstamp",
-		log:          slog.Default().With(slog.String("datasource", "bitstamp")),
-		W:            w,
-		TickerTopic:  tickerTopic,
-		wsClients:    []*internal.WebSocketClient{},
-		wsEndpoint:   wsEndpoint,
-		SymbolList:   symbolList.Crypto,
-		pingInterval: 30 * time.Second,
+		name:             "bitstamp",
+		log:              slog.Default().With(slog.String("datasource", "bitstamp")),
+		W:                w,
+		TickerTopic:      tickerTopic,
+		wsClients:        []*internal.WebSocketClient{},
+		wsEndpoint:       wsEndpoint,
+		SymbolList:       symbolList.Crypto,
+		pingInterval:     30 * time.Second,
+		clientClosedChan: broadcast.NewBroadcaster(0),
 	}
 	bitstamp.symbolChunks = bitstamp.SymbolList.ChunkSymbols(2048)
 	bitstamp.log.Debug("Created new datasource")
@@ -82,6 +84,7 @@ func (d *BitstampClient) Close() error {
 		wsClient.Close()
 	}
 	d.isRunning = false
+	d.clientClosedChan.Send(true)
 	d.W.Done()
 
 	return nil
@@ -163,20 +166,25 @@ func (d *BitstampClient) setLastTickerWatcher() {
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
-		for range lastTickerIntervalTimer.C {
-			now := time.Now()
-			d.lastTimestampMutex.Lock()
-			diff := now.Sub(d.lastTimestamp)
-			d.lastTimestampMutex.Unlock()
-
-			if diff > timeout {
-				// no tickers received in a while, attempt to reconnect
+		for {
+			select {
+			case <-d.clientClosedChan.Listen().Channel():
+				return
+			case <-lastTickerIntervalTimer.C:
+				now := time.Now()
 				d.lastTimestampMutex.Lock()
-				d.lastTimestamp = time.Now()
+				diff := now.Sub(d.lastTimestamp)
 				d.lastTimestampMutex.Unlock()
-				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-				for _, wsClient := range d.wsClients {
-					wsClient.Reconnect()
+
+				if diff > timeout {
+					// no tickers received in a while, attempt to reconnect
+					d.lastTimestampMutex.Lock()
+					d.lastTimestamp = time.Now()
+					d.lastTimestampMutex.Unlock()
+					d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+					for _, wsClient := range d.wsClients {
+						wsClient.Reconnect()
+					}
 				}
 			}
 		}
@@ -186,11 +194,15 @@ func (d *BitstampClient) setPing() {
 	ticker := time.NewTicker(d.pingInterval)
 	go func() {
 		defer ticker.Stop()
-		for range ticker.C {
-			for _, wsClient := range d.wsClients {
-				wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte(`{"event":"bts:heartbeat"}`)})
+		for {
+			select {
+			case <-d.clientClosedChan.Listen().Channel():
+				return
+			case <-ticker.C:
+				for _, wsClient := range d.wsClients {
+					wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte(`{"event":"bts:heartbeat"}`)})
+				}
 			}
-
 		}
 	}()
 }

@@ -35,7 +35,8 @@ type TiingoClient struct {
 
 	pingInterval time.Duration
 
-	isRunning bool
+	isRunning        bool
+	clientClosedChan *broadcast.Broadcaster
 }
 
 func NewTiingoFxClient(options map[string]interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*TiingoClient, error) {
@@ -49,16 +50,17 @@ func NewTiingoFxClient(options map[string]interface{}, symbolList symbols.AllSym
 	}
 
 	tiingo := TiingoClient{
-		name:           "tiingo_fx",
-		log:            slog.Default().With(slog.String("datasource", "tiingo_fx")),
-		W:              w,
-		TickerTopic:    tickerTopic,
-		wsClients:      []*internal.WebSocketClient{},
-		wsEndpoint:     wsEndpoint,
-		SymbolList:     symbolList.Forex,
-		pingInterval:   20 * time.Second,
-		apiToken:       apiToken,
-		thresholdLevel: 5,
+		name:             "tiingo_fx",
+		log:              slog.Default().With(slog.String("datasource", "tiingo_fx")),
+		W:                w,
+		TickerTopic:      tickerTopic,
+		wsClients:        []*internal.WebSocketClient{},
+		wsEndpoint:       wsEndpoint,
+		SymbolList:       symbolList.Forex,
+		pingInterval:     20 * time.Second,
+		apiToken:         apiToken,
+		thresholdLevel:   5,
+		clientClosedChan: broadcast.NewBroadcaster(0),
 	}
 	tiingo.symbolChunks = tiingo.SymbolList.ChunkSymbols(1024)
 	tiingo.log.Debug("Created new datasource")
@@ -71,16 +73,17 @@ func NewTiingoIexClient(options map[string]interface{}, symbolList symbols.AllSy
 	wsEndpoint := "wss://api.tiingo.com/iex"
 
 	tiingo := TiingoClient{
-		name:           "tiingo_iex",
-		log:            slog.Default().With(slog.String("datasource", "tiingo_iex")),
-		W:              w,
-		TickerTopic:    tickerTopic,
-		wsClients:      []*internal.WebSocketClient{},
-		wsEndpoint:     wsEndpoint,
-		SymbolList:     symbolList.Forex,
-		pingInterval:   20 * time.Second,
-		apiToken:       options["api_token"].(string),
-		thresholdLevel: 5,
+		name:             "tiingo_iex",
+		log:              slog.Default().With(slog.String("datasource", "tiingo_iex")),
+		W:                w,
+		TickerTopic:      tickerTopic,
+		wsClients:        []*internal.WebSocketClient{},
+		wsEndpoint:       wsEndpoint,
+		SymbolList:       symbolList.Forex,
+		pingInterval:     20 * time.Second,
+		apiToken:         options["api_token"].(string),
+		thresholdLevel:   5,
+		clientClosedChan: broadcast.NewBroadcaster(0),
 	}
 	tiingo.symbolChunks = tiingo.SymbolList.ChunkSymbols(1024)
 	tiingo.log.Debug("Created new datasource")
@@ -123,6 +126,7 @@ func (d *TiingoClient) Close() error {
 		wsClient.Close()
 	}
 	d.isRunning = false
+	d.clientClosedChan.Send(true)
 	d.W.Done()
 
 	return nil
@@ -230,22 +234,27 @@ func (d *TiingoClient) setLastTickerWatcher() {
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
-		for range lastTickerIntervalTimer.C {
-			now := time.Now()
-			d.lastTimestampMutex.Lock()
-			diff := now.Sub(d.lastTimestamp)
-			d.lastTimestampMutex.Unlock()
-
-			if diff > timeout {
-				// no tickers received in a while, attempt to reconnect
+		for {
+			select {
+			case <-d.clientClosedChan.Listen().Channel():
+				return
+			case <-lastTickerIntervalTimer.C:
+				now := time.Now()
 				d.lastTimestampMutex.Lock()
-				d.lastTimestamp = time.Now()
+				diff := now.Sub(d.lastTimestamp)
 				d.lastTimestampMutex.Unlock()
 
-				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				if diff > timeout {
+					// no tickers received in a while, attempt to reconnect
+					d.lastTimestampMutex.Lock()
+					d.lastTimestamp = time.Now()
+					d.lastTimestampMutex.Unlock()
 
-				for _, wsClient := range d.wsClients {
-					wsClient.Reconnect()
+					d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+
+					for _, wsClient := range d.wsClients {
+						wsClient.Reconnect()
+					}
 				}
 			}
 		}
@@ -256,9 +265,14 @@ func (d *TiingoClient) setPing() {
 	ticker := time.NewTicker(d.pingInterval)
 	go func() {
 		defer ticker.Stop()
-		for range ticker.C {
-			for _, wsClient := range d.wsClients {
-				wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte("ping")})
+		for {
+			select {
+			case <-d.clientClosedChan.Listen().Channel():
+				return
+			case <-ticker.C:
+				for _, wsClient := range d.wsClients {
+					wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte("ping")})
+				}
 			}
 		}
 	}()

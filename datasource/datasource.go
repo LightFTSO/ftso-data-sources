@@ -48,7 +48,7 @@ type FtsoDataSource interface {
 
 type DataSourceOptions struct {
 	Source  string                 `mapstructure:"source"`
-	Options map[string]interface{} `mapstructure:",remain"`
+	Options map[string]interface{} `mapstructure:"options"`
 }
 
 func BuildDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (FtsoDataSource, error) {

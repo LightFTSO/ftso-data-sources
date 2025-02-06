@@ -26,6 +26,7 @@ type KucoinClient struct {
 	log              *slog.Logger
 	isRunning        bool
 	clientClosedChan *broadcast.Broadcaster
+	instanceClient   *kucoinInstanceClient
 }
 
 func NewKucoinClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*KucoinClient, error) {
@@ -56,14 +57,12 @@ func (d *KucoinClient) Connect() error {
 	}
 
 	go func() {
-		defer d.W.Done()
-
 		// create new instance servers indefinitely as they're closed, until we get the close signal from the main function
-	main:
 		for {
 			select {
 			case <-d.clientClosedChan.Listen().Channel():
-				break main
+				d.log.Debug("instance client generator loop exiting")
+				return
 			default:
 				d.log.Info("Creating kucoin instance client...")
 				instanceContext, instanceCancelFunc := context.WithCancel(context.Background())
@@ -73,14 +72,19 @@ func (d *KucoinClient) Connect() error {
 					time.Sleep(5 * time.Second)
 					continue
 				}
-				instanceClient := newKucoinInstanceClient(*instanceData, availableSymbols, d.SymbolList, d.TickerTopic, instanceContext, instanceCancelFunc)
+				d.instanceClient = newKucoinInstanceClient(*instanceData, availableSymbols, d.SymbolList, d.TickerTopic, instanceContext, instanceCancelFunc)
 
-				err = instanceClient.connect()
+				err = d.instanceClient.connect()
 				if err != nil {
 					d.log.Error("", "error", err)
 				}
 
 				<-instanceContext.Done()
+
+				if !d.isRunning {
+					d.log.Debug("instance client generator loop exiting")
+					return
+				}
 			}
 		}
 	}()
@@ -96,9 +100,10 @@ func (d *KucoinClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
+	d.log.Debug("closing Kucoin instance generator")
 	d.isRunning = false
 	d.clientClosedChan.Send(true)
-	d.clientClosedChan.Send(true)
+	d.instanceClient.onDisconnect()
 	d.W.Done()
 
 	return nil

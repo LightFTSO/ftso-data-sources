@@ -293,6 +293,34 @@ Response:
 }
 ```
 
+### Shutdown the program
+**POST http://127.0.0.1:9999/rpc**
+```
+{
+	"method": "RPCManager.Shutdown",
+	"params": [],
+	"id": 1
+}
+```
+Response:
+```
+{
+	"id": 1,
+	"result": {
+		"Assets": {
+			"crypto": [
+				"BTC",
+				"ETH"
+			],
+			"commodities": [],
+			"forex": [],
+			"stocks": []
+		}
+	},
+	"error": null
+}
+```
+
 # Counting ticker rate
 You can count the number of tickers per second enabling the file-output consumer, using /dev/stdout as the output file
 or using the MQTT consumer, in another terminal connect to it using a client program and pipe the output to the program `pv`, e.g.:

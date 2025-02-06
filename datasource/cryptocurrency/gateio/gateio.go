@@ -227,6 +227,7 @@ func (d *GateIoClient) setLastTickerWatcher() {
 		for {
 			select {
 			case <-d.clientClosedChan.Listen().Channel():
+				d.log.Debug("last ticker received watcher goroutine exiting")
 				return
 			case <-lastTickerIntervalTimer.C:
 				now := time.Now()
@@ -258,6 +259,7 @@ func (d *GateIoClient) setPing() {
 		for {
 			select {
 			case <-d.clientClosedChan.Listen().Channel():
+				d.log.Debug("ping sender goroutine exiting")
 				return
 			case <-ticker.C:
 				for _, wsClient := range d.wsClients {

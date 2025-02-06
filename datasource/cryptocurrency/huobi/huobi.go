@@ -179,6 +179,7 @@ func (d *HuobiClient) setLastTickerWatcher() {
 		for {
 			select {
 			case <-d.clientClosedChan.Listen().Channel():
+				d.log.Debug("last ticker received watcher goroutine exiting")
 				return
 			case <-lastTickerIntervalTimer.C:
 				now := time.Now()

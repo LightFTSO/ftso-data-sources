@@ -76,8 +76,8 @@ func (d *kucoinInstanceClient) onDisconnect() error {
 	d.wsClient.ExplicitClose()
 	d.closed = true
 	d.clientClosedChan.Send(true)
-	d.cancel()
 	d.log.Debug("closing instance client")
+	d.cancel()
 	return nil
 }
 
@@ -180,6 +180,7 @@ func (d *kucoinInstanceClient) setLastTickerWatcher() {
 		for {
 			select {
 			case <-d.clientClosedChan.Listen().Channel():
+				d.log.Debug("last ticker received watcher goroutine exiting")
 				return
 			case <-d.lastTickerTsTicker.C:
 				if d.closed {
@@ -206,12 +207,18 @@ func (d *kucoinInstanceClient) setPing() {
 	d.pingTicker = time.NewTicker(d.pingInterval)
 	go func() {
 		defer d.pingTicker.Stop()
-		for range d.pingTicker.C {
-			if d.closed {
+		for {
+			select {
+			case <-d.clientClosedChan.Listen().Channel():
+				d.log.Debug("ping sender goroutine exiting")
 				return
+			case <-d.pingTicker.C:
+				if d.closed {
+					return
+				}
+				d.log.Debug("Sending ping message")
+				d.wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte(fmt.Sprintf(`{"id":"%d","type":"ping"}`, time.Now().UnixMicro()))})
 			}
-			d.log.Debug("Sending ping message")
-			d.wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte(fmt.Sprintf(`{"id":"%d","type":"ping"}`, time.Now().UnixMicro()))})
 		}
 	}()
 }

@@ -3,6 +3,9 @@ image_name = ftso-data-sources:latest
 SRC_DIR=.
 
 build-dev:
+	go build -o build/main $(SRC_DIR)/main.go
+
+build-dev-gcflags:
 	go build -gcflags=all="-N -l" -o build/main $(SRC_DIR)/main.go
 
 run: build-dev

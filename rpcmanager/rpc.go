@@ -122,7 +122,7 @@ func (m *RPCManager) AddDataSource(args DataSourceArgs, reply *DataSourceReply) 
 	}
 
 	// Build and connect the new data source
-	src, err := datasource.BuilDataSource(args.Options, symbols.GetAllSymbols(
+	src, err := datasource.BuildDataSource(args.Options, symbols.GetAllSymbols(
 		m.getAssetList().Crypto, m.getAssetList().Commodities, m.getAssetList().Forex, m.getAssetList().Stocks,
 	), m.TickerTopic, &m.Wg)
 	if err != nil {
@@ -205,7 +205,7 @@ func (m *RPCManager) InitDataSources() error {
 
 	for _, source := range enabledDataSources {
 		symbols := symbols.GetAllSymbols(m.getAssetList().Crypto, m.getAssetList().Commodities, m.getAssetList().Forex, m.getAssetList().Stocks)
-		src, err := datasource.BuilDataSource(source, symbols, m.TickerTopic, &m.Wg)
+		src, err := datasource.BuildDataSource(source, symbols, m.TickerTopic, &m.Wg)
 		if err != nil {
 			log.Printf("Error creating data source %s: %v", source.Source, err)
 			continue

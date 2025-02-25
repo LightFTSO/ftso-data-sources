@@ -51,7 +51,7 @@ type DataSourceOptions struct {
 	Options map[string]interface{} `mapstructure:"options"`
 }
 
-func BuildDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (FtsoDataSource, error) {
+func BuildDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (FtsoDataSource, error) {
 
 	switch source.Source {
 	case "binance":

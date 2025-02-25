@@ -21,7 +21,7 @@ import (
 type KucoinClient struct {
 	name             string
 	W                *sync.WaitGroup
-	TickerTopic      *broadcast.Broadcaster
+	TickerTopic      *tickertopic.TickerTopic
 	apiEndpoint      string
 	SymbolList       []model.Symbol
 	log              *slog.Logger

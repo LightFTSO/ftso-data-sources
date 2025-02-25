@@ -25,7 +25,6 @@ func UpdateConfig(newConfig ConfigOptions, saveCurrentConfig bool) {
 
 	viper.Set("stats.enabled", newConfig.Stats.Enabled)
 	viper.Set("stats.interval", newConfig.Stats.Interval)
-	viper.Set("stats.num_threads", newConfig.Stats.NumThreads)
 
 	viper.Set("datasources", newConfig.Datasources)
 
@@ -33,7 +32,6 @@ func UpdateConfig(newConfig ConfigOptions, saveCurrentConfig bool) {
 	viper.Set("file_consumer.filename", newConfig.FileConsumerOptions.OutputFilename)
 
 	viper.Set("mqtt.enabled", newConfig.MQTTConsumerOptions.Enabled)
-	viper.Set("mqtt.num_threads", newConfig.MQTTConsumerOptions.NumThreads)
 	viper.Set("mqtt.qos_level", newConfig.MQTTConsumerOptions.QOSLevel)
 
 	viper.Set("redis.enabled", newConfig.RedisOptions.Enabled)
@@ -52,6 +50,8 @@ func UpdateConfig(newConfig ConfigOptions, saveCurrentConfig bool) {
 	viper.Set("questdb.client_options.address", newConfig.QuestDBConsumerOptions.ClientOptions.Address)
 	viper.Set("questdb.client_options.schema", newConfig.QuestDBConsumerOptions.ClientOptions.Schema)
 	viper.Set("questdb.individual_feed_table", newConfig.QuestDBConsumerOptions.IndividualFeedTable)
+
+	viper.Set("ticker_transformations", newConfig.TickerTransformationOptions)
 
 	if saveCurrentConfig {
 		slog.Info("Saving new config")

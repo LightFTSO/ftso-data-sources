@@ -40,7 +40,7 @@ type ConfigOptions struct {
 	MQTTConsumerOptions      consumer.MqttConsumerOptions      `mapstructure:"mqtt"`
 	QuestDBConsumerOptions   consumer.QuestDbConsumerOptions   `mapstructure:"questdb"`
 
-	TickerTransformationOptions []tickertopic.TransformationOptions `mapstructure:"transformations"`
+	TickerTransformationOptions []tickertopic.TransformationOptions `mapstructure:"ticker_transformations"`
 }
 
 var Config ConfigOptions

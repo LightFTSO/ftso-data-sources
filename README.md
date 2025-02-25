@@ -144,25 +144,25 @@ assets:
   #  - aud
   commodities:
   crypto:
-    - flr
-    - sgb
-    - xrp
-    - ltc
-    - xlm
-    - doge
-    - ada
-    - algo
-    - btc
-    - eth
-    - fil
-    - arb
-    - avax
-    - bnb
-    - matic
-    - sol
-    - usdc
-    - usdt
-    - xdc
+    - ADA
+    - ALGO
+    - ARB
+    - AVAX
+    - BNB
+    - BTC
+    - DOGE
+    - ETH
+    - FIL
+    - FLR
+    - LTC
+    - MATIC
+    - SGB
+    - SOL
+    - USDC
+    - USDT
+    - XDC
+    - XLM
+    - XRP
 
 # change the capacity of the internal message buffer
 # change it only if you experience performance issues
@@ -270,6 +270,34 @@ Response:
 ```
 {
 	"method": "RPCManager.GetAssets",
+	"params": [],
+	"id": 1
+}
+```
+Response:
+```
+{
+	"id": 1,
+	"result": {
+		"Assets": {
+			"crypto": [
+				"BTC",
+				"ETH"
+			],
+			"commodities": [],
+			"forex": [],
+			"stocks": []
+		}
+	},
+	"error": null
+}
+```
+
+### Shutdown the program
+**POST http://127.0.0.1:9999/rpc**
+```
+{
+	"method": "RPCManager.Shutdown",
 	"params": [],
 	"id": 1
 }

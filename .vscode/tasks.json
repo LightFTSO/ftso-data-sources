@@ -1,0 +1,16 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "run make",   // This should match the preLaunchTask in launch.json
+            "type": "shell",
+            "command": "make",         // Command to run the Makefile
+            "args": ["build-dev"],   // Replace with your Makefile target (if any)
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": [],
+        }
+    ]
+}

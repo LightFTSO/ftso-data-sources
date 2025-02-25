@@ -11,6 +11,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
+	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/tickertopic"
@@ -34,6 +35,7 @@ type kucoinInstanceClient struct {
 	pingTicker         *time.Ticker
 	lastTickerTsTicker *time.Ticker
 	closed             bool
+	clientClosedChan   *broadcast.Broadcaster
 }
 
 func newKucoinInstanceClient(instanceServer InstanceServer, availableSymbols []model.Symbol, symbolList []model.Symbol, tickerTopic *tickertopic.TickerTopic, ctx context.Context, cancel context.CancelFunc) *kucoinInstanceClient {
@@ -54,6 +56,7 @@ func newKucoinInstanceClient(instanceServer InstanceServer, availableSymbols []m
 		ctx:              ctx,
 		cancel:           cancel,
 		closed:           false,
+		clientClosedChan: broadcast.NewBroadcaster(0),
 	}
 	kucoinInstance.wsClient.SetMessageHandler(kucoinInstance.onMessage)
 	kucoinInstance.wsClient.SetOnDisconnect(kucoinInstance.onDisconnect)
@@ -73,8 +76,9 @@ func (d *kucoinInstanceClient) connect() error {
 func (d *kucoinInstanceClient) onDisconnect() error {
 	d.wsClient.ExplicitClose()
 	d.closed = true
-	d.cancel()
+	d.clientClosedChan.Send(true)
 	d.log.Debug("closing instance client")
+	d.cancel()
 	return nil
 }
 
@@ -174,21 +178,27 @@ func (d *kucoinInstanceClient) setLastTickerWatcher() {
 	timeout := (30 * time.Second)
 	go func() {
 		defer d.lastTickerTsTicker.Stop()
-		for range d.lastTickerTsTicker.C {
-			if d.closed {
+		for {
+			select {
+			case <-d.clientClosedChan.Listen().Channel():
+				d.log.Debug("last ticker received watcher goroutine exiting")
 				return
-			}
+			case <-d.lastTickerTsTicker.C:
+				if d.closed {
+					return
+				}
 
-			now := time.Now()
-			d.lastTimestampMutex.Lock()
-			diff := now.Sub(d.lastTimestamp)
-			d.lastTimestampMutex.Unlock()
+				now := time.Now()
+				d.lastTimestampMutex.Lock()
+				diff := now.Sub(d.lastTimestamp)
+				d.lastTimestampMutex.Unlock()
 
-			if diff > timeout {
-				// no tickers received in a while, close this kucoin instance
-				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-				d.onDisconnect()
-				return
+				if diff > timeout {
+					// no tickers received in a while, close this kucoin instance
+					d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+					d.onDisconnect()
+					return
+				}
 			}
 		}
 	}()
@@ -198,12 +208,18 @@ func (d *kucoinInstanceClient) setPing() {
 	d.pingTicker = time.NewTicker(d.pingInterval)
 	go func() {
 		defer d.pingTicker.Stop()
-		for range d.pingTicker.C {
-			if d.closed {
+		for {
+			select {
+			case <-d.clientClosedChan.Listen().Channel():
+				d.log.Debug("ping sender goroutine exiting")
 				return
+			case <-d.pingTicker.C:
+				if d.closed {
+					return
+				}
+				d.log.Debug("Sending ping message")
+				d.wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte(fmt.Sprintf(`{"id":"%d","type":"ping"}`, time.Now().UnixMicro()))})
 			}
-			d.log.Debug("Sending ping message")
-			d.wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte(fmt.Sprintf(`{"id":"%d","type":"ping"}`, time.Now().UnixMicro()))})
 		}
 	}()
 }

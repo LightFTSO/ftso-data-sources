@@ -46,14 +46,12 @@ type FtsoDataSource interface {
 	IsRunning() bool
 }
 
-type DataSourceList []FtsoDataSource
-
 type DataSourceOptions struct {
 	Source  string                 `mapstructure:"source"`
-	Options map[string]interface{} `mapstructure:",remain"`
+	Options map[string]interface{} `mapstructure:"options"`
 }
 
-func BuilDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (FtsoDataSource, error) {
+func BuildDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (FtsoDataSource, error) {
 
 	switch source.Source {
 	case "binance":

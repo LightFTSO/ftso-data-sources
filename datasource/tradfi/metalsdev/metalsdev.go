@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/bytedance/sonic"
+	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
@@ -36,7 +37,8 @@ type MetalsDevClient struct {
 
 	timeInterval *time.Ticker
 
-	isRunning bool
+	isRunning        bool
+	clientClosedChan *broadcast.Broadcaster
 }
 
 func NewMetalsDevClient(options *MetalsDevOptions, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*MetalsDevClient, error) {
@@ -57,6 +59,7 @@ func NewMetalsDevClient(options *MetalsDevOptions, symbolList symbols.AllSymbols
 		apiEndpoint:      "https://api.metals.dev/v1",
 		apiToken:         options.ApiToken,
 		Interval:         d,
+		clientClosedChan: broadcast.NewBroadcaster(0),
 	}
 	metalsdev.log.Debug("Created new datasource")
 
@@ -89,6 +92,7 @@ func (d *MetalsDevClient) Close() error {
 	}
 	d.timeInterval.Stop()
 	d.isRunning = false
+	d.clientClosedChan.Send(true)
 	d.W.Done()
 
 	return nil

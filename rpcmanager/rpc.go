@@ -64,6 +64,9 @@ func (m *RPCManager) TurnOnDataSource(name string, reply *DataSourceReply) error
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 
+	m.Wg.Add(1)
+	defer m.Wg.Done()
+
 	ds, exists := m.DataSources[name]
 	if !exists {
 		return errors.New("data source not found")
@@ -92,6 +95,9 @@ func (m *RPCManager) TurnOffDataSource(name string, reply *DataSourceReply) erro
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 
+	m.Wg.Add(1)
+	defer m.Wg.Done()
+
 	ds, exists := m.DataSources[name]
 	if !exists {
 		return errors.New("data source not found")
@@ -116,13 +122,16 @@ func (m *RPCManager) AddDataSource(args DataSourceArgs, reply *DataSourceReply) 
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 
+	m.Wg.Add(1)
+	defer m.Wg.Done()
+
 	_, exists := m.DataSources[args.Options.Source]
 	if exists {
 		return errors.New("data source already exists")
 	}
 
 	// Build and connect the new data source
-	src, err := datasource.BuilDataSource(args.Options, symbols.GetAllSymbols(
+	src, err := datasource.BuildDataSource(args.Options, symbols.GetAllSymbols(
 		m.getAssetList().Crypto, m.getAssetList().Commodities, m.getAssetList().Forex, m.getAssetList().Stocks,
 	), m.TickerTopic, &m.Wg)
 	if err != nil {
@@ -149,6 +158,9 @@ func (m *RPCManager) AddDataSource(args DataSourceArgs, reply *DataSourceReply) 
 func (m *RPCManager) RemoveDataSource(name string, reply *DataSourceReply) error {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
+
+	m.Wg.Add(1)
+	defer m.Wg.Done()
 
 	ds, exists := m.DataSources[name]
 	if !exists {
@@ -196,6 +208,9 @@ func (m *RPCManager) ReloadDataSources(args struct{}, reply *DataSourceReply) er
 func (m *RPCManager) InitDataSources() error {
 	enabledDataSources := m.GlobalConfig.Datasources
 
+	m.Wg.Add(1)
+	defer m.Wg.Done()
+
 	if len(enabledDataSources) < 1 {
 		if m.GlobalConfig.Env != "development" {
 			return errors.New("no data sources defined in configuration")
@@ -205,7 +220,7 @@ func (m *RPCManager) InitDataSources() error {
 
 	for _, source := range enabledDataSources {
 		symbols := symbols.GetAllSymbols(m.getAssetList().Crypto, m.getAssetList().Commodities, m.getAssetList().Forex, m.getAssetList().Stocks)
-		src, err := datasource.BuilDataSource(source, symbols, m.TickerTopic, &m.Wg)
+		src, err := datasource.BuildDataSource(source, symbols, m.TickerTopic, &m.Wg)
 		if err != nil {
 			log.Printf("Error creating data source %s: %v", source.Source, err)
 			continue
@@ -231,6 +246,9 @@ func (m *RPCManager) InitDataSources() error {
 func (m *RPCManager) AddAsset(args AssetsArgs, reply *AssetReply) error {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
+
+	m.Wg.Add(1)
+	defer m.Wg.Done()
 
 	for _, a := range args.Assets {
 		currentAssets, err := m.getAssetsByCategory(a.Category)
@@ -268,6 +286,7 @@ func (m *RPCManager) AddAsset(args AssetsArgs, reply *AssetReply) error {
 	slog.Info(msg)
 	reply.Message = msg
 	config.UpdateConfig(m.GlobalConfig, true)
+
 	return nil
 }
 
@@ -275,6 +294,9 @@ func (m *RPCManager) AddAsset(args AssetsArgs, reply *AssetReply) error {
 func (m *RPCManager) RemoveAsset(args AssetsArgs, reply *AssetReply) error {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
+
+	m.Wg.Add(1)
+	defer m.Wg.Done()
 
 	for _, a := range args.Assets {
 		currentAssets, err := m.getAssetsByCategory(a.Category)
@@ -318,6 +340,9 @@ func (m *RPCManager) RemoveAsset(args AssetsArgs, reply *AssetReply) error {
 func (m *RPCManager) RenameAsset(args RenameAssetArgs, reply *AssetReply) error {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
+
+	m.Wg.Add(1)
+	defer m.Wg.Done()
 
 	currentAssets, err := m.getAssetsByCategory(args.Category)
 	if err != nil {
@@ -368,7 +393,31 @@ func (m *RPCManager) RenameAsset(args RenameAssetArgs, reply *AssetReply) error 
 
 // Get the current configured asset list
 func (m *RPCManager) GetAssets(args struct{}, reply *CurrentAssetsReply) error {
+	m.Wg.Add(1)
+	defer m.Wg.Done()
 	reply.Assets = m.CurrentAssets
+	return nil
+}
+
+type ShutdownReply struct {
+	Message string
+}
+
+// Close the program
+func (m *RPCManager) Shutdown(args struct{}, reply *ShutdownReply) error {
+	m.Mu.Lock()
+	defer m.Mu.Unlock()
+
+	// Disconnect all existing data sources
+	for name, ds := range m.DataSources {
+		err := ds.Close()
+		if err != nil {
+			log.Printf("Error disconnecting data source %s: %v", name, err)
+		}
+		delete(m.DataSources, name)
+	}
+
+	reply.Message = "Shutting down..."
 	return nil
 }
 

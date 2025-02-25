@@ -12,6 +12,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
+	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
@@ -33,7 +34,8 @@ type BitrueClient struct {
 
 	pingInterval time.Duration
 
-	isRunning bool
+	isRunning        bool
+	clientClosedChan *broadcast.Broadcaster
 }
 
 func NewBitrueClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*BitrueClient, error) {
@@ -41,15 +43,16 @@ func NewBitrueClient(options interface{}, symbolList symbols.AllSymbols, tickerT
 	wsEndpoint := "wss://ws.bitrue.com/kline-api/ws"
 
 	bitrue := BitrueClient{
-		name:         "bitrue",
-		log:          slog.Default().With(slog.String("datasource", "bitrue")),
-		W:            w,
-		TickerTopic:  tickerTopic,
-		wsClients:    []*internal.WebSocketClient{},
-		wsEndpoint:   wsEndpoint,
-		apiEndpoint:  "https://api.bitrue.com",
-		SymbolList:   symbolList.Crypto,
-		pingInterval: 20 * time.Second,
+		name:             "bitrue",
+		log:              slog.Default().With(slog.String("datasource", "bitrue")),
+		W:                w,
+		TickerTopic:      tickerTopic,
+		wsClients:        []*internal.WebSocketClient{},
+		wsEndpoint:       wsEndpoint,
+		apiEndpoint:      "https://api.bitrue.com",
+		SymbolList:       symbolList.Crypto,
+		pingInterval:     20 * time.Second,
+		clientClosedChan: broadcast.NewBroadcaster(0),
 	}
 	bitrue.symbolChunks = bitrue.SymbolList.ChunkSymbols(2048)
 	bitrue.log.Debug("Created new datasource")
@@ -88,6 +91,7 @@ func (d *BitrueClient) Close() error {
 	}
 	d.W.Done()
 	d.isRunning = false
+	d.clientClosedChan.Send(true)
 
 	return nil
 }
@@ -185,22 +189,28 @@ func (d *BitrueClient) setLastTickerWatcher() {
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
-		for range lastTickerIntervalTimer.C {
-			now := time.Now()
-			d.lastTimestampMutex.Lock()
-			diff := now.Sub(d.lastTimestamp)
-			d.lastTimestampMutex.Unlock()
-
-			if diff > timeout {
-				// no tickers received in a while, attempt to reconnect
+		for {
+			select {
+			case <-d.clientClosedChan.Listen().Channel():
+				d.log.Debug("last ticker received watcher goroutine exiting")
+				return
+			case <-lastTickerIntervalTimer.C:
+				now := time.Now()
 				d.lastTimestampMutex.Lock()
-				d.lastTimestamp = time.Now()
+				diff := now.Sub(d.lastTimestamp)
 				d.lastTimestampMutex.Unlock()
 
-				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				if diff > timeout {
+					// no tickers received in a while, attempt to reconnect
+					d.lastTimestampMutex.Lock()
+					d.lastTimestamp = time.Now()
+					d.lastTimestampMutex.Unlock()
 
-				for _, wsClient := range d.wsClients {
-					wsClient.Reconnect()
+					d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+
+					for _, wsClient := range d.wsClients {
+						wsClient.Reconnect()
+					}
 				}
 			}
 		}

@@ -35,14 +35,11 @@ func setDefaults() {
 	viper.SetDefault("redis.client_options.initaddress", []string{"127.0.0.1:6379"})
 	viper.SetDefault("redis.client_options.username", "")
 	viper.SetDefault("redis.client_options.password", "")
-	viper.SetDefault("redis.num_threads", 1)
-	viper.SetDefault("redis.include_stdout", false)
 	viper.SetDefault("redis.ts.retention", "24h")
 	viper.SetDefault("redis.ts.chunksize", 4096)
 
 	viper.SetDefault("websocket_server.enabled", false)
 	viper.SetDefault("websocket_server.ticker_endpoint", "/tickers")
-	viper.SetDefault("websocket_server.individual_feed_table", false)
 	viper.SetDefault("websocket_server.flush_interval", "500ms")
 
 	viper.SetDefault("questdb.enabled", false)

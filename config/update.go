@@ -7,16 +7,16 @@ import (
 )
 
 func UpdateConfig(newConfig ConfigOptions, saveCurrentConfig bool) {
+	// save the configuration object before changes are applied, for backup purposes
 	if saveCurrentConfig {
 		SaveConfig()
 	}
 
 	viper.Set("env", newConfig.Env)
 	viper.Set("log_level", newConfig.LogLevel)
-
 	viper.Set("message_buffer_size", newConfig.MessageBufferSize)
-
 	viper.Set("use_exchange_timestamp", newConfig.UseExchangeTimestamp)
+	viper.Set("port", newConfig.Port)
 
 	viper.Set("assets.crypto", newConfig.Assets.Crypto)
 	viper.Set("assets.commodities", newConfig.Assets.Commodities)
@@ -44,8 +44,8 @@ func UpdateConfig(newConfig ConfigOptions, saveCurrentConfig bool) {
 	viper.Set("redis.ts.chunksize", newConfig.RedisOptions.TsOptions.ChunkSize)
 
 	viper.Set("websocket_server.enabled", newConfig.WebsocketConsumerOptions.Enabled)
-	viper.Set("websocket_server.port", newConfig.WebsocketConsumerOptions.Port)
 	viper.Set("websocket_server.ticker_endpoint", newConfig.WebsocketConsumerOptions.TickersEndpoint)
+	viper.Set("websocket_server.flush_interval", newConfig.WebsocketConsumerOptions.FlushInterval)
 
 	viper.Set("questdb.enabled", newConfig.QuestDBConsumerOptions.Enabled)
 	viper.Set("questdb.flush_interval", newConfig.QuestDBConsumerOptions.FlushInterval)

@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/textileio/go-threads/broadcast"
+
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
@@ -19,56 +21,59 @@ type NoisySourceOptions struct {
 }
 
 type NoisySource struct {
-	name         string
-	W            *sync.WaitGroup
-	TickerTopic  *tickertopic.TickerTopic
-	Interval     time.Duration
-	SymbolList   model.SymbolList
-	timeInterval *time.Ticker
-	log          *slog.Logger
-	isRunning    bool
+	name             string
+	W                *sync.WaitGroup
+	TickerTopic      *broadcast.Broadcaster
+	Interval         time.Duration
+	SymbolList       model.SymbolList
+	timeInterval     *time.Ticker
+	log              *slog.Logger
+	isRunning        bool
+	clientClosedChan *broadcast.Broadcaster
 }
 
-func (n *NoisySource) Connect() error {
-	n.isRunning = true
-	n.SubscribeTickers(nil, nil)
-	n.W.Add(1)
+func (d *NoisySource) Connect() error {
+	d.isRunning = true
+	d.SubscribeTickers(nil, nil)
+	d.W.Add(1)
 	return nil
 }
 
-func (n *NoisySource) Reconnect() error {
+func (d *NoisySource) Reconnect() error {
 	return nil
 }
 
-func (n *NoisySource) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
-	n.log.Debug("starting fake ticker generation", "interval", n.Interval.String())
-	go func(br *tickertopic.TickerTopic) {
-		n.timeInterval = time.NewTicker(n.Interval)
+func (d *NoisySource) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
+	d.log.Debug("starting fake ticker generation", "interval", d.Interval.String())
+	go func(br *broadcast.Broadcaster) {
+		d.timeInterval = time.NewTicker(d.Interval)
 
-		defer n.timeInterval.Stop()
+		defer d.timeInterval.Stop()
 
-		for t := range n.timeInterval.C {
-			randomSymbol := n.SymbolList[rand.Intn(len(n.SymbolList))]
-			fakeTicker, err := model.NewTicker(strconv.FormatFloat(float64(rand.Intn(1000))+rand.Float64(), 'f', 9, 64), randomSymbol, n.GetName(), t)
+		for t := range d.timeInterval.C {
+			randomSymbol := d.SymbolList[rand.Intn(len(d.SymbolList))]
+			fakeTicker, err := model.NewTicker(strconv.FormatFloat(float64(rand.Intn(1000))+rand.Float64(), 'f', 9, 64), randomSymbol, d.GetName(), t)
 			if err != nil {
-				n.log.Error("Error creating ticker",
+				d.log.Error("Error creating ticker",
 					"ticker", fakeTicker, "error", err.Error())
 				continue
 			}
 			br.Send(fakeTicker)
 		}
-	}(n.TickerTopic)
+	}(d.TickerTopic)
 
 	return nil
 }
 
-func (n *NoisySource) Close() error {
-	if !n.isRunning {
+func (d *NoisySource) Close() error {
+	if !d.isRunning {
 		return errors.New("datasource is not running")
 	}
-	n.timeInterval.Stop()
-	n.isRunning = false
-	n.W.Done()
+	d.timeInterval.Stop()
+	d.isRunning = false
+	d.clientClosedChan.Send(true)
+	d.clientClosedChan.Send(true)
+	d.W.Done()
 
 	return nil
 }
@@ -77,8 +82,8 @@ func (d *NoisySource) IsRunning() bool {
 	return d.isRunning
 }
 
-func (n *NoisySource) GetName() string {
-	return n.name
+func (d *NoisySource) GetName() string {
+	return d.name
 }
 
 func NewNoisySource(options *NoisySourceOptions, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*NoisySource, error) {
@@ -88,12 +93,13 @@ func NewNoisySource(options *NoisySourceOptions, symbolList symbols.AllSymbols, 
 		d = time.Second
 	}
 	noisy := NoisySource{
-		name:        "noisy",
-		log:         slog.Default().With(slog.String("datasource", "noisy")),
-		Interval:    d,
-		W:           w,
-		TickerTopic: tickerTopic,
-		SymbolList:  symbolList.Flatten(),
+		name:             "noisy",
+		log:              slog.Default().With(slog.String("datasource", "noisy")),
+		Interval:         d,
+		W:                w,
+		TickerTopic:      tickerTopic,
+		SymbolList:       symbolList.Flatten(),
+		clientClosedChan: broadcast.NewBroadcaster(0),
 	}
 
 	noisy.log.Debug("Created new datasource", "interval", d.String())

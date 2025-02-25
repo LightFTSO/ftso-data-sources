@@ -11,6 +11,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
+	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
@@ -31,21 +32,23 @@ type HitbtcClient struct {
 
 	pingInterval time.Duration
 
-	isRunning bool
+	isRunning        bool
+	clientClosedChan *broadcast.Broadcaster
 }
 
 func NewHitbtcClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*HitbtcClient, error) {
 	wsEndpoint := "wss://api.hitbtc.com/api/3/ws/public"
 
 	hitbtc := HitbtcClient{
-		name:         "hitbtc",
-		log:          slog.Default().With(slog.String("datasource", "hitbtc")),
-		W:            w,
-		TickerTopic:  tickerTopic,
-		wsClients:    []*internal.WebSocketClient{},
-		wsEndpoint:   wsEndpoint,
-		SymbolList:   symbolList.Crypto,
-		pingInterval: 20 * time.Second,
+		name:             "hitbtc",
+		log:              slog.Default().With(slog.String("datasource", "hitbtc")),
+		W:                w,
+		TickerTopic:      tickerTopic,
+		wsClients:        []*internal.WebSocketClient{},
+		wsEndpoint:       wsEndpoint,
+		SymbolList:       symbolList.Crypto,
+		pingInterval:     20 * time.Second,
+		clientClosedChan: broadcast.NewBroadcaster(0),
 	}
 	hitbtc.symbolChunks = hitbtc.SymbolList.ChunkSymbols(1024)
 	hitbtc.log.Debug("Created new datasource")
@@ -86,6 +89,7 @@ func (d *HitbtcClient) Close() error {
 		wsClient.Close()
 	}
 	d.isRunning = false
+	d.clientClosedChan.Send(true)
 	d.W.Done()
 
 	return nil
@@ -193,22 +197,28 @@ func (d *HitbtcClient) setLastTickerWatcher() {
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
-		for range lastTickerIntervalTimer.C {
-			now := time.Now()
-			d.lastTimestampMutex.Lock()
-			diff := now.Sub(d.lastTimestamp)
-			d.lastTimestampMutex.Unlock()
-
-			if diff > timeout {
-				// no tickers received in a while, attempt to reconnect
+		for {
+			select {
+			case <-d.clientClosedChan.Listen().Channel():
+				d.log.Debug("last ticker received watcher goroutine exiting")
+				return
+			case <-lastTickerIntervalTimer.C:
+				now := time.Now()
 				d.lastTimestampMutex.Lock()
-				d.lastTimestamp = time.Now()
+				diff := now.Sub(d.lastTimestamp)
 				d.lastTimestampMutex.Unlock()
 
-				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				if diff > timeout {
+					// no tickers received in a while, attempt to reconnect
+					d.lastTimestampMutex.Lock()
+					d.lastTimestamp = time.Now()
+					d.lastTimestampMutex.Unlock()
 
-				for _, wsClient := range d.wsClients {
-					wsClient.Reconnect()
+					d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+
+					for _, wsClient := range d.wsClients {
+						wsClient.Reconnect()
+					}
 				}
 			}
 		}
@@ -219,9 +229,15 @@ func (d *HitbtcClient) setPing() {
 	ticker := time.NewTicker(d.pingInterval)
 	go func() {
 		defer ticker.Stop()
-		for range ticker.C {
-			for _, wsClient := range d.wsClients {
-				wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte("ping")})
+		for {
+			select {
+			case <-d.clientClosedChan.Listen().Channel():
+				d.log.Debug("ping sender goroutine exiting")
+				return
+			case <-ticker.C:
+				for _, wsClient := range d.wsClients {
+					wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte("ping")})
+				}
 			}
 		}
 	}()

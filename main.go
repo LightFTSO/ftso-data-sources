@@ -69,7 +69,7 @@ func run(globalConfig config.ConfigOptions) {
 	// Start RPC server
 	go startRpcManager(manager)
 
-	// Wait for all data sources to finish
+	// Wait for all data sources, consumers and RPC manager to finish
 	manager.Wg.Wait()
 }
 
@@ -96,7 +96,10 @@ func startRpcManager(manager *rpcmanager.RPCManager) {
 
 	slog.Info(fmt.Sprintf("RPC server started on port :%d", manager.GlobalConfig.Port))
 
-	http.Serve(listener, nil)
+	err = http.Serve(listener, nil)
+	if err != nil {
+		log.Fatalf("Error starting HTTP server: %v", err)
+	}
 }
 
 func enableConsumer(c consumer.Consumer, tickerTopic *tickertopic.TickerTopic) {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
+	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
@@ -36,22 +37,24 @@ type DigifinexClient struct {
 	pingInterval     time.Duration
 	availableMarkets model.SymbolList
 
-	isRunning bool
+	isRunning        bool
+	clientClosedChan *broadcast.Broadcaster
 }
 
 func NewDigifinexClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*DigifinexClient, error) {
 	wsEndpoint := "wss://openapi.digifinex.com/ws/v1/"
 
 	digifinex := DigifinexClient{
-		name:         "digifinex",
-		log:          slog.Default().With(slog.String("datasource", "digifinex")),
-		W:            w,
-		TickerTopic:  tickerTopic,
-		wsClients:    []*internal.WebSocketClient{},
-		wsEndpoint:   wsEndpoint,
-		apiEndpoint:  "https://openapi.digifinex.com",
-		SymbolList:   symbolList.Crypto,
-		pingInterval: 15 * time.Second,
+		name:             "digifinex",
+		log:              slog.Default().With(slog.String("datasource", "digifinex")),
+		W:                w,
+		TickerTopic:      tickerTopic,
+		wsClients:        []*internal.WebSocketClient{},
+		wsEndpoint:       wsEndpoint,
+		apiEndpoint:      "https://openapi.digifinex.com",
+		SymbolList:       symbolList.Crypto,
+		pingInterval:     15 * time.Second,
+		clientClosedChan: broadcast.NewBroadcaster(0),
 	}
 	digifinex.symbolChunks = digifinex.SymbolList.ChunkSymbols(30)
 	digifinex.log.Debug("Created new datasource")
@@ -93,6 +96,7 @@ func (d *DigifinexClient) Close() error {
 		wsClient.Close()
 	}
 	d.isRunning = false
+	d.clientClosedChan.Send(true)
 	d.W.Done()
 
 	return nil
@@ -260,22 +264,28 @@ func (d *DigifinexClient) setLastTickerWatcher() {
 	timeout := (30 * time.Second)
 	go func() {
 		defer lastTickerIntervalTimer.Stop()
-		for range lastTickerIntervalTimer.C {
-			now := time.Now()
-			d.lastTimestampMutex.Lock()
-			diff := now.Sub(d.lastTimestamp)
-			d.lastTimestampMutex.Unlock()
-
-			if diff > timeout {
-				// no tickers received in a while, attempt to reconnect
+		for {
+			select {
+			case <-d.clientClosedChan.Listen().Channel():
+				d.log.Debug("last ticker received watcher goroutine exiting")
+				return
+			case <-lastTickerIntervalTimer.C:
+				now := time.Now()
 				d.lastTimestampMutex.Lock()
-				d.lastTimestamp = time.Now()
+				diff := now.Sub(d.lastTimestamp)
 				d.lastTimestampMutex.Unlock()
 
-				d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+				if diff > timeout {
+					// no tickers received in a while, attempt to reconnect
+					d.lastTimestampMutex.Lock()
+					d.lastTimestamp = time.Now()
+					d.lastTimestampMutex.Unlock()
 
-				for _, wsClient := range d.wsClients {
-					wsClient.Reconnect()
+					d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+
+					for _, wsClient := range d.wsClients {
+						wsClient.Reconnect()
+					}
 				}
 			}
 		}
@@ -286,18 +296,23 @@ func (d *DigifinexClient) setPing() {
 	ticker := time.NewTicker(d.pingInterval)
 	go func() {
 		defer ticker.Stop()
-		for range ticker.C {
-			msg := map[string]interface{}{
-				"ping":   fmt.Sprint(rand.Uint32() % 999999),
-				"method": "ping",
-				"params": []string{},
-			}
-			for _, wsClient := range d.wsClients {
-				if err := wsClient.SendMessageJSON(websocket.TextMessage, msg); err != nil {
-					d.log.Warn("Failed to send ping", "error", err)
+		for {
+			select {
+			case <-d.clientClosedChan.Listen().Channel():
+				d.log.Debug("ping sender goroutine exiting")
+				return
+			case <-ticker.C:
+				msg := map[string]interface{}{
+					"ping":   fmt.Sprint(rand.Uint32() % 999999),
+					"method": "ping",
+					"params": []string{},
+				}
+				for _, wsClient := range d.wsClients {
+					if err := wsClient.SendMessageJSON(websocket.TextMessage, msg); err != nil {
+						d.log.Warn("Failed to send ping", "error", err)
+					}
 				}
 			}
-
 		}
 	}()
 }

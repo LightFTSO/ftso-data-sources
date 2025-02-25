@@ -15,12 +15,13 @@ import (
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type KucoinClient struct {
 	name             string
 	W                *sync.WaitGroup
-	TickerTopic      *broadcast.Broadcaster
+	TickerTopic      *tickertopic.TickerTopic
 	apiEndpoint      string
 	SymbolList       []model.Symbol
 	log              *slog.Logger
@@ -29,7 +30,7 @@ type KucoinClient struct {
 	instanceClient   *kucoinInstanceClient
 }
 
-func NewKucoinClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*KucoinClient, error) {
+func NewKucoinClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*KucoinClient, error) {
 	kucoin := KucoinClient{
 		name:             "kucoin",
 		log:              slog.Default().With(slog.String("datasource", "kucoin")),

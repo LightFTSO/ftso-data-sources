@@ -15,12 +15,13 @@ import (
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type HuobiClient struct {
 	name               string
 	W                  *sync.WaitGroup
-	TickerTopic        *broadcast.Broadcaster
+	TickerTopic        *tickertopic.TickerTopic
 	wsClients          []*internal.WebSocketClient
 	wsEndpoint         string
 	SymbolList         model.SymbolList
@@ -32,7 +33,7 @@ type HuobiClient struct {
 	clientClosedChan   *broadcast.Broadcaster
 }
 
-func NewHuobiClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*HuobiClient, error) {
+func NewHuobiClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*HuobiClient, error) {
 	wsEndpoint := "wss://api.huobi.pro/ws"
 
 	huobi := HuobiClient{

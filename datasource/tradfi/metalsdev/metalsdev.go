@@ -16,6 +16,7 @@ import (
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type MetalsDevOptions struct {
@@ -26,7 +27,7 @@ type MetalsDevOptions struct {
 type MetalsDevClient struct {
 	name             string
 	W                *sync.WaitGroup
-	TickerTopic      *broadcast.Broadcaster
+	TickerTopic      *tickertopic.TickerTopic
 	Interval         time.Duration
 	CommoditySymbols model.SymbolList
 	ForexSymbols     model.SymbolList
@@ -40,7 +41,7 @@ type MetalsDevClient struct {
 	clientClosedChan *broadcast.Broadcaster
 }
 
-func NewMetalsDevClient(options *MetalsDevOptions, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*MetalsDevClient, error) {
+func NewMetalsDevClient(options *MetalsDevOptions, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*MetalsDevClient, error) {
 
 	d, err := time.ParseDuration(options.Interval)
 	if err != nil {
@@ -140,7 +141,7 @@ func (d *MetalsDevClient) getLatest(useSample bool) (*LatestEndpointResponse, er
 }
 
 func (d *MetalsDevClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
-	go func(br *broadcast.Broadcaster) {
+	go func(br *tickertopic.TickerTopic) {
 		d.timeInterval = time.NewTicker(d.Interval)
 
 		defer d.timeInterval.Stop()
@@ -178,7 +179,7 @@ func (d *MetalsDevClient) SubscribeTickers(wsClient *internal.WebSocketClient, s
 					continue
 				}
 				d.log.Info(fmt.Sprintf("metalsdev: base=%s quote=%s price=%s", ticker.Base, ticker.Quote, ticker.LastPrice))
-				br.Send(&ticker)
+				br.Send(ticker)
 			}
 
 		}

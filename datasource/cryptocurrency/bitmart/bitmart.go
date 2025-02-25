@@ -15,12 +15,13 @@ import (
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type BitmartClient struct {
 	name               string
 	W                  *sync.WaitGroup
-	TickerTopic        *broadcast.Broadcaster
+	TickerTopic        *tickertopic.TickerTopic
 	wsClients          []*internal.WebSocketClient
 	wsEndpoint         string
 	SymbolList         model.SymbolList
@@ -35,7 +36,7 @@ type BitmartClient struct {
 	clientClosedChan *broadcast.Broadcaster
 }
 
-func NewBitmartClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*BitmartClient, error) {
+func NewBitmartClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*BitmartClient, error) {
 	wsEndpoint := "wss://ws-manager-compress.bitmart.com/api?protocol=1.1"
 
 	bitmart := BitmartClient{

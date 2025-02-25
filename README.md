@@ -96,14 +96,12 @@ datasources:
 # prints the number of tickers per second every [interval] seconds
 stats:
   enabled: true
-  num_threads: 2
   interval: 60s
 
 # see https://mqtt.org/
 mqtt:
   enabled: false
   url: "tcp://localhost:1883"
-  num_threads: 4
   qos_level: 1
 
 # see https://questdb.io/
@@ -164,9 +162,30 @@ assets:
     - XLM
     - XRP
 
+# Ticker transformations change the data inside the generated tickers.
+# Transformations affect every ticker from every exchange
+# TODO: Add conditional ticker transformations
+# So far, there are three types of ticker transformations:
+# 'use_system_timestamp','rename_asset' and 'rename_quote_asset'
+# 
+# All transformations follow the same structure: type, enabled, and its options
+ticker_transformations:
+  - type: use_system_timestamp
+	enabled: true
+  # example: rename FTM to S:
+  - type: rename_asset
+    enabled: true
+	from: FTM
+	to: S
+  # example rename USDT quote asset (the part after the /) to UST
+  - type: rename_quote_asset
+    enabled: true
+	from: USDT
+	to: UST
+
 # change the capacity of the internal message buffer
 # change it only if you experience performance issues
-# (expected to happen only with thousands of messages per second)
+# (expected to happen only with many thousands (10,000+) of messages per second)
 message_buffer_size: 65536
 ```
 

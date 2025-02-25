@@ -17,12 +17,13 @@ import (
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type GateIoClient struct {
 	name               string
 	W                  *sync.WaitGroup
-	TickerTopic        *broadcast.Broadcaster
+	TickerTopic        *tickertopic.TickerTopic
 	wsClients          []*internal.WebSocketClient
 	wsEndpoint         string
 	apiEndpoint        string
@@ -38,7 +39,7 @@ type GateIoClient struct {
 	clientClosedChan *broadcast.Broadcaster
 }
 
-func NewGateIoClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *broadcast.Broadcaster, w *sync.WaitGroup) (*GateIoClient, error) {
+func NewGateIoClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*GateIoClient, error) {
 	wsEndpoint := "wss://api.gateio.ws/ws/v4/"
 
 	gateio := GateIoClient{

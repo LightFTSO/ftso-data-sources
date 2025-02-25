@@ -83,6 +83,10 @@ func (t *Ticker) validateTimestamp() error {
 	return nil
 }
 
+func (t *Ticker) Symbol() string {
+	return t.Base + "/" + t.Quote
+}
+
 func NewTicker(lastPrice string,
 	symbol Symbol,
 	source string,
@@ -92,7 +96,7 @@ func NewTicker(lastPrice string,
 		Base:      symbol.Base,
 		Quote:     symbol.Quote,
 		Source:    source,
-		Timestamp: timestamp,
+		Timestamp: timestamp.UTC(),
 	}
 
 	err := ticker.Validate()

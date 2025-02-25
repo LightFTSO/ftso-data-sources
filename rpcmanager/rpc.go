@@ -8,11 +8,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/config"
 	"roselabs.mx/ftso-data-sources/datasource"
 	"roselabs.mx/ftso-data-sources/helpers"
 	"roselabs.mx/ftso-data-sources/symbols"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 // RPC Arguments and Reply Structures
@@ -53,7 +53,7 @@ type RPCManager struct {
 	GlobalConfig  config.ConfigOptions
 	DataSources   map[string]datasource.FtsoDataSource
 	CurrentAssets config.AssetConfig // Set of current assets
-	TickerTopic   *broadcast.Broadcaster
+	TickerTopic   *tickertopic.TickerTopic
 
 	Mu sync.Mutex
 	Wg sync.WaitGroup

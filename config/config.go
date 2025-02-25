@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/viper"
 	"roselabs.mx/ftso-data-sources/consumer"
 	"roselabs.mx/ftso-data-sources/datasource"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type AssetConfig struct {
@@ -38,6 +39,8 @@ type ConfigOptions struct {
 	FileConsumerOptions      consumer.FileConsumerOptions      `mapstructure:"file_output"`
 	MQTTConsumerOptions      consumer.MqttConsumerOptions      `mapstructure:"mqtt"`
 	QuestDBConsumerOptions   consumer.QuestDbConsumerOptions   `mapstructure:"questdb"`
+
+	TickerTransformationOptions []tickertopic.TransformationOptions `mapstructure:"ticker_transformations"`
 }
 
 var Config ConfigOptions

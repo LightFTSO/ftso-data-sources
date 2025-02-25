@@ -11,6 +11,7 @@ import (
 	"github.com/redis/rueidis"
 	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/model"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 const TICKERS_KEY string = "tickers"
@@ -155,10 +156,10 @@ func (s *RedisConsumer) flushTickers() {
 	}
 }
 
-func (s *RedisConsumer) StartTickerListener(tickerTopic *broadcast.Broadcaster) {
+func (s *RedisConsumer) StartTickerListener(tickerTopic *tickertopic.TickerTopic) {
 	// Listen for tickers in the ch channel and sends them to a io.Writer
 	log.Debug("Redis ticker listener started", "consumer", "redis")
-	s.TickerListener = tickerTopic.Listen()
+	s.TickerListener = tickerTopic.Broadcaster.Listen()
 	go func() {
 		for t := range s.TickerListener.Channel() {
 			ticker := (t.(*model.Ticker))
@@ -181,18 +182,16 @@ func (s *RedisConsumer) CloseTickerListener() {
 	s.redisClient.Close()
 }
 
-func NewRedisConsumer(options RedisOptions, useExchangeTimestamp bool) *RedisConsumer {
+func NewRedisConsumer(options RedisOptions) *RedisConsumer {
 	r, err := rueidis.NewClient(options.ClientOptions)
 	if err != nil {
 		panic(err)
 	}
 
 	newConsumer := &RedisConsumer{
-		redisClient:          r,
-		tsRetention:          options.TsOptions.Retention,
-		tsChunkSize:          options.TsOptions.ChunkSize,
-		instanceMaxMemory:    options.TsOptions.MaxMemory,
-		useExchangeTimestamp: useExchangeTimestamp,
+		redisClient: r,
+		tsRetention: options.TsOptions.Retention,
+		tsChunkSize: options.TsOptions.ChunkSize,
 	}
 	newConsumer.setup()
 

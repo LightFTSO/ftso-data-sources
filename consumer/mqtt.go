@@ -3,11 +3,11 @@ package consumer
 import (
 	"fmt"
 	log "log/slog"
-	"time"
 
 	"github.com/textileio/go-threads/broadcast"
 	"golang.org/x/exp/rand"
 	"roselabs.mx/ftso-data-sources/model"
+	"roselabs.mx/ftso-data-sources/tickertopic"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
@@ -17,16 +17,14 @@ type MqttConsumer struct {
 
 	numThreads int
 
-	mqttClient           mqtt.Client
-	qosLevel             int
-	useExchangeTimestamp bool
+	mqttClient mqtt.Client
+	qosLevel   int
 }
 
 type MqttConsumerOptions struct {
 	Enabled       bool
 	Url           string             `mapstructure:"url"`
 	ClientOptions mqtt.ClientOptions `mapstructure:"client_options"`
-	NumThreads    int                `mapstructure:"num_threads"`
 	QOSLevel      int                `mapstructure:"qos_level"`
 }
 
@@ -42,10 +40,6 @@ func (s *MqttConsumer) setup() error {
 }
 
 func (s *MqttConsumer) processTicker(ticker *model.Ticker) {
-	if !s.useExchangeTimestamp {
-		ticker.Timestamp = time.Now().UTC()
-	}
-
 	channel := fmt.Sprintf("tickers/%s/%s/%s", ticker.Base, ticker.Quote, ticker.Source)
 
 	payload := fmt.Sprintf("%s,%d", ticker.LastPrice, ticker.Timestamp.UnixMilli())
@@ -53,18 +47,16 @@ func (s *MqttConsumer) processTicker(ticker *model.Ticker) {
 	token.Wait()
 }
 
-func (s *MqttConsumer) StartTickerListener(tickerTopic *broadcast.Broadcaster) {
+func (s *MqttConsumer) StartTickerListener(tickerTopic *tickertopic.TickerTopic) {
 	// Listen for tickers in the ch channel and sends them to an MQTT broker
-	log.Debug(fmt.Sprintf("MQTT ticker listener configured with %d consumer goroutines", s.numThreads), "consumer", "mqtt", "num_threads", s.numThreads)
-	s.TickerListener = tickerTopic.Listen()
-	for consumerId := 1; consumerId <= s.numThreads; consumerId++ {
-		go func(consumerId int) {
-			log.Debug(fmt.Sprintf("MQTT ticker consumer %d goroutine listening for tickers now", consumerId), "consumer", "mqtt", "consumer_num", consumerId)
-			for ticker := range s.TickerListener.Channel() {
-				s.processTicker(ticker.(*model.Ticker))
-			}
-		}(consumerId)
-	}
+	log.Debug(fmt.Sprintf("MQTT ticker listener configured with %d consumer goroutines", s.numThreads), "consumer", "mqtt")
+	s.TickerListener = tickerTopic.Broadcaster.Listen()
+	go func() {
+		log.Debug("MQTT ticker consumer listening for tickers now", "consumer", "mqtt")
+		for ticker := range s.TickerListener.Channel() {
+			s.processTicker(ticker.(*model.Ticker))
+		}
+	}()
 
 }
 
@@ -72,7 +64,7 @@ func (s *MqttConsumer) CloseTickerListener() {
 	s.TickerListener.Discard()
 }
 
-func NewMqttConsumer(options MqttConsumerOptions, useExchangeTimestamp bool) *MqttConsumer {
+func NewMqttConsumer(options MqttConsumerOptions) *MqttConsumer {
 	opts := mqtt.NewClientOptions()
 	opts.AddBroker(options.Url)
 	opts.SetCleanSession(true)
@@ -90,10 +82,8 @@ func NewMqttConsumer(options MqttConsumerOptions, useExchangeTimestamp bool) *Mq
 	})(12)) // create a random ClientID
 
 	newConsumer := &MqttConsumer{
-		mqttClient:           mqtt.NewClient(opts),
-		numThreads:           options.NumThreads,
-		qosLevel:             options.QOSLevel,
-		useExchangeTimestamp: useExchangeTimestamp,
+		mqttClient: mqtt.NewClient(opts),
+		qosLevel:   options.QOSLevel,
 	}
 	newConsumer.setup()
 

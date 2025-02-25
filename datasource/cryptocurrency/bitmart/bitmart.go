@@ -69,6 +69,7 @@ func (d *BitmartClient) Connect() error {
 		wsClient.Start()
 	}
 	d.setLastTickerWatcher()
+	d.setPing()
 
 	return nil
 }

@@ -29,7 +29,7 @@ func (s *StatisticsGenerator) StartTickerListener(tickerTopic *tickertopic.Ticke
 	log.Debug("Ticker Statistics generator started", "consumer", "statistics")
 	s.TickerListener = tickerTopic.Broadcaster.Listen()
 	go func() {
-		log.Debug("Ticker statistics generator %d listening now", "consumer", "statistics")
+		log.Debug("Ticker statistics generator listening now", "consumer", "statistics")
 		for range s.TickerListener.Channel() {
 			s.tickerCounter.Add(1)
 		}

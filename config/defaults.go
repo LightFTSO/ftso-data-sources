@@ -20,7 +20,6 @@ func setDefaults() {
 
 	viper.SetDefault("stats.enabled", true)
 	viper.SetDefault("stats.interval", "60s")
-	viper.SetDefault("stats.num_threads", 1)
 
 	viper.SetDefault("datasources", []string{"noisy"})
 
@@ -28,7 +27,6 @@ func setDefaults() {
 	viper.SetDefault("file_consumer.filename", "")
 
 	viper.SetDefault("mqtt.enabled", false)
-	viper.SetDefault("mqtt.num_threads", 2)
 	viper.SetDefault("mqtt.qos_level", 0)
 
 	viper.SetDefault("redis.enabled", false)
@@ -48,5 +46,5 @@ func setDefaults() {
 	viper.SetDefault("questdb.client_options.schema", "http")
 	viper.SetDefault("questdb.individual_feed_table", true)
 
-	viper.SetDefault("transformations", tickertopic.TransformationOptions{})
+	viper.SetDefault("ticker_transformations", tickertopic.TransformationOptions{})
 }

@@ -17,7 +17,6 @@ type QuestDbConsumerOptions struct {
 	Enabled             bool          `mapstructure:"enabled"`
 	FlushInterval       time.Duration `mapstructure:"flush_interval"`
 	IndividualFeedTable bool          `mapstructure:"individual_feed_table"`
-	NumThreads          int           `mapstructure:"num_threads"`
 	ClientOptions       struct {
 		Schema    string `mapstructure:"schema"`
 		Address   string `mapstructure:"address"`

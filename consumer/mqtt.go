@@ -25,7 +25,6 @@ type MqttConsumerOptions struct {
 	Enabled       bool
 	Url           string             `mapstructure:"url"`
 	ClientOptions mqtt.ClientOptions `mapstructure:"client_options"`
-	NumThreads    int                `mapstructure:"num_threads"`
 	QOSLevel      int                `mapstructure:"qos_level"`
 }
 
@@ -50,16 +49,14 @@ func (s *MqttConsumer) processTicker(ticker *model.Ticker) {
 
 func (s *MqttConsumer) StartTickerListener(tickerTopic *tickertopic.TickerTopic) {
 	// Listen for tickers in the ch channel and sends them to an MQTT broker
-	log.Debug(fmt.Sprintf("MQTT ticker listener configured with %d consumer goroutines", s.numThreads), "consumer", "mqtt", "num_threads", s.numThreads)
+	log.Debug(fmt.Sprintf("MQTT ticker listener configured with %d consumer goroutines", s.numThreads), "consumer", "mqtt")
 	s.TickerListener = tickerTopic.Broadcaster.Listen()
-	for consumerId := 1; consumerId <= s.numThreads; consumerId++ {
-		go func(consumerId int) {
-			log.Debug(fmt.Sprintf("MQTT ticker consumer %d goroutine listening for tickers now", consumerId), "consumer", "mqtt", "consumer_num", consumerId)
-			for ticker := range s.TickerListener.Channel() {
-				s.processTicker(ticker.(*model.Ticker))
-			}
-		}(consumerId)
-	}
+	go func() {
+		log.Debug("MQTT ticker consumer listening for tickers now", "consumer", "mqtt")
+		for ticker := range s.TickerListener.Channel() {
+			s.processTicker(ticker.(*model.Ticker))
+		}
+	}()
 
 }
 
@@ -86,7 +83,6 @@ func NewMqttConsumer(options MqttConsumerOptions) *MqttConsumer {
 
 	newConsumer := &MqttConsumer{
 		mqttClient: mqtt.NewClient(opts),
-		numThreads: options.NumThreads,
 		qosLevel:   options.QOSLevel,
 	}
 	newConsumer.setup()

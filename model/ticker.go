@@ -96,7 +96,7 @@ func NewTicker(lastPrice string,
 		Base:      symbol.Base,
 		Quote:     symbol.Quote,
 		Source:    source,
-		Timestamp: timestamp,
+		Timestamp: timestamp.UTC(),
 	}
 
 	err := ticker.Validate()

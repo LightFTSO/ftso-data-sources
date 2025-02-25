@@ -1,7 +1,6 @@
 package tickertopic
 
 import (
-	"fmt"
 	"log/slog"
 
 	"github.com/textileio/go-threads/broadcast"
@@ -33,9 +32,7 @@ func NewTickerTopic(transformationOptions []TransformationOptions, capacity int)
 }
 
 func (t *TickerTopic) Send(ticker *model.Ticker) {
-	fmt.Printf("ticker before: %+v\n", ticker)
 	ticker = t.applyTransformations(ticker)
-	fmt.Printf("ticker  after: %+v\n", ticker)
 
 	t.Broadcaster.Send(ticker)
 }

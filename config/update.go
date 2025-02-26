@@ -28,8 +28,8 @@ func UpdateConfig(newConfig ConfigOptions, saveCurrentConfig bool) {
 
 	viper.Set("datasources", newConfig.Datasources)
 
-	viper.Set("file_consumer.enabled", newConfig.FileConsumerOptions.Enabled)
-	viper.Set("file_consumer.filename", newConfig.FileConsumerOptions.OutputFilename)
+	viper.Set("file_output.enabled", newConfig.FileConsumerOptions.Enabled)
+	viper.Set("file_output.filename", newConfig.FileConsumerOptions.OutputFilename)
 
 	viper.Set("mqtt.enabled", newConfig.MQTTConsumerOptions.Enabled)
 	viper.Set("mqtt.qos_level", newConfig.MQTTConsumerOptions.QOSLevel)

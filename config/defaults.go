@@ -23,8 +23,8 @@ func setDefaults() {
 
 	viper.SetDefault("datasources", []string{"noisy"})
 
-	viper.SetDefault("file_consumer.enabled", false)
-	viper.SetDefault("file_consumer.filename", "")
+	viper.SetDefault("file_output.enabled", false)
+	viper.SetDefault("file_output.filename", "")
 
 	viper.SetDefault("mqtt.enabled", false)
 	viper.SetDefault("mqtt.qos_level", 0)

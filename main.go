@@ -40,12 +40,6 @@ func main() {
 }
 
 func run(globalConfig config.ConfigOptions) {
-	if globalConfig.UseExchangeTimestamp {
-		slog.Info("Using exchange timestamp as ticker timestamp")
-	} else {
-		slog.Info("Using local timestamp as ticker timestamp")
-	}
-
 	slog.Debug(fmt.Sprintf("Ticker broadcaster buffer size is %d", config.Config.MessageBufferSize))
 	tickerTopic := tickertopic.NewTickerTopic(config.Config.TickerTransformationOptions, config.Config.MessageBufferSize)
 

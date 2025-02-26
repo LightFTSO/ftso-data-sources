@@ -10,7 +10,6 @@ func setDefaults() {
 	viper.SetDefault("env", "development")
 	viper.SetDefault("log_level", "info")
 	viper.SetDefault("message_buffer_size", 0)
-	viper.SetDefault("use_exchange_timestamp", true)
 	viper.SetDefault("port", 9999)
 
 	viper.SetDefault("assets.crypto", constants.BASES_CRYPTO)

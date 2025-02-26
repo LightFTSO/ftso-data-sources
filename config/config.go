@@ -24,8 +24,6 @@ type ConfigOptions struct {
 
 	MessageBufferSize int `mapstructure:"message_buffer_size"`
 
-	UseExchangeTimestamp bool `mapstructure:"use_exchange_timestamp"`
-
 	Port int `mapstructure:"port"`
 
 	Datasources []datasource.DataSourceOptions `mapstructure:"datasources"`

@@ -15,7 +15,6 @@ func UpdateConfig(newConfig ConfigOptions, saveCurrentConfig bool) {
 	viper.Set("env", newConfig.Env)
 	viper.Set("log_level", newConfig.LogLevel)
 	viper.Set("message_buffer_size", newConfig.MessageBufferSize)
-	viper.Set("use_exchange_timestamp", newConfig.UseExchangeTimestamp)
 	viper.Set("port", newConfig.Port)
 
 	viper.Set("assets.crypto", newConfig.Assets.Crypto)

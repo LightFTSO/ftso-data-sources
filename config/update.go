@@ -34,12 +34,13 @@ func UpdateConfig(newConfig ConfigOptions, saveCurrentConfig bool) {
 	viper.Set("mqtt.enabled", newConfig.MQTTConsumerOptions.Enabled)
 	viper.Set("mqtt.qos_level", newConfig.MQTTConsumerOptions.QOSLevel)
 
-	viper.Set("redis.enabled", newConfig.RedisOptions.Enabled)
-	viper.Set("redis.client_options.initaddress", newConfig.RedisOptions.ClientOptions.InitAddress)
-	viper.Set("redis.client_options.username", newConfig.RedisOptions.ClientOptions.Username)
-	viper.Set("redis.client_options.password", newConfig.RedisOptions.ClientOptions.Password)
-	viper.Set("redis.ts.retention", newConfig.RedisOptions.TsOptions.Retention)
-	viper.Set("redis.ts.chunksize", newConfig.RedisOptions.TsOptions.ChunkSize)
+	viper.Set("redis_ts.enabled", newConfig.RedisOptions.Enabled)
+	viper.Set("redis_ts.client_options.initaddress", newConfig.RedisOptions.ClientOptions.InitAddress)
+	viper.Set("redis_ts.client_options.username", newConfig.RedisOptions.ClientOptions.Username)
+	viper.Set("redis_ts.client_options.password", newConfig.RedisOptions.ClientOptions.Password)
+	viper.Set("redis_ts.ts.retention", newConfig.RedisOptions.TsOptions.Retention)
+	viper.Set("redis_ts.ts.chunksize", newConfig.RedisOptions.TsOptions.ChunkSize)
+	viper.Set("redis_ts.ts.maxmemory", newConfig.RedisOptions.TsOptions.MaxMemory)
 
 	viper.Set("websocket_server.enabled", newConfig.WebsocketConsumerOptions.Enabled)
 	viper.Set("websocket_server.ticker_endpoint", newConfig.WebsocketConsumerOptions.TickersEndpoint)
@@ -60,5 +61,4 @@ func UpdateConfig(newConfig ConfigOptions, saveCurrentConfig bool) {
 			slog.Error("error saving new config to file", "error", err)
 		}
 	}
-
 }

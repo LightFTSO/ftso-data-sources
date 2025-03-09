@@ -13,10 +13,13 @@ import (
 type TransformationOptions struct {
 	Type    string                 `mapstructure:"type"`
 	Enabled bool                   `mapstructure:"enabled"`
+	From    string                 `mapstructure:"from"`
+	To      string                 `mapstructure:"to"`
 	Options map[string]interface{} `mapstructure:",remain"`
 }
 
 var ErrUnknownTransformationType = errors.New("unknown transformation type")
+var ErrMissingOptionsFromTransformations = errors.New("missing From and/or To fields from transformation")
 
 func createTransformations(transformationOptions []TransformationOptions) ([]Transformation, error) {
 
@@ -37,16 +40,24 @@ func createTransformations(transformationOptions []TransformationOptions) ([]Tra
 			}
 		case "rename_asset":
 			var transform = new(RenameAssetTransform)
-			transform.to = v.Options["to"].(string)
-			transform.from = v.Options["from"].(string)
+			if v.To != "" && v.From != "" {
+				transform.to = v.To
+				transform.from = v.From
+			} else {
+				return nil, ErrMissingOptionsFromTransformations
+			}
 
 			slog.Info(fmt.Sprintf("Using rename_asset transform, renaming asset from %s to %s in all tickers", transform.from, transform.to))
 			transformations = append(transformations, transform)
 
 		case "rename_quote_asset":
 			var transform = new(RenameQuoteTransform)
-			transform.to = v.Options["to"].(string)
-			transform.from = v.Options["from"].(string)
+			if v.To != "" && v.From != "" {
+				transform.to = v.To
+				transform.from = v.From
+			} else {
+				return nil, ErrMissingOptionsFromTransformations
+			}
 
 			slog.Info(fmt.Sprintf("Using rename_quote_asset_asset transform, renaming quote from %s to %s in all tickers", transform.from, transform.to))
 			transformations = append(transformations, transform)

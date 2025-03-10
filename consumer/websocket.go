@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/bytedance/sonic"
+	"github.com/golang/protobuf/proto"
 	"github.com/textileio/go-threads/broadcast"
 	"golang.org/x/net/websocket"
 	websocket_server "roselabs.mx/ftso-data-sources/internal/websocket_server"
@@ -41,18 +42,34 @@ func (s *WebsocketServerConsumer) setup() error {
 }
 
 func (s *WebsocketServerConsumer) processTickerBatch(tickers []*model.Ticker) {
+	// Get active connections and their formats
+	connections := s.wsServer.GetActiveConnections()
 
-	// Marshal the tickers
-	payload, err := sonic.Marshal(tickers)
-	if err != nil {
-		log.Error("error encoding tickers", "consumer", "websocket", "error", err)
-		return
-	}
+	for conn, useProto := range connections {
+		var payload []byte
+		var err error
 
-	// Broadcast the payload
-	err = s.wsServer.BroadcastMessage(websocket.TextFrame, payload)
-	if err != nil {
-		log.Error("error broadcasting tickers", "consumer", "websocket", "error", err)
+		if useProto {
+			// Marshal to protobuf
+			payload, err = proto.Marshal(&model.TickerBatch{Tickers: tickers})
+			if err != nil {
+				log.Error("error encoding tickers to protobuf", "consumer", "websocket", "error", err)
+				continue
+			}
+		} else {
+			// Marshal to JSON
+			payload, err = sonic.Marshal(tickers)
+			if err != nil {
+				log.Error("error encoding tickers to json", "consumer", "websocket", "error", err)
+				continue
+			}
+		}
+
+		// Send to specific connection
+		err = s.wsServer.SendMessage(conn, websocket.BinaryFrame, payload)
+		if err != nil {
+			log.Error("error sending tickers", "consumer", "websocket", "error", err)
+		}
 	}
 }
 

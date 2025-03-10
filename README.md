@@ -43,6 +43,10 @@ Run in docker:
 
 Supported go version: 1.22+
 
+# Protobuf Definitions and Codegen
+
+See https://github.com/RoseLabsMx/ftso-data-sources-proto-files
+
 # Configuration 
 Modify the following sample configuration, by default, the program will look for a file called `config.yaml` in it's root folder or you can specify the file with the `-config <file>` flag
 

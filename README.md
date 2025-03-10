@@ -28,9 +28,11 @@ Flow goes like this:
 `git clone https://github.com/LightFTSO/ftso-data-sources.git`
 2. cd into it
 `cd ftso-data-sources`
-3. Create the config.yaml (see the section below)
+3. (optionally clone submodules for protobuf codegen)
+`git submodule update --init --recursive`
+4. Create the config.yaml (see the section below)
 `touch config.yaml`
-3. Run it 
+5. Run it 
 Locally with `make run`:
 You need go 1.22+ installed, see https://go.dev/doc/install
 ```bash

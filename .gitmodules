@@ -1,0 +1,3 @@
+[submodule "generated/proto/ticker"]
+	path = generated/proto/ticker
+	url = git@github-roselabsmx:RoseLabsMx/ftso-data-sources-proto-files.git

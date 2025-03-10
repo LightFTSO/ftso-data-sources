@@ -36,13 +36,13 @@ func cleanRemotePair(s string) string {
 }
 
 func getBaseCurrency(pair string) string {
-	for _, stablecoin := range constants.USDT_USDC_DAI {
+	for _, stablecoin := range constants.USDT_USDC_DAI_USDS {
 		if strings.HasPrefix(pair, stablecoin) {
 			return stablecoin
 		}
 	}
 
-	for _, quote := range constants.USD_USDT_USDC_DAI {
+	for _, quote := range constants.USD_USDT_USDC_DAI_USDS {
 		base, found := strings.CutSuffix(pair, quote)
 		if found {
 			return base

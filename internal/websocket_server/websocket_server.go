@@ -6,8 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-
-	"github.com/gorilla/websocket"
 )
 
 type WsMessage struct {
@@ -44,15 +42,6 @@ func (ws *WebsocketServer) Connect() error {
 func (ws *WebsocketServer) BroadcastMessage(messageType int, message []byte) error {
 	ws.hub.broadcast <- &WsMessage{Type: messageType, Message: message}
 	return nil
-}
-
-func (ws *WebsocketServer) GetActiveConnections() map[*websocket.Conn]bool {
-	connections := make(map[*websocket.Conn]bool)
-	for client := range ws.hub.clients {
-		if client.conn.RemoteAddr()
-		connections[client.conn] = true
-	}
-	return connections
 }
 
 func Hook() {

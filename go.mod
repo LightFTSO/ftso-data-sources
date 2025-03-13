@@ -5,19 +5,20 @@ go 1.22.0
 toolchain go1.23.6
 
 require (
-	github.com/bytedance/sonic v1.12.8
+	github.com/bytedance/sonic v1.13.1
 	github.com/eclipse/paho.mqtt.golang v1.5.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/mitchellh/mapstructure v1.5.0
 	github.com/questdb/go-questdb-client/v3 v3.2.0
-	github.com/redis/rueidis v1.0.54
+	github.com/redis/rueidis v1.0.55
 	github.com/spf13/viper v1.19.0
 	github.com/textileio/go-threads v1.1.5
+	google.golang.org/protobuf v1.36.5
 )
 
 require (
-	github.com/bytedance/sonic/loader v0.2.3 // indirect
+	github.com/bytedance/sonic/loader v0.2.4 // indirect
 	github.com/cloudwego/base64x v0.1.5 // indirect
 	github.com/fsnotify/fsnotify v1.8.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
@@ -36,7 +37,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.14.0 // indirect
 	golang.org/x/exp v0.0.0-20250128182459-e0ece0dbea4c
-	golang.org/x/net v0.34.0
+	golang.org/x/net v0.35.0 // indirect
 	golang.org/x/sync v0.11.0 // indirect
 	golang.org/x/sys v0.30.0 // indirect
 	golang.org/x/text v0.22.0 // indirect

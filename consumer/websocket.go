@@ -1,23 +1,25 @@
 package consumer
 
 import (
+	"fmt"
 	log "log/slog"
 	"sync"
 	"time"
 
-	"github.com/bytedance/sonic"
+	"github.com/gorilla/websocket"
 	"github.com/textileio/go-threads/broadcast"
-	"golang.org/x/net/websocket"
+	"roselabs.mx/ftso-data-sources/internal/serialization"
 	websocket_server "roselabs.mx/ftso-data-sources/internal/websocket_server"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
 type WebsocketConsumerOptions struct {
-	Enabled         bool          `mapstructure:"enabled"`
-	TickersEndpoint string        `mapstructure:"ticker_endpoint"`
-	FlushInterval   time.Duration `mapstructure:"flush_interval"`
-	Port            int
+	Enabled               bool          `mapstructure:"enabled"`
+	TickersEndpoint       string        `mapstructure:"ticker_endpoint"`
+	FlushInterval         time.Duration `mapstructure:"flush_interval"`
+	SerializationProtocol string        `mapstructure:"serialization_protocol"`
+	Port                  int
 }
 
 type WebsocketServerConsumer struct {
@@ -29,27 +31,50 @@ type WebsocketServerConsumer struct {
 
 	tickerBuffer []*model.Ticker
 	mutex        sync.Mutex
+
+	serializer  func([]*model.Ticker) ([]byte, error)
+	messageType int
+}
+
+func (s *WebsocketServerConsumer) getSerializer() (func(tickers []*model.Ticker) ([]byte, error), error) {
+	switch s.config.SerializationProtocol {
+	case "json":
+		s.messageType = websocket.TextMessage
+		return serialization.JsonTickerSerializer, nil
+	case "protobuf":
+		s.messageType = websocket.BinaryMessage
+		return serialization.ProtobufTickerSerializer, nil
+	default:
+		err := fmt.Errorf("unknown serialization method %s", s.config.SerializationProtocol)
+		return nil, err
+	}
 }
 
 func (s *WebsocketServerConsumer) setup() error {
+	serializer, err := s.getSerializer()
+	if err != nil {
+		panic(err)
+	}
+	s.serializer = serializer
+
 	if err := s.wsServer.Connect(); err != nil {
 		panic(err)
 	}
-	log.Info("Websocket Consumer started.", "port", s.config.Port)
+	log.Info("Websocket Consumer started.", "port", s.config.Port, "serializer", s.config.SerializationProtocol)
 
 	return nil
 }
 
 func (s *WebsocketServerConsumer) processTickerBatch(tickers []*model.Ticker) {
 	// Marshal the tickers
-	payload, err := sonic.Marshal(tickers)
+	payload, err := s.serializer(tickers)
 	if err != nil {
 		log.Error("error encoding tickers", "consumer", "websocket", "error", err)
 		return
 	}
 
 	// Broadcast the payload
-	err = s.wsServer.BroadcastMessage(websocket.TextFrame, payload)
+	err = s.wsServer.BroadcastMessage(s.messageType, payload)
 	if err != nil {
 		log.Error("error broadcasting tickers", "consumer", "websocket", "error", err)
 	}

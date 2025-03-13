@@ -26,11 +26,6 @@ const (
 	maxMessageSize = 4096
 )
 
-var (
-// newline = []byte{'\n'}
-// space   = []byte{' '}
-)
-
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
@@ -59,17 +54,16 @@ func (c *Client) readPump() {
 	}()
 	c.conn.SetReadLimit(maxMessageSize)
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
-	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+	c.conn.SetPongHandler(func(string) error {
+		c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
 	for {
 		_, _, err := c.conn.ReadMessage()
 		if err != nil {
-			/*if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-			}*/
 			log.Error(err.Error())
 			break
 		}
-		//message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
-		//c.hub.broadcast <- &WsMessage{Type: websocket.TextMessage, Message: message}
 	}
 }
 
@@ -100,13 +94,15 @@ func (c *Client) writePump() {
 			}
 			w.Write(message.Message)
 
-			// Add queued chat messages to the current websocket message.
-			n := len(c.send)
-			for i := 0; i < n; i++ {
-				msg := <-c.send
-				m := append(msg.Message, '\n')
-				w.Write(m)
-			}
+			/*
+				// Add queued messages to the current websocket message.
+				n := len(c.send)
+				for range n {
+					msg := <-c.send
+					m := append(msg.Message, '\n')
+					w.Write(m)
+				}
+			*/
 
 			if err := w.Close(); err != nil {
 				return
@@ -127,11 +123,14 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		log.Error(err.Error())
 		return
 	}
-	client := &Client{hub: hub, conn: conn, send: make(chan WsMessage, 256)}
+	client := &Client{
+		hub:  hub,
+		conn: conn,
+		send: make(chan WsMessage, 256),
+	}
 	client.hub.register <- client
 
-	// Allow collection of memory referenced by the caller by doing all work in
-	// new goroutines.
+	// Allow collection of memory referenced by the caller by doing all work in new goroutines.
 	go client.writePump()
 	go client.readPump()
 }

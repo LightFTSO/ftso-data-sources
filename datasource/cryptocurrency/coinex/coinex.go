@@ -129,7 +129,7 @@ func (d *CoinexClient) onMessage(message internal.WsMessage) {
 
 }
 
-func (d *CoinexClient) comparePrices(s *model.Ticker) string { return s.LastPrice }
+func (d *CoinexClient) comparePrices(s *model.Ticker) float64 { return s.Price }
 
 func (d *CoinexClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	var newTickerEvent WsTickerMessage
@@ -142,7 +142,7 @@ func (d *CoinexClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	tickers := []*model.Ticker{}
 	symbol := model.ParseSymbol(newTickerEvent.Data.Market)
 	for _, t := range newTickerEvent.Data.DealList {
-		newTicker, err := model.NewTicker(t.Price,
+		newTicker, err := model.NewTickerPriceString(t.Price,
 			symbol,
 			d.GetName(),
 			time.UnixMilli(t.Timestamp))

@@ -126,7 +126,7 @@ func (d *BitgetClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	tickers := []*model.Ticker{}
 	for _, t := range newTickerEvent.Data {
 		symbol := model.ParseSymbol(t.InstId)
-		newTicker, err := model.NewTicker(t.LastPrice,
+		newTicker, err := model.NewTickerPriceString(t.LastPrice,
 			symbol,
 			d.GetName(),
 			time.UnixMilli(newTickerEvent.Timestamp))

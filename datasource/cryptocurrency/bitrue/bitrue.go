@@ -3,7 +3,6 @@ package bitrue
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -146,7 +145,7 @@ func (d *BitrueClient) parseTicker(message []byte) (*model.Ticker, error) {
 	pair = strings.ReplaceAll(pair, "_ticker", "")
 	symbol := model.ParseSymbol(pair)
 
-	newTicker, err := model.NewTicker(strconv.FormatFloat(newEvent.TickData.Close, 'f', 9, 64),
+	newTicker, err := model.NewTicker(newEvent.TickData.Close,
 		symbol,
 		d.GetName(),
 		time.UnixMilli(int64(newEvent.Timestamp)))

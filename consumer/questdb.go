@@ -42,14 +42,14 @@ func (q *QuestDbConsumer) processTicker(ticker *model.Ticker) {
 			Symbol("exchange", ticker.Source).
 			Symbol("base", ticker.Base).
 			Symbol("quote", ticker.Quote).
-			Float64Column("price", ticker.LastPriceFloat64).
+			Float64Column("price", ticker.Price).
 			At(*q.txContext, ticker.Timestamp)
 	} else {
 		err = (*q.questdbSender).Table("tickers").
 			Symbol("base", ticker.Base).
 			Symbol("quote", ticker.Quote).
 			Symbol("exchange", ticker.Source).
-			Float64Column("price", ticker.LastPriceFloat64).
+			Float64Column("price", ticker.Price).
 			At(*q.txContext, ticker.Timestamp)
 	}
 	if err != nil {

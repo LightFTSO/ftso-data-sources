@@ -127,7 +127,7 @@ func (d *BitstampClient) parseTicker(message []byte) (*model.Ticker, error) {
 		return nil, err
 	}
 
-	ticker, err := model.NewTicker(newTickerEvent.Data.LastPrice,
+	ticker, err := model.NewTickerPriceString(newTickerEvent.Data.LastPrice,
 		symbol,
 		d.GetName(),
 		time.UnixMicro(ts))

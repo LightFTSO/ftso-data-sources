@@ -3,7 +3,6 @@ package tiingo
 import (
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -181,7 +180,7 @@ func (d *TiingoClient) parseTicker(message []byte) (*model.Ticker, error) {
 		Base:  symbol.Base,
 		Quote: symbol.Quote,
 
-		LastPrice: strconv.FormatFloat(price, 'f', 9, 64),
+		Price:     price,
 		Source:    d.GetName(),
 		Timestamp: ts,
 	}

@@ -137,7 +137,7 @@ func (d *HitbtcClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	for _, key := range keys {
 		tickData := newTickerEvent.Data[key]
 		symbol := model.ParseSymbol(key)
-		newTicker, err := model.NewTicker(tickData.LastPrice,
+		newTicker, err := model.NewTickerPriceString(tickData.LastPrice,
 			symbol,
 			d.GetName(),
 			time.UnixMilli(tickData.Timestamp))

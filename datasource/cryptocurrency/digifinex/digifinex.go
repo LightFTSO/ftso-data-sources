@@ -156,7 +156,7 @@ func (d *DigifinexClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	tickers := []*model.Ticker{}
 	for _, t := range newTickerEvent.Params {
 		symbol := model.ParseSymbol(t.Symbol)
-		newTicker, err := model.NewTicker(t.LastPrice,
+		newTicker, err := model.NewTickerPriceString(t.LastPrice,
 			symbol,
 			d.GetName(),
 			time.UnixMilli(t.Timestamp))

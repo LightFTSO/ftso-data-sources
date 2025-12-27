@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	log "log/slog"
-	"strconv"
 	"sync"
 	"time"
 
@@ -85,11 +84,7 @@ func (s *RedisConsumer) processTickerBatch(tickers []*model.Ticker) {
 	tsMaddCommand := s.redisClient.B().TsMadd().KeyTimestampValue()
 
 	for _, ticker := range tickers {
-		val, err := strconv.ParseFloat(ticker.LastPrice, 64)
-		if err != nil {
-			log.Error("Error parsing float", "value", ticker.LastPrice, "consumer", "redis", "error", err)
-			continue
-		}
+
 		key := fmt.Sprintf("%s:%s:%s:%s", TICKERS_KEY, ticker.Source, ticker.Base, ticker.Quote)
 
 		// Check if the key exists in our map
@@ -127,7 +122,7 @@ func (s *RedisConsumer) processTickerBatch(tickers []*model.Ticker) {
 
 		ts := ticker.Timestamp.UTC().UnixMilli()
 
-		tsMaddCommand = tsMaddCommand.KeyTimestampValue(key, ts, val)
+		tsMaddCommand = tsMaddCommand.KeyTimestampValue(key, ts, ticker.Price)
 	}
 
 	err := s.redisClient.Do(context.Background(), tsMaddCommand.Build()).Error()

@@ -125,7 +125,7 @@ func (d *kucoinInstanceClient) parseTicker(message []byte) (*model.Ticker, error
 	}
 
 	symbol := model.ParseSymbol(strings.ReplaceAll(newTickerEvent.Topic, "/market/ticker:", ""))
-	ticker, err := model.NewTicker(newTickerEvent.Data.Price,
+	ticker, err := model.NewTickerPriceString(newTickerEvent.Data.Price,
 		symbol,
 		d.getName(),
 		time.UnixMilli(newTickerEvent.Data.Time))

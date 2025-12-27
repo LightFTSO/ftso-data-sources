@@ -140,7 +140,7 @@ func (d *HuobiClient) parseTicker(message []byte) (*model.Ticker, error) {
 
 	symbol := model.ParseSymbol(market)
 
-	ticker, err := model.NewTicker(fmt.Sprint(tickerMessage.Tick.LastPrice),
+	ticker, err := model.NewTicker(tickerMessage.Tick.LastPrice,
 		symbol,
 		d.GetName(),
 		time.UnixMilli(tickerMessage.Timestamp))

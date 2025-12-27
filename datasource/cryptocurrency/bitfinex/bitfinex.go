@@ -213,7 +213,7 @@ func (d *BitfinexClient) parseTicker(message []byte) (*model.Ticker, error) {
 			"timestamp_value", tradeData[1], "error", "unable to parse timestamps value")
 		return nil, nil
 	}
-	newTicker, err := model.NewTicker(fmt.Sprintf("%f", price),
+	newTicker, err := model.NewTicker(price,
 		symbol,
 		d.GetName(),
 		time.UnixMilli(int64(ts)))

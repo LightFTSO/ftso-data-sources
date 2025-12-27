@@ -19,7 +19,7 @@ func convertModelTickersToProto(tickers []*model.Ticker) []*pbticker.Ticker {
 			Base:      t.Base,
 			Quote:     t.Quote,
 			Source:    t.Source,
-			LastPrice: t.LastPriceFloat64,
+			LastPrice: t.Price,
 			Timestamp: timestamppb.New(t.Timestamp),
 		}
 	}

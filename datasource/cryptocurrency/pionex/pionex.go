@@ -137,7 +137,7 @@ func (d *PionexClient) onMessage(message internal.WsMessage) {
 	}
 }
 
-func (d *PionexClient) comparePrices(s *model.Ticker) string { return s.LastPrice }
+func (d *PionexClient) comparePrices(s *model.Ticker) float64 { return s.Price }
 
 func (d *PionexClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	var newTickerEvent wsTickerMessage
@@ -150,7 +150,7 @@ func (d *PionexClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	tickers := []*model.Ticker{}
 	for _, t := range newTickerEvent.Data {
 		symbol := model.ParseSymbol(t.Symbol)
-		newTicker, err := model.NewTicker(t.LastPrice,
+		newTicker, err := model.NewTickerPriceString(t.LastPrice,
 			symbol,
 			d.GetName(),
 			time.UnixMilli(t.Timestamp))

@@ -146,7 +146,7 @@ func (d *CryptoComClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 			continue
 		}
 
-		newTicker, err := model.NewTicker(v.LastPrice,
+		newTicker, err := model.NewTickerPriceString(v.LastPrice,
 			symbol,
 			d.GetName(),
 			time.UnixMilli(v.Timestamp))

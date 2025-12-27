@@ -123,7 +123,7 @@ func (d *BinanceClient) parseTicker(message []byte) (*model.Ticker, error) {
 		return &model.Ticker{}, err
 	}
 	symbol := model.ParseSymbol(newTickerEvent.Data.Symbol)
-	ticker, err := model.NewTicker(newTickerEvent.Data.LastPrice,
+	ticker, err := model.NewTickerPriceString(newTickerEvent.Data.LastPrice,
 		symbol,
 		d.GetName(),
 		time.UnixMilli(newTickerEvent.Data.Time))

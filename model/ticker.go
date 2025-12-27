@@ -10,21 +10,17 @@ import (
 )
 
 type Ticker struct {
-	Base             string    `json:"b"`
-	Quote            string    `json:"q"`
-	Source           string    `json:"S"`
-	LastPrice        string    `json:"l"`
-	LastPriceFloat64 float64   `json:"-"`
-	Timestamp        time.Time `json:"ts"`
+	Base      string    `json:"b"`
+	Quote     string    `json:"q"`
+	Source    string    `json:"S"`
+	Price     float64   `json:"l"`
+	Timestamp time.Time `json:"ts"`
 }
 
 func (t *Ticker) Validate() error {
 	var errorList *multierror.Error
-	err := t.validateLastPrice()
-	if err != nil {
-		errorList = multierror.Append(errorList, err)
-	}
-	err = t.validateBase()
+
+	err := t.validateBase()
 	if err != nil {
 		errorList = multierror.Append(errorList, err)
 	}
@@ -42,16 +38,6 @@ func (t *Ticker) Validate() error {
 	}
 
 	return errorList.ErrorOrNil()
-}
-
-func (t *Ticker) validateLastPrice() error {
-	lastPrice, err := strconv.ParseFloat(t.LastPrice, 64)
-	if err != nil {
-		return fmt.Errorf("lastPrice:\"%s\" is not a valid price: %w", t.LastPrice, err)
-	}
-	t.LastPriceFloat64 = lastPrice
-
-	return nil
 }
 
 func (t *Ticker) validateBase() error {
@@ -87,12 +73,13 @@ func (t *Ticker) Symbol() string {
 	return t.Base + "/" + t.Quote
 }
 
-func NewTicker(lastPrice string,
+func NewTicker(price float64,
 	symbol Symbol,
 	source string,
 	timestamp time.Time) (*Ticker, error) {
+
 	ticker := Ticker{
-		LastPrice: lastPrice,
+		Price:     price,
 		Base:      symbol.Base,
 		Quote:     symbol.Quote,
 		Source:    source,
@@ -100,6 +87,29 @@ func NewTicker(lastPrice string,
 	}
 
 	err := ticker.Validate()
+
+	return &ticker, err
+}
+
+func NewTickerPriceString(priceString string,
+	symbol Symbol,
+	source string,
+	timestamp time.Time) (*Ticker, error) {
+
+	price, err := strconv.ParseFloat(priceString, 64)
+	if err != nil {
+		return nil, fmt.Errorf("lastPrice:\"%s\" is not a valid price: %w", priceString, err)
+	}
+
+	ticker := Ticker{
+		Price:     price,
+		Base:      symbol.Base,
+		Quote:     symbol.Quote,
+		Source:    source,
+		Timestamp: timestamp.UTC(),
+	}
+
+	err = ticker.Validate()
 
 	return &ticker, err
 }

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"log/slog"
 	"math/rand"
-	"strconv"
 	"sync"
 	"time"
 
@@ -52,7 +51,7 @@ func (d *NoisySource) SubscribeTickers(wsClient *internal.WebSocketClient, symbo
 
 		for t := range d.timeInterval.C {
 			randomSymbol := d.SymbolList[rand.Intn(len(d.SymbolList))]
-			fakeTicker, err := model.NewTicker(strconv.FormatFloat(float64(rand.Intn(1000))+rand.Float64(), 'f', 9, 64), randomSymbol, d.GetName(), t)
+			fakeTicker, err := model.NewTicker(float64(rand.Intn(1000))+rand.Float64(), randomSymbol, d.GetName(), t)
 			if err != nil {
 				d.log.Error("Error creating ticker",
 					"ticker", fakeTicker, "error", err.Error())

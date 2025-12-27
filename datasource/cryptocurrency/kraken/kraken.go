@@ -6,7 +6,6 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -143,7 +142,7 @@ func (d *KrakenClient) parseTicker(message []byte) (*model.Ticker, error) {
 
 	base := KrakenAsset(symbol.Base)
 
-	ticker, err := model.NewTicker(strconv.FormatFloat(tickerData.Last, 'f', 9, 64),
+	ticker, err := model.NewTicker(tickerData.Last,
 		model.Symbol{Base: string(base.GetStdName()),
 			Quote: symbol.Quote},
 		d.GetName(),

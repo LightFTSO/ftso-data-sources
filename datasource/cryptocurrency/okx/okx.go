@@ -139,7 +139,7 @@ func (d *OkxClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 			return nil, err
 		}
 
-		newTicker, err := model.NewTicker(v.Idxpx,
+		newTicker, err := model.NewTickerPriceString(v.Idxpx,
 			symbol,
 			d.GetName(),
 			time.UnixMilli(ts))

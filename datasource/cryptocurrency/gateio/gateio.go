@@ -131,7 +131,7 @@ func (d *GateIoClient) parseTicker(message []byte) (*model.Ticker, error) {
 	}
 
 	symbol := model.ParseSymbol(newTickerEvent.Result.CurrencyPair)
-	ticker, err := model.NewTicker(newTickerEvent.Result.Last,
+	ticker, err := model.NewTickerPriceString(newTickerEvent.Result.Last,
 		symbol,
 		d.GetName(),
 		time.UnixMilli(newTickerEvent.TimeMs))

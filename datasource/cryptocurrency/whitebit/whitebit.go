@@ -145,7 +145,7 @@ func (d *WhitebitClient) parseTicker(message []byte) (*model.Ticker, error) {
 	}
 
 	symbol := model.ParseSymbol(newTickerEvent.Params[0])
-	ticker, err := model.NewTicker(newTickerEvent.Params[1],
+	ticker, err := model.NewTickerPriceString(newTickerEvent.Params[1],
 		symbol,
 		d.GetName(),
 		time.Now())

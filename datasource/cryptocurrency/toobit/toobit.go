@@ -134,7 +134,7 @@ func (d *ToobitClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	tickers := []*model.Ticker{}
 	for _, t := range newTickerEvent.Data {
 		symbol := model.ParseSymbol(t.Symbol)
-		newTicker, err := model.NewTicker(t.Close,
+		newTicker, err := model.NewTickerPriceString(t.Close,
 			symbol,
 			d.GetName(),
 			time.UnixMilli(t.Timestamp))

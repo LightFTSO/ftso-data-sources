@@ -132,7 +132,7 @@ func (d *CoinbaseClient) parseTicker(message []byte) (*model.Ticker, error) {
 		return nil, err
 	}
 
-	ticker, err := model.NewTicker(tickerMessage.LastPrice,
+	ticker, err := model.NewTickerPriceString(tickerMessage.LastPrice,
 		symbol,
 		d.GetName(),
 		ts)

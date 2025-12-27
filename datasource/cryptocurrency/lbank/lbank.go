@@ -145,7 +145,7 @@ func (d *LbankClient) parseTicker(message []byte) (*model.Ticker, error) {
 		return nil, err
 	}
 
-	ticker, err := model.NewTicker(fmt.Sprintf("%.6f", newTickerEvent.Ticker.LastPrice),
+	ticker, err := model.NewTicker(newTickerEvent.Ticker.LastPrice,
 		symbol,
 		d.GetName(),
 		ts)

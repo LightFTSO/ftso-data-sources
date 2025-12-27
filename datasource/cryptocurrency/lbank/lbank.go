@@ -214,18 +214,15 @@ func (d *LbankClient) setPing() {
 	ticker := time.NewTicker(d.pingInterval)
 	go func() {
 		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				for _, wsClient := range d.wsClients {
-					id := d.subscriptionId.Add(1)
-					msg := map[string]interface{}{
-						"ping":   fmt.Sprintf("%d", id),
-						"action": "ping",
-					}
-					if err := wsClient.SendMessageJSON(websocket.TextMessage, msg); err != nil {
-						d.log.Warn("Failed to send ping", "error", err)
-					}
+		for range ticker.C {
+			for _, wsClient := range d.wsClients {
+				id := d.subscriptionId.Add(1)
+				msg := map[string]any{
+					"ping":   fmt.Sprintf("%d", id),
+					"action": "ping",
+				}
+				if err := wsClient.SendMessageJSON(websocket.TextMessage, msg); err != nil {
+					d.log.Warn("Failed to send ping", "error", err)
 				}
 			}
 		}

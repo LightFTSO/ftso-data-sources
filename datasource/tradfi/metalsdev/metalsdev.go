@@ -163,7 +163,7 @@ func (d *MetalsDevClient) SubscribeTickers(wsClient *internal.WebSocketClient, s
 					Source:    d.GetName(),
 					Timestamp: t,
 				}
-				d.log.Info(fmt.Sprintf("metalsdev: base=%s quote=%s price=%s", ticker.Base, ticker.Quote, ticker.Price))
+				d.log.Info(fmt.Sprintf("metalsdev: base=%s quote=%s price=%f", ticker.Base, ticker.Quote, ticker.Price))
 				br.Send(&ticker)
 			}
 			for _, s := range d.ForexSymbols {
@@ -177,7 +177,7 @@ func (d *MetalsDevClient) SubscribeTickers(wsClient *internal.WebSocketClient, s
 						"ticker", ticker, "error", err.Error())
 					continue
 				}
-				d.log.Info(fmt.Sprintf("metalsdev: base=%s quote=%s price=%s", ticker.Base, ticker.Quote, ticker.Price))
+				d.log.Info(fmt.Sprintf("metalsdev: base=%s quote=%s price=%f", ticker.Base, ticker.Quote, ticker.Price))
 				br.Send(ticker)
 			}
 

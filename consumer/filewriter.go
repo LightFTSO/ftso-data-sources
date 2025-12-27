@@ -25,7 +25,7 @@ type FileConsumer struct {
 
 func (s *FileConsumer) processTicker(ticker *model.Ticker) {
 	s.W.Write([]byte(fmt.Sprintf(
-		"%s source=%s base=%s quote=%s last_price=%s ts=%d\n",
+		"%s source=%s base=%s quote=%s last_price=%f ts=%d\n",
 		time.Now().Format(constants.TS_FORMAT), ticker.Source, ticker.Base, ticker.Quote, ticker.Price, ticker.Timestamp.UTC().UnixMilli())))
 }
 

@@ -42,7 +42,7 @@ func (s *MqttConsumer) setup() error {
 func (s *MqttConsumer) processTicker(ticker *model.Ticker) {
 	channel := fmt.Sprintf("tickers/%s/%s/%s", ticker.Base, ticker.Quote, ticker.Source)
 
-	payload := fmt.Sprintf("%s,%d", ticker.Price, ticker.Timestamp.UnixMilli())
+	payload := fmt.Sprintf("%f,%d", ticker.Price, ticker.Timestamp.UnixMilli())
 	token := s.mqttClient.Publish(channel, byte(s.qosLevel), false, payload)
 	token.Wait()
 }

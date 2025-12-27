@@ -32,11 +32,11 @@ type WebsocketServerConsumer struct {
 	tickerBuffer []*model.Ticker
 	mutex        sync.Mutex
 
-	serializer  func([]*model.Ticker) ([]byte, error)
+	serializer  func([]*model.TickerMessage) ([]byte, error)
 	messageType int
 }
 
-func (s *WebsocketServerConsumer) getSerializer() (func(tickers []*model.Ticker) ([]byte, error), error) {
+func (s *WebsocketServerConsumer) getSerializer() (func(tickers []*model.TickerMessage) ([]byte, error), error) {
 	switch s.config.SerializationProtocol {
 	case "json":
 		s.messageType = websocket.TextMessage
@@ -66,8 +66,14 @@ func (s *WebsocketServerConsumer) setup() error {
 }
 
 func (s *WebsocketServerConsumer) processTickerBatch(tickers []*model.Ticker) {
+	tickersMessage := make([]*model.TickerMessage, len(tickers))
+	for i, t := range tickers {
+		tm := model.NewTickerMessage(t)
+		tickersMessage[i] = &tm
+	}
+
 	// Marshal the tickers
-	payload, err := s.serializer(tickers)
+	payload, err := s.serializer(tickersMessage)
 	if err != nil {
 		log.Error("error encoding tickers", "consumer", "websocket", "error", err)
 		return
@@ -81,10 +87,10 @@ func (s *WebsocketServerConsumer) processTickerBatch(tickers []*model.Ticker) {
 }
 
 func (s *WebsocketServerConsumer) flushTickers() {
-	ticker := time.NewTicker(s.config.FlushInterval)
-	defer ticker.Stop()
+	interval := time.NewTicker(s.config.FlushInterval)
+	defer interval.Stop()
 
-	for range ticker.C {
+	for range interval.C {
 		s.mutex.Lock()
 		if len(s.tickerBuffer) == 0 {
 			s.mutex.Unlock()

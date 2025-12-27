@@ -3,33 +3,31 @@ package serialization
 import (
 	log "log/slog"
 
-	pbticker "roselabs.mx/ftso-data-sources/generated/proto/ticker"
-
 	"github.com/bytedance/sonic"
 	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/types/known/timestamppb"
 	"roselabs.mx/ftso-data-sources/model"
+	pbticker "roselabs.mx/ftso-data-sources/model/pb"
 )
 
 // convertModelTickersToProto converts a slice of model.Ticker into a slice of protobuf Ticker messages.
-func convertModelTickersToProto(tickers []*model.Ticker) []*pbticker.Ticker {
-	protoTickers := make([]*pbticker.Ticker, len(tickers))
+func convertModelTickersToProto(tickers []*model.TickerMessage) []*pbticker.TickerMessage {
+	protoTickers := make([]*pbticker.TickerMessage, len(tickers))
 	for i, t := range tickers {
-		protoTickers[i] = &pbticker.Ticker{
+		protoTickers[i] = &pbticker.TickerMessage{
 			Base:      t.Base,
 			Quote:     t.Quote,
 			Source:    t.Source,
 			LastPrice: t.Price,
-			Timestamp: timestamppb.New(t.Timestamp),
+			Timestamp: t.Timestamp,
 		}
 	}
 	return protoTickers
 }
 
-func ProtobufTickerSerializer(tickers []*model.Ticker) ([]byte, error) {
+func ProtobufTickerSerializer(tickers []*model.TickerMessage) ([]byte, error) {
 	// Convert to protobuf representation and marshal
 	protoTickers := convertModelTickersToProto(tickers)
-	tickerList := &pbticker.TickerList{
+	tickerList := &pbticker.TickerMessageList{
 		Tickers: protoTickers,
 	}
 	protoPayload, err := proto.Marshal(tickerList)
@@ -39,7 +37,7 @@ func ProtobufTickerSerializer(tickers []*model.Ticker) ([]byte, error) {
 	}
 	return protoPayload, nil
 }
-func JsonTickerSerializer(tickers []*model.Ticker) ([]byte, error) {
+func JsonTickerSerializer(tickers []*model.TickerMessage) ([]byte, error) {
 	// JSON payload using sonic.Marshal (default)
 	jsonPayload, err := sonic.Marshal(tickers)
 	if err != nil {

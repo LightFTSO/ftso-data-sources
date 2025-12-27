@@ -9,6 +9,24 @@ import (
 	"roselabs.mx/ftso-data-sources/constants"
 )
 
+type TickerMessage struct {
+	Base      string  `json:"b"`
+	Quote     string  `json:"q"`
+	Source    string  `json:"S"`
+	Price     float64 `json:"l"`
+	Timestamp int64   `json:"ts"`
+}
+
+func NewTickerMessage(ticker *Ticker) TickerMessage {
+	return TickerMessage{
+		Base:      ticker.Base,
+		Quote:     ticker.Quote,
+		Source:    ticker.Source,
+		Price:     ticker.Price,
+		Timestamp: ticker.Timestamp.UnixMilli(),
+	}
+}
+
 type Ticker struct {
 	Base      string    `json:"b"`
 	Quote     string    `json:"q"`

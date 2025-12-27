@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package ticker;
+
+// Go package import path
+option go_package = "pb";
+
+import "google/protobuf/timestamp.proto";
+
+message Ticker {
+  string base = 1;
+  string quote = 2;
+  string source = 3;
+  double last_price = 4;
+  google.protobuf.Timestamp timestamp = 5;
+}
+
+message TickerList {
+  repeated Ticker tickers = 1;
+}
+
+message TickerMessage {
+  string base = 1;
+  string quote = 2;
+  string source = 3;
+  double last_price = 4;
+  int64 timestamp = 5;
+}
+
+message TickerMessageList {
+  repeated TickerMessage tickers = 1;
+}

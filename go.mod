@@ -1,8 +1,6 @@
 module roselabs.mx/ftso-data-sources
 
-go 1.22.0
-
-toolchain go1.23.6
+go 1.25.5
 
 require (
 	github.com/bytedance/sonic v1.13.1

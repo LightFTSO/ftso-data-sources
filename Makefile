@@ -1,6 +1,17 @@
-project_name = ftso-data-sources
-image_name = ftso-data-sources:latest
+project_name := ftso-data-sources
+image_name := ftso-data-sources:latest
 SRC_DIR=.
+PROTO_ROOT = datasource/cryptocurrency/mexc/proto
+OUT_DIR = datasource/cryptocurrency/mexc/pb
+MOD = $(shell go list -m -f '{{.Path}}')
+PROTO_FILES = $(shell find $(PROTO_ROOT) -maxdepth 1 -name '*.proto')
+
+# mappings (no go_package)
+MAPS = $(foreach f,$(PROTO_FILES),\
+  --go_opt=M$(patsubst $(PROTO_ROOT)/%,%,$(f))=$(MOD)/$(OUT_DIR) \
+)
+
+.PHONY: proto-mexc
 
 build-dev:
 	go build -o build/main $(SRC_DIR)/main.go
@@ -55,3 +66,11 @@ stop:
 
 start:
 	docker compose up -d
+
+proto-mexc:
+	mkdir -p $(OUT_DIR)
+	echo $(MAPS)
+	protoc -I $(PROTO_ROOT) \
+	  --go_out=$(OUT_DIR) --go_opt=paths=source_relative \
+	  $(MAPS) \
+	  $(PROTO_FILES)

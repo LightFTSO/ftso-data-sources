@@ -10,9 +10,10 @@ import (
 
 	"log/slog"
 
-	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
 	"github.com/textileio/go-threads/broadcast"
+	"google.golang.org/protobuf/proto"
+	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/mexc/pb"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
@@ -41,7 +42,7 @@ type MexcClient struct {
 }
 
 func NewMexcClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*MexcClient, error) {
-	wsEndpoint := "wss://wbs.mexc.com/ws"
+	wsEndpoint := "wss://wbs-api.mexc.com/ws"
 
 	shanghaiTimezone, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
@@ -106,41 +107,45 @@ func (d *MexcClient) IsRunning() bool {
 }
 
 func (d *MexcClient) onMessage(message internal.WsMessage) {
-	if message.Type == websocket.TextMessage {
-		if strings.Contains(string(message.Message), `"c":"spot@public.miniTicker`) {
-			ticker, err := d.parseTicker(message.Message)
-			if err != nil {
-				d.log.Error("Error parsing ticker",
-					"ticker", ticker, "error", err.Error())
-				return
-			}
-			d.lastTimestampMutex.Lock()
-			d.lastTimestamp = time.Now()
-			d.lastTimestampMutex.Unlock()
+	switch message.Type {
+	case websocket.TextMessage:
+		//fmt.Println("TextMessage ", message.Type, string(message.Message))
 
-			d.TickerTopic.Send(ticker)
+	case websocket.BinaryMessage:
+		var newMessage pb.PushDataV3ApiWrapper
+		err := proto.Unmarshal(message.Message, &newMessage)
+		if err != nil {
+			d.log.Error("Error unmarshaling message", "error", err)
+			return
 		}
+		ticker, err := d.parseTicker(&newMessage)
+		if err != nil {
+			d.log.Error("Error parsing ticker",
+				"ticker", ticker, "error", err.Error())
+			return
+		}
+		d.lastTimestampMutex.Lock()
+		d.lastTimestamp = time.Now()
+		d.lastTimestampMutex.Unlock()
+
+		d.TickerTopic.Send(ticker)
+
 	}
 }
 
-func (d *MexcClient) parseTicker(message []byte) (*model.Ticker, error) {
-	var newTickerEvent WsTickerMessage
-	err := sonic.Unmarshal(message, &newTickerEvent)
-	if err != nil {
-		d.log.Error("Error unmarshaling ticker", "error", err)
-		return nil, err
-	}
+func (d *MexcClient) parseTicker(message *pb.PushDataV3ApiWrapper) (*model.Ticker, error) {
+	var newTickerEvent pb.PublicMiniTickerV3Api = *message.GetPublicMiniTicker()
 
-	symbol := model.ParseSymbol(newTickerEvent.Data.Symbol)
-	ticker, err := model.NewTickerPriceString(newTickerEvent.Data.LastPrice,
+	symbol := model.ParseSymbol(newTickerEvent.GetSymbol())
+	ts := time.UnixMilli(message.GetSendTime())
+	ticker, err := model.NewTickerPriceString(newTickerEvent.GetPrice(),
 		symbol,
 		d.GetName(),
-		time.UnixMilli(newTickerEvent.Timestamp))
+		ts)
 	if err != nil {
 		d.log.Error("Error parsing ticker", "error", err)
 		return nil, err
 	}
-
 	return ticker, err
 }
 
@@ -149,7 +154,7 @@ func (d *MexcClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbol
 		subMessage := map[string]interface{}{
 			"id":     d.subscriptionId.Add(1),
 			"method": "SUBSCRIPTION",
-			"params": []string{fmt.Sprintf("spot@public.miniTicker.v3.api@%s%s@UTC+8", strings.ToUpper(v.Base), strings.ToUpper(v.Quote))},
+			"params": []string{fmt.Sprintf("spot@public.miniTicker.v3.api.pb@%s%s@UTC+0", strings.ToUpper(v.Base), strings.ToUpper(v.Quote))},
 		}
 		wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
 	}

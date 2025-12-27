@@ -36,7 +36,6 @@ type ConfigOptions struct {
 	WebsocketConsumerOptions consumer.WebsocketConsumerOptions `mapstructure:"websocket_server"`
 	FileConsumerOptions      consumer.FileConsumerOptions      `mapstructure:"file_output"`
 	MQTTConsumerOptions      consumer.MqttConsumerOptions      `mapstructure:"mqtt"`
-	QuestDBConsumerOptions   consumer.QuestDbConsumerOptions   `mapstructure:"questdb"`
 
 	TickerTransformationOptions []tickertopic.TransformationOptions `mapstructure:"ticker_transformations"`
 }

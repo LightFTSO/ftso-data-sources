@@ -46,12 +46,6 @@ func UpdateConfig(newConfig ConfigOptions, saveCurrentConfig bool) {
 	viper.Set("websocket_server.flush_interval", newConfig.WebsocketConsumerOptions.FlushInterval)
 	viper.Set("websocket_server.serialization_protocol", newConfig.WebsocketConsumerOptions.SerializationProtocol)
 
-	viper.Set("questdb.enabled", newConfig.QuestDBConsumerOptions.Enabled)
-	viper.Set("questdb.flush_interval", newConfig.QuestDBConsumerOptions.FlushInterval)
-	viper.Set("questdb.client_options.address", newConfig.QuestDBConsumerOptions.ClientOptions.Address)
-	viper.Set("questdb.client_options.schema", newConfig.QuestDBConsumerOptions.ClientOptions.Schema)
-	viper.Set("questdb.individual_feed_table", newConfig.QuestDBConsumerOptions.IndividualFeedTable)
-
 	viper.Set("ticker_transformations", newConfig.TickerTransformationOptions)
 
 	if saveCurrentConfig {

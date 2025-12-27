@@ -1,3 +1,6 @@
 [submodule "generated/proto/ticker"]
 	path = generated/proto/ticker
 	url = https://github.com/RoseLabsMx/ftso-data-sources-proto-files.git
+[submodule "datasource/cryptocurrency/mexc/protobuf"]
+	path = datasource/cryptocurrency/mexc/protobuf
+	url = https://github.com/mexcdevelop/websocket-proto.git

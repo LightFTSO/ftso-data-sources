@@ -104,8 +104,7 @@ func initConsumers(tickerTopic *tickertopic.TickerTopic, config config.ConfigOpt
 	if !config.FileConsumerOptions.Enabled &&
 		!config.RedisOptions.Enabled &&
 		!config.WebsocketConsumerOptions.Enabled &&
-		!config.MQTTConsumerOptions.Enabled &&
-		!config.QuestDBConsumerOptions.Enabled {
+		!config.MQTTConsumerOptions.Enabled {
 		if config.Env != "development" {
 			panic("no consumers enabled")
 		} else {
@@ -125,11 +124,6 @@ func initConsumers(tickerTopic *tickertopic.TickerTopic, config config.ConfigOpt
 
 	if config.MQTTConsumerOptions.Enabled {
 		c := consumer.NewMqttConsumer(config.MQTTConsumerOptions)
-		enableConsumer(c, tickerTopic)
-	}
-
-	if config.QuestDBConsumerOptions.Enabled {
-		c := consumer.NewQuestDbConsumer(config.QuestDBConsumerOptions)
 		enableConsumer(c, tickerTopic)
 	}
 

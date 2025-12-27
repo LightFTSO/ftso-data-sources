@@ -2,7 +2,7 @@ Created with ❤️ LightFTSO
 
 # Introduction
 Flow goes like this:
-1. Configure and create data consumers (file, redis, mqtt, websocket, questdb, etc)
+1. Configure and create data consumers (file, redis, mqtt, websocket, etc)
 2. Instantiate data source(s) (could be crypto exchange, forex api, stocks api, or whatever)
 3. Broadcast ticker data to each of the consumers
 4. Consume the data, that part depends on you
@@ -109,14 +109,6 @@ mqtt:
   enabled: false
   url: "tcp://localhost:1883"
   qos_level: 1
-
-# see https://questdb.io/
-questdb:
-  enabled: false
-  flush_interval: 10s
-  individual_feed_table: false
-  client_options:
-    address: localhost:9000
     
 # See https://redis.io/docs/latest/develop/data-types/timeseries/
 redis_ts:

@@ -43,32 +43,6 @@ services:
     networks:
       - ftso-data-sources
 
-  questdb:
-    image: questdb/questdb:latest
-    container_name: questdb
-    restart: unless-stopped
-    ports:
-      - 9000:9000
-      - 9009:9009
-      - 8812:8812
-      - 9003:9003
-    volumes:
-      - ./questdb:/root/.questdb
-    networks:
-      - ftso-data-sources
-    environment:
-      - QDB_LOG_W_STDOUT_LEVEL=ERROR
-      - QDB_LOG_W_FILE_LEVEL=ERROR
-      - QDB_LOG_W_HTTP_MIN_LEVEL=ERROR
-      - QDB_PG_USER=lightftso # postgresql user -> Configured in .env file
-      - QDB_PG_PASSWORD=lightftso # postgresql password -> Configured in .env file
-      - QDB_TELEMETRY_ENABLED=true # Disable telemetry
-      - QDB_HTTP_ENABLED=true # Disable http server gui and rest interface
-      - QDB_HTTP_MIN_ENABLED=true # Disable http health server
-      - QDB_PG_ENABLED=true # Disable postgresql
-      - QBD_LINE_TCP_ENABLED=true # Disable influxdb tcp server
-      - QBD_LINE_UDP_ENABLED=false # Disable influxdb udp server
-
 networks:
   ftso-data-sources:
 

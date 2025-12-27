@@ -8,7 +8,6 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/mitchellh/mapstructure v1.5.0
-	github.com/questdb/go-questdb-client/v3 v3.2.0
 	github.com/redis/rueidis v1.0.69
 	github.com/spf13/viper v1.21.0
 	github.com/textileio/go-threads v1.1.5

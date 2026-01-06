@@ -285,7 +285,7 @@ func (d *BinanceClient) startWatchdog() {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
 
-		timeoutDuration := 30 * time.Second
+		timeout := 30 * time.Second
 
 		for {
 			select {
@@ -298,12 +298,12 @@ func (d *BinanceClient) startWatchdog() {
 				last := d.lastTimestamp.Load()
 				lastTime := time.UnixMilli(last)
 
-				if time.Since(lastTime) > timeoutDuration {
+				if time.Since(lastTime) > timeout {
 					// We are stale.
 					// Update timestamp to prevent spamming reconnects if it takes time
 					d.lastTimestamp.Store(time.Now().UnixMilli())
 
-					d.log.Warn("Watchdog: No tickers received", "timeout", timeoutDuration)
+					d.log.Warn("Watchdog: No tickers received", "timeout", timeout.String())
 
 					// Trigger reconnect on all clients
 					for _, wsClient := range d.wsClients {

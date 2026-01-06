@@ -247,7 +247,7 @@ func (d *HTXClient) startWatchdog() {
 			case <-ticker.C:
 				last := d.lastTimestamp.Load()
 				if time.Since(time.UnixMilli(last)) > timeout {
-					d.log.Warn("Watchdog: No tickers received", "timeout", timeout)
+					d.log.Warn("Watchdog: No tickers received", "timeout", timeout.String())
 					d.lastTimestamp.Store(time.Now().UnixMilli())
 
 					for _, ws := range d.wsClients {

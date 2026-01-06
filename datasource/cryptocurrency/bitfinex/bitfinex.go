@@ -391,7 +391,7 @@ func (d *BitfinexClient) startWatchdog() {
 			case <-ticker.C:
 				last := d.lastTimestamp.Load()
 				if time.Since(time.UnixMilli(last)) > timeout {
-					d.log.Warn("Watchdog: No trades received", "timeout", timeout)
+					d.log.Warn("Watchdog: No trades received", "timeout", timeout.String())
 					d.lastTimestamp.Store(time.Now().UnixMilli()) // Prevent spam
 
 					for _, ws := range d.wsClients {

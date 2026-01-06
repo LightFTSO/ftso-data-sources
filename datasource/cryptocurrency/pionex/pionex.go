@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -44,23 +45,60 @@ type PionexClient struct {
 }
 
 func NewPionexClient(options map[string]any, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*PionexClient, error) {
-	wsEndpoint := "wss://ws.pionex.com/wsPub"
-
 	pionex := &PionexClient{
 		name:        "pionex",
 		log:         slog.Default().With(slog.String("datasource", "pionex")),
 		W:           w,
 		TickerTopic: tickerTopic,
 		wsClients:   []*internal.WebSocketClient{},
-		wsEndpoint:  wsEndpoint,
+		wsEndpoint:  "wss://ws.pionex.com/wsPub",
 		apiEndpoint: "https://api.pionex.com/api/v1",
 	}
 
-	// Pionex requires 1 subscription frame per symbol.
-	// 200 symbols per connection is a safe balance to avoid "write buffer full".
-	pionex.symbolChunks = symbolList.Crypto.ChunkSymbols(200)
+	// 1. Fetch available symbols immediately to filter the list
+	// We use a temporary context here because d.ctx isn't initialized until Connect()
+	initCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	pionex.log.Debug("Created new datasource")
+	availableMap, err := pionex.getAvailableSymbolsMap(initCtx)
+	if err != nil {
+		// If we can't fetch symbols, we can't safely filter.
+		// Depending on strictness, we could return error or fall back to full list.
+		// Returning error is safer to prevent bad configurations.
+		return nil, fmt.Errorf("failed to fetch pionex symbols: %w", err)
+	}
+
+	// 2. Filter the symbol list
+	var validSymbols model.SymbolList
+	for _, s := range symbolList.Crypto {
+		key := fmt.Sprintf("%s_%s", strings.ToUpper(s.Base), strings.ToUpper(s.Quote))
+		if availableMap[key] {
+			validSymbols = append(validSymbols, s)
+		}
+	}
+
+	// 3. Create Chunks
+	// Pionex allows maximum 10 connections per IP.
+	// We calculate chunk size to ensure we never exceed 10 chunks.
+	maxConnections := 5
+	totalSymbols := len(validSymbols)
+
+	chunkSize := 0
+	if totalSymbols > 0 {
+		chunkSize = int(math.Ceil(float64(totalSymbols) / float64(maxConnections)))
+	}
+
+	if chunkSize > 0 {
+		pionex.symbolChunks = validSymbols.ChunkSymbols(chunkSize)
+	} else {
+		pionex.symbolChunks = []model.SymbolList{}
+	}
+
+	pionex.log.Debug("Created new datasource",
+		"total_symbols", len(symbolList.Crypto),
+		"valid_symbols", totalSymbols,
+		"chunks", len(pionex.symbolChunks))
+
 	return pionex, nil
 }
 
@@ -176,7 +214,7 @@ func (d *PionexClient) parseTicker(message []byte) ([]model.Ticker, error) {
 		symbol := model.ParseSymbol(t.Symbol)
 
 		newTicker, err := model.NewTickerPriceString(
-			t.LastPrice,
+			t.Price,
 			symbol,
 			d.name,
 			time.UnixMilli(t.Timestamp),
@@ -195,24 +233,13 @@ func (d *PionexClient) parseTicker(message []byte) ([]model.Ticker, error) {
 // -------------------------------------------------------------------------
 
 func (d *PionexClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
-	// 1. Fetch available symbols (Optimized: Get Map ONCE)
-	// Note: In production, you might want to cache this map globally or pass it in.
-	// Calling this per-connection is still better than per-chunk if chunks are small.
-	availableMap, err := d.getAvailableSymbolsMap()
-	if err != nil {
-		d.log.Error("Failed to fetch available symbols", "error", err)
-		return err
-	}
+	// Optimization:
+	// The symbols passed here are already filtered in the constructor.
+	// We do NOT need to fetch available symbols again.
 
-	// 2. Filter and Subscribe
 	for _, req := range symbols {
 		// Pionex Format: BTC_USDT
 		key := fmt.Sprintf("%s_%s", strings.ToUpper(req.Base), strings.ToUpper(req.Quote))
-
-		// Only subscribe if it exists in the map (prevents API errors)
-		if !availableMap[key] {
-			continue
-		}
 
 		subMessage := map[string]interface{}{
 			"op":     "SUBSCRIBE",
@@ -223,18 +250,22 @@ func (d *PionexClient) SubscribeTickers(wsClient *internal.WebSocketClient, symb
 		// Throttle (Pionex is sensitive to burst subscriptions)
 		time.Sleep(50 * time.Millisecond)
 
-		wsClient.TrySendMessageJSON(websocket.TextMessage, subMessage)
+		data, err := sonic.Marshal(subMessage)
+		if err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		wsClient.SendMessage(ctx, internal.WsMessage{Type: websocket.TextMessage, Message: data, Err: nil})
+		cancel()
 	}
 
 	d.log.Debug("Subscribed ticker symbols", "count", len(symbols))
 	return nil
 }
 
-func (d *PionexClient) getAvailableSymbolsMap() (map[string]bool, error) {
+// Updated to accept Context so it can be called from Constructor
+func (d *PionexClient) getAvailableSymbolsMap(ctx context.Context) (map[string]bool, error) {
 	reqUrl := d.apiEndpoint + "/common/symbols"
-
-	ctx, cancel := context.WithTimeout(d.ctx, 10*time.Second)
-	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqUrl, nil)
 	if err != nil {
@@ -285,7 +316,7 @@ func (d *PionexClient) startWatchdog() {
 			case <-ticker.C:
 				last := d.lastTimestamp.Load()
 				if time.Since(time.UnixMilli(last)) > timeout {
-					d.log.Warn("Watchdog: No tickers received", "timeout", timeout)
+					d.log.Warn("Watchdog: No tickers received", "timeout", timeout.String())
 					d.lastTimestamp.Store(time.Now().UnixMilli())
 
 					for _, ws := range d.wsClients {

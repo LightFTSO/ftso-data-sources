@@ -19,5 +19,5 @@ type wsTickerMessage struct {
 type tickerData struct {
 	Symbol    string `json:"symbol"`
 	Timestamp int64  `json:"timestamp"` // Timestamp in milliseconds
-	LastPrice string `json:"price"`     // Last price
+	Price     string `json:"price"`     // Last price
 }

@@ -32,7 +32,7 @@ Flow goes like this:
 `touch config.yaml`
 4. Run it 
 Locally with `make run`:
-You need go 1.22+ installed, see https://go.dev/doc/install
+You need go 1.25+ installed, see https://go.dev/doc/install
 ```bash
 # if you dont have make installed
 sudo apt install build-essential # if using ubuntu, refer to your distro for more info on installing make and gcc

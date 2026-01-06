@@ -42,24 +42,39 @@ type DigifinexClient struct {
 	// Lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// available symbols map
+	availableMap map[string]bool
 }
 
 func NewDigifinexClient(options map[string]any, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*DigifinexClient, error) {
-	wsEndpoint := "wss://openapi.digifinex.com/ws/v1/"
-
 	digifinex := &DigifinexClient{
 		name:        "digifinex",
 		log:         slog.Default().With(slog.String("datasource", "digifinex")),
 		W:           w,
 		TickerTopic: tickerTopic,
 		wsClients:   []*internal.WebSocketClient{},
-		wsEndpoint:  wsEndpoint,
+		wsEndpoint:  "wss://openapi.digifinex.com/ws/v1/",
 		apiEndpoint: "https://openapi.digifinex.com",
 	}
 
-	// Digifinex allows large batches (100+).
-	// 500 symbols per connection is safe and efficient.
-	digifinex.symbolChunks = symbolList.Crypto.ChunkSymbols(500)
+	initCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	availableMap, err := digifinex.getAvailableSymbolsMap(initCtx)
+	if err != nil {
+		digifinex.log.Error("Failed to fetch available symbols", "error", err)
+		return nil, err
+	}
+
+	var validSymbols model.SymbolList
+	for _, s := range symbolList.Crypto {
+		key := fmt.Sprintf("%s_%s", strings.ToUpper(s.Base), strings.ToUpper(s.Quote))
+		if availableMap[key] {
+			validSymbols = append(validSymbols, s)
+		}
+	}
+
+	digifinex.symbolChunks = validSymbols.ChunkSymbols(30)
 
 	digifinex.log.Debug("Created new datasource")
 	return digifinex, nil
@@ -196,66 +211,45 @@ func (d *DigifinexClient) parseTicker(message []byte) ([]model.Ticker, error) {
 // -------------------------------------------------------------------------
 
 func (d *DigifinexClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
-	// 1. Fetch Available Symbols (O(1) Map)
-	availableMap, err := d.getAvailableSymbolsMap()
-	if err != nil {
-		d.log.Error("Failed to fetch available symbols", "error", err)
-		return err
-	}
 
 	// 2. Filter Symbols
-	var validMarkets []string
+	var markets []string
 	for _, req := range symbols {
-		// Digifinex Format: BASE_QUOTE (e.g. BTC_USDT)
-		// API returns lower case usually, but accepts upper case in subscribe.
-		// Let's normalize to Upper Case "BASE_QUOTE" for matching.
 		key := fmt.Sprintf("%s_%s", strings.ToUpper(req.Base), strings.ToUpper(req.Quote))
-
-		if _, exists := availableMap[key]; exists {
-			validMarkets = append(validMarkets, key)
-		}
+		markets = append(markets, key)
 	}
 
-	if len(validMarkets) == 0 {
+	if len(markets) == 0 {
 		return nil
 	}
 
-	// 3. Batch Subscribe
-	// Digifinex documentation says multiple symbols allowed.
-	// We'll batch 50 at a time.
-	chunkSize := 50
-	for i := 0; i < len(validMarkets); i += chunkSize {
-		end := i + chunkSize
-		if end > len(validMarkets) {
-			end = len(validMarkets)
-		}
+	id := d.subscriptionId.Add(1)
 
-		batch := validMarkets[i:end]
-		id := d.subscriptionId.Add(1)
-
-		subMessage := map[string]interface{}{
-			"method": "ticker.subscribe",
-			"id":     id,
-			"params": batch,
-		}
-
-		// Throttle
-		time.Sleep(50 * time.Millisecond)
-
-		// Note: Digifinex uses Binary Frames for receiving, but Text Frames for sending usually work.
-		// If strict binary send is required, one would marshal to bytes.
-		// Most libraries support sending Text to Digifinex.
-		wsClient.TrySendMessageJSON(websocket.TextMessage, subMessage)
+	subMessage := map[string]interface{}{
+		"method": "ticker.subscribe",
+		"id":     id,
+		"params": markets,
 	}
 
-	d.log.Debug("Subscribed ticker symbols", "count", len(validMarkets))
+	// Throttle
+	time.Sleep(50 * time.Millisecond)
+
+	data, err := sonic.Marshal(subMessage)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	wsClient.SendMessage(ctx, internal.WsMessage{Type: websocket.TextMessage, Message: data, Err: nil})
+	cancel()
+
+	d.log.Debug("Subscribed ticker symbols", "count", len(markets))
 	return nil
 }
 
-func (d *DigifinexClient) getAvailableSymbolsMap() (map[string]bool, error) {
+func (d *DigifinexClient) getAvailableSymbolsMap(initCtx context.Context) (map[string]bool, error) {
 	reqUrl := d.apiEndpoint + "/v3/markets"
 
-	ctx, cancel := context.WithTimeout(d.ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(initCtx, 10*time.Second)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqUrl, nil)
@@ -339,7 +333,7 @@ func (d *DigifinexClient) startWatchdog() {
 			case <-ticker.C:
 				last := d.lastTimestamp.Load()
 				if time.Since(time.UnixMilli(last)) > timeout {
-					d.log.Warn("Watchdog: No tickers received", "timeout", timeout)
+					d.log.Warn("Watchdog: No tickers received", "timeout", timeout.String())
 					d.lastTimestamp.Store(time.Now().UnixMilli())
 
 					for _, ws := range d.wsClients {

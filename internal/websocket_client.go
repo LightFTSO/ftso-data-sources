@@ -170,7 +170,7 @@ func (c *WebSocketClient) connectionSupervisor() {
 		default:
 			// Attempt connection
 			if err := c.connectAndServe(); err != nil {
-				c.log.Error("Connection lost/failed", "error", err, "retry_in", reconnectDelay)
+				c.log.Error("Connection lost/failed", "error", err, "retry_in", reconnectDelay.String())
 
 				// Notify disconnect handler
 				if c.onDisconnect != nil {
@@ -182,14 +182,9 @@ func (c *WebSocketClient) connectionSupervisor() {
 				case <-c.ctx.Done():
 					return
 				case <-time.After(reconnectDelay):
-					// Exponential backoff with jitter could go here
-					reconnectDelay *= 2
-					if reconnectDelay > maxReconnectDelay {
-						reconnectDelay = maxReconnectDelay
-					}
+					reconnectDelay = min(maxReconnectDelay, reconnectDelay*2)
 				}
 			} else {
-				// If connectAndServe returns nil (clean exit), reset delay
 				reconnectDelay = baseReconnectDelay
 			}
 		}

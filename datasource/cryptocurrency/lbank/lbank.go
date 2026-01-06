@@ -1,19 +1,17 @@
 package lbank
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"log/slog"
-
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
-	"github.com/hashicorp/go-multierror"
-	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
@@ -21,73 +19,86 @@ import (
 )
 
 type LbankClient struct {
-	name               string
-	W                  *sync.WaitGroup
-	TickerTopic        *tickertopic.TickerTopic
-	wsClients          []*internal.WebSocketClient
-	wsEndpoint         string
-	SymbolList         model.SymbolList
-	symbolChunks       []model.SymbolList
-	lastTimestamp      time.Time
-	lastTimestampMutex sync.Mutex
-	log                *slog.Logger
+	name string
+	log  *slog.Logger
 
-	pingInterval time.Duration
+	// Core
+	TickerTopic *tickertopic.TickerTopic
+	W           *sync.WaitGroup
+	wsClients   []*internal.WebSocketClient
 
+	// Config
+	wsEndpoint   string
+	symbolChunks []model.SymbolList
+
+	// State
+	lastTimestamp  atomic.Int64 // UnixMilli
 	subscriptionId atomic.Uint64
+	isRunning      bool
 	tzInfo         *time.Location
 
-	isRunning        bool
-	clientClosedChan *broadcast.Broadcaster
+	// Lifecycle
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
-func NewLbankClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*LbankClient, error) {
+func NewLbankClient(options map[string]any, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*LbankClient, error) {
 	wsEndpoint := "wss://www.lbkex.net/ws/V2/"
 
+	// LBank sends time strings in Asia/Shanghai.
+	// If loading fails (e.g. minimal docker image), fallback to UTC or FixedZone.
 	shanghaiTimezone, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
-		return nil, multierror.Append(fmt.Errorf("error loading timezone information"), err)
+		slog.Warn("Failed to load Asia/Shanghai timezone, using FixedZone +8", "error", err)
+		shanghaiTimezone = time.FixedZone("CST", 8*60*60)
 	}
 
-	lbank := LbankClient{
-		name:             "lbank",
-		log:              slog.Default().With(slog.String("datasource", "lbank")),
-		W:                w,
-		TickerTopic:      tickerTopic,
-		wsClients:        []*internal.WebSocketClient{},
-		wsEndpoint:       wsEndpoint,
-		SymbolList:       symbolList.Crypto,
-		pingInterval:     30 * time.Second,
-		tzInfo:           shanghaiTimezone,
-		clientClosedChan: broadcast.NewBroadcaster(0),
+	lbank := &LbankClient{
+		name:        "lbank",
+		log:         slog.Default().With(slog.String("datasource", "lbank")),
+		W:           w,
+		TickerTopic: tickerTopic,
+		wsClients:   []*internal.WebSocketClient{},
+		wsEndpoint:  wsEndpoint,
+		tzInfo:      shanghaiTimezone,
 	}
-	lbank.symbolChunks = lbank.SymbolList.ChunkSymbols(1024)
+
+	// LBank requires 1 frame per symbol subscription.
+	// 500 connections is too many. LBank supports ~1000 subs per connection if throttled.
+	// We'll chunk by 500.
+	lbank.symbolChunks = symbolList.Crypto.ChunkSymbols(500)
+
 	lbank.log.Debug("Created new datasource")
-	return &lbank, nil
+	return lbank, nil
 }
 
 func (d *LbankClient) Connect() error {
+	if d.isRunning {
+		return nil
+	}
 	d.isRunning = true
+	d.ctx, d.cancel = context.WithCancel(context.Background())
 	d.W.Add(1)
 
+	d.lastTimestamp.Store(time.Now().UnixMilli())
+
 	for _, chunk := range d.symbolChunks {
+		currentChunk := chunk
 		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
 		wsClient.SetMessageHandler(d.onMessage)
 		wsClient.SetLogger(d.log)
+
 		wsClient.SetOnConnect(func() error {
-			err := d.SubscribeTickers(wsClient, chunk)
-			if err != nil {
-				d.log.Error("Error subscribing to tickers")
-				return err
-			}
-			return err
+			return d.SubscribeTickers(wsClient, currentChunk)
 		})
+
 		d.wsClients = append(d.wsClients, wsClient)
 		wsClient.Start()
 	}
 
-	d.setPing()
-	d.setLastTickerWatcher()
+	d.startPingLoop()
+	d.startWatchdog()
+	d.log.Info("LBank datasource connected", "connections", len(d.wsClients))
 
 	return nil
 }
@@ -96,13 +107,16 @@ func (d *LbankClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
+	d.log.Info("LBank closing...")
+
+	d.cancel()
+
 	for _, wsClient := range d.wsClients {
 		wsClient.Close()
 	}
-	d.isRunning = false
-	d.clientClosedChan.Send(true)
-	d.W.Done()
 
+	d.W.Done()
+	d.isRunning = false
 	return nil
 }
 
@@ -110,51 +124,59 @@ func (d *LbankClient) IsRunning() bool {
 	return d.isRunning
 }
 
+func (d *LbankClient) GetName() string {
+	return d.name
+}
+
+// -------------------------------------------------------------------------
+// Message Handling
+// -------------------------------------------------------------------------
+
 func (d *LbankClient) onMessage(message internal.WsMessage) {
+	if message.Type != websocket.TextMessage {
+		return
+	}
+
 	msg := string(message.Message)
 
-	if message.Type == websocket.TextMessage {
-		if strings.Contains(msg, `"type":"tick"`) {
-			ticker, err := d.parseTicker(message.Message)
-			if err != nil {
-				d.log.Error("Error parsing ticker",
-					"ticker", ticker, "error", err.Error())
-				return
-			}
-			d.lastTimestampMutex.Lock()
-			d.lastTimestamp = time.Now()
-			d.lastTimestampMutex.Unlock()
-
-			d.TickerTopic.Send(ticker)
-
+	// LBank sends: {"type":"tick", "pair":"btc_usdt", ...}
+	if strings.Contains(msg, `"type":"tick"`) {
+		ticker, err := d.parseTicker(message.Message)
+		if err != nil {
+			return
 		}
+
+		d.lastTimestamp.Store(time.Now().UnixMilli())
+		d.TickerTopic.Send(ticker)
 	}
 }
 
-func (d *LbankClient) parseTicker(message []byte) (*model.Ticker, error) {
-	var newTickerEvent wsTickerMessage
-	err := sonic.Unmarshal(message, &newTickerEvent)
-	if err != nil {
-		d.log.Error(err.Error())
-		return &model.Ticker{}, err
+func (d *LbankClient) parseTicker(message []byte) (model.Ticker, error) {
+	var event wsTickerMessage
+	if err := sonic.Unmarshal(message, &event); err != nil {
+		return model.Ticker{}, err
 	}
 
-	symbol := model.ParseSymbol(newTickerEvent.Pair)
-	ts, err := time.ParseInLocation("2006-01-02T15:04:05.999", newTickerEvent.Timestamp, d.tzInfo)
+	symbol := model.ParseSymbol(event.Pair)
+
+	// LBank Format: "2024-01-01T12:00:00.123" (China Time)
+	ts, err := time.ParseInLocation("2006-01-02T15:04:05.999", event.Timestamp, d.tzInfo)
 	if err != nil {
-		return nil, err
+		// Fallback to current time if parse fails
+		ts = time.Now()
 	}
 
-	ticker, err := model.NewTicker(newTickerEvent.Ticker.LastPrice,
+	return model.NewTicker(
+		event.Ticker.LastPrice,
 		symbol,
-		d.GetName(),
-		ts)
-	if err != nil {
-		d.log.Error("Error parsing ticker", "error", err)
-		return nil, err
-	}
-	return ticker, err
+		d.name,
+		ts,
+	)
 }
+
+// -------------------------------------------------------------------------
+// Subscription
+// -------------------------------------------------------------------------
 
 func (d *LbankClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
 	for _, v := range symbols {
@@ -163,66 +185,71 @@ func (d *LbankClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbo
 			"subscribe": "tick",
 			"pair":      fmt.Sprintf("%s_%s", strings.ToUpper(v.Base), strings.ToUpper(v.Quote)),
 		}
-		wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+
+		// Throttle: 1ms delay prevents "write buffer full"
+		time.Sleep(1 * time.Millisecond)
+
+		wsClient.TrySendMessageJSON(websocket.TextMessage, subMessage)
 	}
 
-	d.log.Debug("Subscribed ticker symbols", "symbols", len(symbols))
+	d.log.Debug("Subscribed ticker symbols", "count", len(symbols))
 	return nil
 }
 
-func (d *LbankClient) GetName() string {
-	return d.name
-}
+// -------------------------------------------------------------------------
+// Heartbeat & Watchdog
+// -------------------------------------------------------------------------
 
-func (d *LbankClient) setLastTickerWatcher() {
-	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	d.lastTimestampMutex.Lock()
-	d.lastTimestamp = time.Now()
-	d.lastTimestampMutex.Unlock()
-
-	timeout := (30 * time.Second)
+func (d *LbankClient) startPingLoop() {
+	d.W.Add(1)
 	go func() {
-		defer lastTickerIntervalTimer.Stop()
+		defer d.W.Done()
+		// LBank expects {"action":"ping", "ping":"UUID"}
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
 		for {
 			select {
-			case <-d.clientClosedChan.Listen().Channel():
-				d.log.Debug("last ticker received watcher goroutine exiting")
+			case <-d.ctx.Done():
 				return
-			case <-lastTickerIntervalTimer.C:
-				now := time.Now()
-				d.lastTimestampMutex.Lock()
-				diff := now.Sub(d.lastTimestamp)
-				d.lastTimestampMutex.Unlock()
-
-				if diff > timeout {
-					// no tickers received in a while, attempt to reconnect
-					d.lastTimestampMutex.Lock()
-					d.lastTimestamp = time.Now()
-					d.lastTimestampMutex.Unlock()
-
-					d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-
-					for _, wsClient := range d.wsClients {
-						wsClient.Reconnect()
-					}
+			case <-ticker.C:
+				id := d.subscriptionId.Add(1)
+				pingMsg := map[string]interface{}{
+					"action": "ping",
+					"ping":   fmt.Sprintf("%d", id),
+				}
+				for _, wsClient := range d.wsClients {
+					wsClient.TrySendMessage(internal.WsMessage{
+						Type:    websocket.TextMessage,
+						Message: func() []byte { b, _ := sonic.Marshal(pingMsg); return b }(),
+					})
 				}
 			}
 		}
 	}()
 }
-func (d *LbankClient) setPing() {
-	ticker := time.NewTicker(d.pingInterval)
+
+func (d *LbankClient) startWatchdog() {
+	d.W.Add(1)
 	go func() {
+		defer d.W.Done()
+		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
-		for range ticker.C {
-			for _, wsClient := range d.wsClients {
-				id := d.subscriptionId.Add(1)
-				msg := map[string]any{
-					"ping":   fmt.Sprintf("%d", id),
-					"action": "ping",
-				}
-				if err := wsClient.SendMessageJSON(websocket.TextMessage, msg); err != nil {
-					d.log.Warn("Failed to send ping", "error", err)
+		timeout := 30 * time.Second
+
+		for {
+			select {
+			case <-d.ctx.Done():
+				return
+			case <-ticker.C:
+				last := d.lastTimestamp.Load()
+				if time.Since(time.UnixMilli(last)) > timeout {
+					d.log.Warn("Watchdog: No tickers received", "timeout", timeout)
+					d.lastTimestamp.Store(time.Now().UnixMilli())
+
+					for _, ws := range d.wsClients {
+						ws.Reconnect()
+					}
 				}
 			}
 		}

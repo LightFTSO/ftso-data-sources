@@ -1,21 +1,11 @@
 package xt
 
-type MarketInfo struct {
-	Data []DigifinexMarket `json:"data"`
-}
-
-type DigifinexMarket struct {
-	Market string `json:"market"`
-}
-
 type WsTickerMessage struct {
-	Topic string     `json:"topic"`
-	Event string     `json:"event"`
-	Data  TickerData `json:"data"`
+	Data XtTickerData `json:"data"`
 }
 
-type TickerData struct {
-	Symbol    string `json:"s"`
-	LastPrice string `json:"c"`
-	Timestamp int64  `json:"t"`
+type XtTickerData struct {
+	Symbol    string `json:"s"` // "btc_usdt"
+	LastPrice string `json:"c"` // "30000.00"
+	Timestamp int64  `json:"t"` // ms
 }

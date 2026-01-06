@@ -6,8 +6,11 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/gorilla/websocket"
 )
 
+// WsMessage remains the same for internal Client communication
 type WsMessage struct {
 	Type    int
 	Message []byte
@@ -16,32 +19,56 @@ type WsMessage struct {
 
 type WebsocketServer struct {
 	Address    string
-	hub        Hub
+	hub        *Hub // Changed to pointer to share state safely
 	wsEndpoint string
 }
 
 func NewWebsocketServer(port int, wsEndpoint string) *WebsocketServer {
-	server := &WebsocketServer{
+	return &WebsocketServer{
 		Address:    fmt.Sprintf(":%d", port),
 		wsEndpoint: wsEndpoint,
-		hub:        *newHub(),
+		hub:        newHub(),
 	}
-
-	return server
 }
 
 func (ws *WebsocketServer) Connect() error {
 	go ws.hub.run()
 	http.HandleFunc(ws.wsEndpoint, func(w http.ResponseWriter, r *http.Request) {
-		serveWs(&ws.hub, w, r)
+		serveWs(ws.hub, w, r) // serveWs expects *Hub
 	})
-
 	return nil
 }
 
-func (ws *WebsocketServer) BroadcastMessage(messageType int, message []byte) error {
-	ws.hub.broadcast <- &WsMessage{Type: messageType, Message: message}
-	return nil
+// BroadcastJSON is the new optimized method.
+// Pass the struct directly (e.g., model.Ticker).
+func (ws *WebsocketServer) BroadcastJSON(v interface{}) {
+	// Optimization: Don't even send to channel if count is 0.
+	// This saves channel lock overhead.
+	if ws.hub.clientCount.Load() == 0 {
+		return
+	}
+
+	ws.hub.broadcast <- LazyMessage{
+		Type: websocket.TextMessage,
+		Data: v,
+	}
+}
+
+// BroadcastBytes keeps compatibility if you have pre-serialized data
+func (ws *WebsocketServer) BroadcastBytes(messageType int, message []byte) {
+	if ws.hub.clientCount.Load() == 0 {
+		return
+	}
+
+	ws.hub.broadcast <- LazyMessage{
+		Type: messageType,
+		Data: message,
+	}
+}
+
+// HasClients allows external services to check connection status cheaply
+func (ws *WebsocketServer) HasClients() bool {
+	return ws.hub.clientCount.Load() > 0
 }
 
 func Hook() {

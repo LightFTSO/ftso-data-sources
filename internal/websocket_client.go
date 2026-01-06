@@ -13,8 +13,15 @@ import (
 )
 
 const (
-	reconnectDelay = 1 * time.Second
-	writeWait      = 1 * time.Second
+	// Time allowed to write a message to the peer.
+	writeWait = 5 * time.Second
+	// Time allowed to read the next pong message from the peer.
+	pongWait = 60 * time.Second
+	// Send pings to peer with this period. Must be less than pongWait.
+	pingPeriod = (pongWait * 9) / 10
+	// Base reconnection delay
+	baseReconnectDelay = 1 * time.Second
+	maxReconnectDelay  = 30 * time.Second
 )
 
 type WsMessage struct {
@@ -22,261 +29,321 @@ type WsMessage struct {
 	Message []byte
 	Err     error
 }
+
 type WsMessageHandler func(message WsMessage)
 
 type WebSocketClient struct {
-	url          string
-	conn         *websocket.Conn
-	send         chan WsMessage
-	receive      chan WsMessage
-	reconnect    chan struct{}
-	mu           sync.Mutex
-	once         sync.Once
-	reconnecting bool
-	Closed       bool
+	url string
+	// Guards the connection reference
+	mu   sync.RWMutex
+	conn *websocket.Conn
+
+	send    chan WsMessage
+	receive chan WsMessage
+
+	// Lifecycle management
+	ctx    context.Context
+	cancel context.CancelFunc
+
+	// Handlers
 	onConnect    func() error
 	onDisconnect func() error
 	onMessage    func(WsMessage)
-	log          *slog.Logger
-	ctx          context.Context
-	cancel       context.CancelFunc
+
+	log *slog.Logger
 }
 
 func NewWebSocketClient(url string) *WebSocketClient {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &WebSocketClient{
-		url:       url,
-		send:      make(chan WsMessage, 256),
-		receive:   make(chan WsMessage, 256),
-		reconnect: make(chan struct{}, 1),
-		ctx:       ctx,
-		cancel:    cancel,
-		log:       slog.Default(),
+		url:     url,
+		send:    make(chan WsMessage, 512), // Buffered to handle bursts
+		receive: make(chan WsMessage, 512),
+		ctx:     ctx,
+		cancel:  cancel,
+		log:     slog.Default(),
 	}
 }
 
-func (c *WebSocketClient) SendMessage(message WsMessage) {
+// Start begins the connection supervisor and the message processor.
+// It is non-blocking.
+func (c *WebSocketClient) Start() {
+	// 1. Start the Message Processor (Runs once for the life of the client)
+	go c.messageProcessor()
+
+	// 2. Start the Connection Supervisor (Manages reconnections)
+	go c.connectionSupervisor()
+}
+
+func (c *WebSocketClient) Close() {
+	c.cancel() // Signals everything to stop
+}
+
+func (c *WebSocketClient) Reconnect() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.Closed {
-		return
-	}
-	select {
-	case c.send <- message:
-	default:
-		c.log.Warn("SendMessage: send channel is full, dropping message")
+
+	if c.conn != nil {
+		c.log.Info("Forcing reconnection...")
+		// Closing the connection causes readPump/writePump to error out.
+		// connectAndServe will return, and the supervisor loop will retry.
+		c.conn.Close()
 	}
 }
 
-func (c *WebSocketClient) SendMessageJSON(msgType int, message interface{}) error {
+func (c *WebSocketClient) SendMessageJSON(ctx context.Context, msgType int, message interface{}) error {
 	data, err := sonic.Marshal(message)
 	if err != nil {
 		return err
 	}
-
-	c.SendMessage(WsMessage{Type: msgType, Message: data})
-
-	return nil
+	// Non-blocking send with drop logic to prevent backpressure blocking the caller
+	select {
+	case <-c.ctx.Done():
+		// The client itself was closed/cancelled
+		return fmt.Errorf("websocket client is closed")
+	case <-ctx.Done():
+		// The caller gave up (timeout)
+		return ctx.Err()
+	case c.send <- WsMessage{Type: msgType, Message: data}:
+		// Success
+		return nil
+	default:
+		c.log.Warn("SendMessageJSON: send channel full, dropping message")
+		return fmt.Errorf("send channel full")
+	}
 }
 
-func (c *WebSocketClient) Start() {
-	go func() {
-		for {
-			select {
-			case <-c.ctx.Done():
-				c.log.Info("WebSocket client context canceled")
-				return
-			default:
-				if err := c.connect(); err != nil {
-					c.log.Error("connection error:", "error", err)
-					time.Sleep(reconnectDelay)
-					continue
+func (c *WebSocketClient) SendMessage(ctx context.Context, message WsMessage) error {
+	select {
+	case <-c.ctx.Done():
+		// The client itself was closed/cancelled
+		return fmt.Errorf("websocket client is closed")
+	case <-ctx.Done():
+		// The caller gave up (timeout)
+		return ctx.Err()
+	case c.send <- message:
+		// Success
+		return nil
+	}
+}
+
+func (c *WebSocketClient) TrySendMessage(message WsMessage) error {
+	select {
+	case <-c.ctx.Done():
+		return fmt.Errorf("websocket client is closed")
+	case c.send <- message:
+		return nil
+	default:
+		c.log.Warn("TrySendMessage: send channel full, dropping message")
+		return fmt.Errorf("send channel full")
+	}
+}
+
+func (c *WebSocketClient) TrySendMessageJSON(msgType int, message interface{}) error {
+	data, err := sonic.Marshal(message)
+	if err != nil {
+		return err
+	}
+	select {
+	case <-c.ctx.Done():
+		return fmt.Errorf("websocket client is closed")
+	case c.send <- WsMessage{Type: msgType, Message: data}:
+		// Success
+		return nil
+	default:
+		c.log.Warn("TrySendMessage: send channel full, dropping message")
+		return fmt.Errorf("send channel full")
+	}
+}
+
+// -------------------------------------------------------------------------
+// Core Supervisor Loop
+// -------------------------------------------------------------------------
+
+func (c *WebSocketClient) connectionSupervisor() {
+	reconnectDelay := baseReconnectDelay
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		default:
+			// Attempt connection
+			if err := c.connectAndServe(); err != nil {
+				c.log.Error("Connection lost/failed", "error", err, "retry_in", reconnectDelay)
+
+				// Notify disconnect handler
+				if c.onDisconnect != nil {
+					c.onDisconnect()
 				}
 
+				// Backoff sleep
 				select {
 				case <-c.ctx.Done():
-					c.log.Info("Closing WebSocket client")
-					c.handleDisconnect()
 					return
-				case <-c.reconnect:
-					time.Sleep(reconnectDelay)
-					c.log.Info("Reconnecting...")
-					continue
+				case <-time.After(reconnectDelay):
+					// Exponential backoff with jitter could go here
+					reconnectDelay *= 2
+					if reconnectDelay > maxReconnectDelay {
+						reconnectDelay = maxReconnectDelay
+					}
 				}
+			} else {
+				// If connectAndServe returns nil (clean exit), reset delay
+				reconnectDelay = baseReconnectDelay
 			}
 		}
-	}()
+	}
 }
 
-func (c *WebSocketClient) ExplicitClose() {
-	c.Closed = true
-	c.cancel()
-}
-
-func (c *WebSocketClient) Close() {
-	c.once.Do(func() {
-		c.mu.Lock()
-		c.Closed = true
-		c.mu.Unlock()
-		c.cancel()
-		c.handleDisconnect()
-	})
-}
-
-func (c *WebSocketClient) Reconnect() {
-	c.handleDisconnect()
-	c.handleReconnection()
-}
-
-func (c *WebSocketClient) SetOnConnect(handler func() error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.onConnect = handler
-}
-
-func (c *WebSocketClient) SetOnDisconnect(handler func() error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.onDisconnect = handler
-}
-
-func (ws *WebSocketClient) SetLogger(logger *slog.Logger) {
-	ws.log = logger
-}
-
-func (ws *WebSocketClient) SetMessageHandler(handler WsMessageHandler) {
-	ws.onMessage = handler
-}
-
-func (c *WebSocketClient) connect() error {
+// connectAndServe establishes the connection and blocks until it fails.
+func (c *WebSocketClient) connectAndServe() error {
 	u, err := url.Parse(c.url)
 	if err != nil {
 		return err
 	}
 
-	var conn *websocket.Conn
-	for {
-		conn, _, err = websocket.DefaultDialer.Dial(u.String(), nil)
-		if err == nil {
-			conn.SetReadLimit(655350)
-			c.mu.Lock()
-			c.conn = conn
-			c.reconnecting = false
-			c.mu.Unlock()
-			break
-		}
-		c.log.Error("Error connecting. Retrying in 1 second...", "err", err)
-		select {
-		case <-c.ctx.Done():
-			return c.ctx.Err()
-		case <-time.After(time.Second):
-		}
+	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	if err != nil {
+		return err
 	}
 
-	if c.onMessage == nil {
-		return fmt.Errorf("onMessage handler not set")
-	}
+	// Setup Connection Properties
+	conn.SetReadLimit(2 * 1024 * 1024) // 2MB
+	conn.SetReadDeadline(time.Now().Add(pongWait))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
 
-	go c.startListening()
-	go c.writePump()
-	go c.readPump()
+	c.mu.Lock()
+	c.conn = conn
+	c.mu.Unlock()
 
-	c.log.Info("Connected")
-
+	c.log.Info("WebSocket Connected", "url", c.url)
 	if c.onConnect != nil {
-		c.onConnect()
+		if err := c.onConnect(); err != nil {
+			c.log.Error("OnConnect handler failed", "error", err)
+			// Don't kill connection just because handler failed, usually
+		}
 	}
 
-	return nil
+	// Create a child context for this specific connection session
+	// If either Read or Write pump fails, we cancel this context to kill the other.
+	sessionCtx, cancelSession := context.WithCancel(c.ctx)
+	defer func() {
+		cancelSession()
+		c.mu.Lock()
+		if c.conn != nil {
+			c.conn.Close()
+			c.conn = nil
+		}
+		c.mu.Unlock()
+	}()
+
+	// Error channel to catch whichever pump fails first
+	errChan := make(chan error, 2)
+
+	go c.readPump(sessionCtx, conn, errChan)
+	go c.writePump(sessionCtx, conn, errChan)
+
+	// Block until one of the pumps returns an error or context is canceled
+	select {
+	case <-c.ctx.Done():
+		return nil
+	case err := <-errChan:
+		return err
+	}
 }
 
-func (c *WebSocketClient) readPump() {
-	defer c.handleReconnection()
+// -------------------------------------------------------------------------
+// Pumps
+// -------------------------------------------------------------------------
 
+func (c *WebSocketClient) readPump(ctx context.Context, conn *websocket.Conn, errChan chan<- error) {
 	for {
-		select {
-		case <-c.ctx.Done():
+		// No select needed here because ReadMessage fails if connection closes
+		msgType, message, err := conn.ReadMessage()
+		if err != nil {
+			errChan <- fmt.Errorf("read error: %w", err)
 			return
-		default:
-			msgType, message, err := c.conn.ReadMessage()
-			if err != nil {
-				c.log.Error("read error", "error", err.Error())
-				c.handleDisconnect()
-				return
-			}
-			select {
-			case c.receive <- WsMessage{Type: msgType, Message: message}:
-			case <-c.ctx.Done():
-				return
-			}
+		}
+
+		select {
+		case c.receive <- WsMessage{Type: msgType, Message: message}:
+		case <-ctx.Done():
+			return
 		}
 	}
 }
 
-func (c *WebSocketClient) writePump() {
-	defer c.handleReconnection()
+func (c *WebSocketClient) writePump(ctx context.Context, conn *websocket.Conn, errChan chan<- error) {
+	ticker := time.NewTicker(pingPeriod)
+	defer ticker.Stop()
 
 	for {
 		select {
-		case <-c.ctx.Done():
+		case <-ctx.Done():
 			return
+
 		case message := <-c.send:
-			if err := c.write(message.Type, message.Message); err != nil {
-				c.log.Error("write error", "error", err)
-				c.handleDisconnect()
+			conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := conn.WriteMessage(message.Type, message.Message); err != nil {
+				errChan <- fmt.Errorf("write error: %w", err)
+				return
+			}
+
+		case <-ticker.C:
+			conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				errChan <- fmt.Errorf("ping error: %w", err)
 				return
 			}
 		}
 	}
 }
 
-func (c *WebSocketClient) write(messageType int, data []byte) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn == nil {
-		return fmt.Errorf("connection is nil")
-	}
-	c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-	return c.conn.WriteMessage(messageType, data)
-}
+// -------------------------------------------------------------------------
+// Consumers
+// -------------------------------------------------------------------------
 
-func (c *WebSocketClient) handleReconnection() {
-	if c.Closed {
-		return
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if !c.reconnecting {
-		c.reconnecting = true
-		select {
-		case c.reconnect <- struct{}{}:
-		default:
-		}
-	}
-}
-
-func (c *WebSocketClient) handleDisconnect() {
-	if c.Closed {
-		return
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.conn != nil {
-		c.conn.Close()
-		c.conn = nil
-	}
-	if c.onDisconnect != nil {
-		c.onDisconnect()
-	}
-}
-
-func (c *WebSocketClient) startListening() {
+func (c *WebSocketClient) messageProcessor() {
 	for {
 		select {
 		case <-c.ctx.Done():
 			return
 		case msg := <-c.receive:
-			c.onMessage(msg)
+			if c.onMessage != nil {
+				// NOTE: This blocks the read pump if onMessage is slow.
+				// If you need high throughput with slow handlers, spawn a goroutine here
+				// or use a worker pool in the layer above.
+				c.onMessage(msg)
+			}
 		}
 	}
+}
+
+// Setters
+func (ws *WebSocketClient) SetLogger(logger *slog.Logger) {
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	ws.log = logger
+}
+
+func (ws *WebSocketClient) SetOnConnect(handler func() error) {
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	ws.onConnect = handler
+}
+
+func (ws *WebSocketClient) SetOnDisconnect(handler func() error) {
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	ws.onDisconnect = handler
+}
+
+func (ws *WebSocketClient) SetMessageHandler(handler WsMessageHandler) {
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	ws.onMessage = handler
 }

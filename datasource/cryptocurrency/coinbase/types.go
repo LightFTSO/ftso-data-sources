@@ -1,11 +1,5 @@
 package coinbase
 
-type CoinbaseTicker struct {
-	LastPrice string `json:"price"`
-	ProductId string `json:"product_id"`
-	Timestamp string `json:"time"`
-}
-
 type CoinbaseSubscriptionSuccessMessage struct {
 	Type string `json:"type"`
 
@@ -13,4 +7,11 @@ type CoinbaseSubscriptionSuccessMessage struct {
 		Name       string   `json:"ticker"`
 		ProductIds []string `json:"product_ids"`
 	}
+}
+
+type CoinbaseTicker struct {
+	Type      string `json:"type"`
+	ProductId string `json:"product_id"`
+	LastPrice string `json:"price"`
+	Timestamp string `json:"time"`
 }

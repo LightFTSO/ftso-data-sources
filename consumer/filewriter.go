@@ -13,7 +13,7 @@ import (
 )
 
 type FileConsumerOptions struct {
-	Enabled        bool
+	Enabled        bool   `mapstructure:"enabled"`
 	OutputFilename string `mapstructure:"filename"`
 }
 

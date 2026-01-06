@@ -1,11 +1,10 @@
 package hitbtc
 
-type wsTickerMessage struct {
-	Channel string                `json:"ch"`
-	Data    map[string]tickerData `json:"data"`
+type WsTickerMessage struct {
+	Data map[string]HitbtcTickerData `json:"data"`
 }
 
-type tickerData struct {
-	Timestamp int64  `json:"t"` // Timestamp in milliseconds
-	LastPrice string `json:"c"` // Last price
+type HitbtcTickerData struct {
+	LastPrice string `json:"c"` // c = Close price
+	Timestamp int64  `json:"t"` // t = Timestamp (ms)
 }

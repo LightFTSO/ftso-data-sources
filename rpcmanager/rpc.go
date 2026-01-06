@@ -14,7 +14,10 @@ import (
 	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
-// RPC Arguments and Reply Structures
+// -----------------------------------------------------------------------------
+// RPC Data Structures
+// -----------------------------------------------------------------------------
+
 type DataSourceArgs struct {
 	Options datasource.DataSourceOptions
 }
@@ -50,7 +53,10 @@ type ShutdownReply struct {
 	Message string
 }
 
-// RPCManager handles RPC operations for data sources and assets
+// -----------------------------------------------------------------------------
+// RPC Manager
+// -----------------------------------------------------------------------------
+
 type RPCManager struct {
 	GlobalConfig  config.ConfigOptions
 	DataSources   map[string]datasource.FtsoDataSource
@@ -58,20 +64,97 @@ type RPCManager struct {
 	TickerTopic   *tickertopic.TickerTopic
 
 	Mu sync.Mutex
-	Wg sync.WaitGroup
+	Wg *sync.WaitGroup
 }
 
-// TurnOnDataSource activates an existing data source
+// -----------------------------------------------------------------------------
+// Data Source Management
+// -----------------------------------------------------------------------------
+
+// InitDataSources initializes all data sources defined in the config.
+// It is safe to call this concurrently as it acquires the lock.
+func (m *RPCManager) InitDataSources() error {
+	m.Mu.Lock()
+	defer m.Mu.Unlock()
+	return m.initDataSourcesLocked()
+}
+
+// initDataSourcesLocked is the internal logic assuming lock is held.
+func (m *RPCManager) initDataSourcesLocked() error {
+	enabledDataSources := m.GlobalConfig.Datasources
+
+	if len(enabledDataSources) < 1 {
+		if m.GlobalConfig.Env != "development" {
+			return errors.New("no data sources defined in configuration")
+		}
+		slog.Warn("No data sources enabled (Development Mode)")
+		return nil
+	}
+
+	allSymbols := symbols.GetAllSymbols(
+		m.CurrentAssets.Crypto,
+		m.CurrentAssets.Commodities,
+		m.CurrentAssets.Forex,
+		m.CurrentAssets.Stocks,
+	)
+
+	// 1. Build Data Sources
+	for _, sourceOpt := range enabledDataSources {
+		// We pass m.Wg to the datasource. The datasource is responsible for
+		// calling Add(1) when it connects and Done() when it disconnects/closes.
+		src, err := datasource.BuildDataSource(sourceOpt, allSymbols, m.TickerTopic, m.Wg)
+		if err != nil {
+			slog.Error("Failed to build data source", "source", sourceOpt.Source, "error", err)
+			continue
+		}
+		m.DataSources[src.GetName()] = src
+	}
+
+	// 2. Connect Data Sources
+	for _, ds := range m.DataSources {
+		// Launch connection in background.
+		// Note: The DataSource implementation is responsible for managing its own
+		// Goroutine lifecycle and WaitGroup usage.
+		go func(d datasource.FtsoDataSource) {
+			if err := d.Connect(); err != nil {
+				slog.Error("Data source connection failed", "source", d.GetName(), "error", err)
+			}
+		}(ds)
+	}
+
+	return nil
+}
+
+func (m *RPCManager) ReloadDataSources(args struct{}, reply *DataSourceReply) error {
+	m.Mu.Lock()
+	defer m.Mu.Unlock()
+
+	slog.Info("Reloading all data sources...")
+
+	// 1. Close existing
+	for name, ds := range m.DataSources {
+		if err := ds.Close(); err != nil {
+			slog.Warn("Error closing data source during reload", "source", name, "error", err)
+		}
+		delete(m.DataSources, name)
+	}
+
+	// 2. Re-initialize
+	if err := m.initDataSourcesLocked(); err != nil {
+		return err
+	}
+
+	reply.Message = "All data sources reloaded successfully"
+	return nil
+}
+
 func (m *RPCManager) TurnOnDataSource(name string, reply *DataSourceReply) error {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 
-	m.Wg.Add(1)
-	defer m.Wg.Done()
-
 	ds, exists := m.DataSources[name]
 	if !exists {
-		return errors.New("data source not found")
+		return fmt.Errorf("data source '%s' not found", name)
 	}
 
 	if ds.IsRunning() {
@@ -79,29 +162,23 @@ func (m *RPCManager) TurnOnDataSource(name string, reply *DataSourceReply) error
 		return nil
 	}
 
-	m.Wg.Add(1)
 	go func() {
-		defer m.Wg.Done()
 		if err := ds.Connect(); err != nil {
-			slog.Error("Data source encountered an error", "source", name, "error", err)
+			slog.Error("Failed to turn on data source", "source", name, "error", err)
 		}
 	}()
 
-	reply.Message = fmt.Sprintf("Data source '%s' turned on successfully", name)
+	reply.Message = fmt.Sprintf("Data source '%s' turned on", name)
 	return nil
 }
 
-// TurnOffDataSource deactivates an existing data source
 func (m *RPCManager) TurnOffDataSource(name string, reply *DataSourceReply) error {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 
-	m.Wg.Add(1)
-	defer m.Wg.Done()
-
 	ds, exists := m.DataSources[name]
 	if !exists {
-		return errors.New("data source not found")
+		return fmt.Errorf("data source '%s' not found", name)
 	}
 
 	if !ds.IsRunning() {
@@ -113,59 +190,50 @@ func (m *RPCManager) TurnOffDataSource(name string, reply *DataSourceReply) erro
 		return err
 	}
 
-	reply.Message = fmt.Sprintf("Data source '%s' turned off successfully", name)
+	reply.Message = fmt.Sprintf("Data source '%s' turned off", name)
 	return nil
 }
 
-// AddDataSource creates and starts a new data source
 func (m *RPCManager) AddDataSource(args DataSourceArgs, reply *DataSourceReply) error {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 
-	m.Wg.Add(1)
-	defer m.Wg.Done()
-
-	if _, exists := m.DataSources[args.Options.Source]; exists {
+	name := args.Options.Source
+	if _, exists := m.DataSources[name]; exists {
 		return errors.New("data source already exists")
 	}
 
 	allSymbols := symbols.GetAllSymbols(
-		m.getAssetList().Crypto,
-		m.getAssetList().Commodities,
-		m.getAssetList().Forex,
-		m.getAssetList().Stocks,
+		m.CurrentAssets.Crypto,
+		m.CurrentAssets.Commodities,
+		m.CurrentAssets.Forex,
+		m.CurrentAssets.Stocks,
 	)
 
-	src, err := datasource.BuildDataSource(args.Options, allSymbols, m.TickerTopic, &m.Wg)
+	src, err := datasource.BuildDataSource(args.Options, allSymbols, m.TickerTopic, m.Wg)
 	if err != nil {
 		return err
 	}
 
-	m.DataSources[args.Options.Source] = src
+	m.DataSources[name] = src
 
-	m.Wg.Add(1)
 	go func() {
-		defer m.Wg.Done()
 		if err := src.Connect(); err != nil {
-			slog.Error("Data source encountered an error", "source", args.Options.Source, "error", err)
+			slog.Error("Failed to connect new data source", "source", name, "error", err)
 		}
 	}()
 
-	reply.Message = fmt.Sprintf("Data source '%s' added and started successfully", args.Options.Source)
+	reply.Message = fmt.Sprintf("Data source '%s' added and started", name)
 	return nil
 }
 
-// RemoveDataSource stops and removes an existing data source
 func (m *RPCManager) RemoveDataSource(name string, reply *DataSourceReply) error {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 
-	m.Wg.Add(1)
-	defer m.Wg.Done()
-
 	ds, exists := m.DataSources[name]
 	if !exists {
-		return errors.New("data source not found")
+		return fmt.Errorf("data source '%s' not found", name)
 	}
 
 	if err := ds.Close(); err != nil {
@@ -173,187 +241,97 @@ func (m *RPCManager) RemoveDataSource(name string, reply *DataSourceReply) error
 	}
 
 	delete(m.DataSources, name)
-	reply.Message = "Data source removed successfully"
+	reply.Message = fmt.Sprintf("Data source '%s' removed", name)
 	return nil
 }
 
-// ReloadDataSources refreshes all data sources based on current configuration
-func (m *RPCManager) ReloadDataSources(args struct{}, reply *DataSourceReply) error {
-	m.Mu.Lock()
-	defer m.Mu.Unlock()
+// -----------------------------------------------------------------------------
+// Asset Management
+// -----------------------------------------------------------------------------
 
-	m.Wg.Add(1)
-	defer m.Wg.Done()
-
-	// Disconnect all existing data sources
-	for name, ds := range m.DataSources {
-		if err := ds.Close(); err != nil {
-			slog.Error("Error disconnecting data source", "source", name, "error", err)
-		}
-		delete(m.DataSources, name)
-	}
-
-	// Reinitialize data sources
-	if err := m.InitDataSources(); err != nil {
-		return err
-	}
-
-	reply.Message = "All data sources reloaded successfully"
-	return nil
-}
-
-// InitDataSources initializes data sources from the global configuration
-func (m *RPCManager) InitDataSources() error {
-	enabledDataSources := m.GlobalConfig.Datasources
-
-	m.Wg.Add(1)
-	defer m.Wg.Done()
-
-	if len(enabledDataSources) < 1 {
-		if m.GlobalConfig.Env != "development" {
-			return errors.New("no data sources defined in configuration")
-		}
-		slog.Warn("No data sources enabled, where will get the data from?")
-	}
-
-	// Create all data sources first
-	allSymbols := symbols.GetAllSymbols(
-		m.getAssetList().Crypto,
-		m.getAssetList().Commodities,
-		m.getAssetList().Forex,
-		m.getAssetList().Stocks,
-	)
-
-	for _, source := range enabledDataSources {
-		src, err := datasource.BuildDataSource(source, allSymbols, m.TickerTopic, &m.Wg)
-		if err != nil {
-			slog.Error("Error creating data source", "source", source.Source, "error", err)
-			continue
-		}
-		m.DataSources[src.GetName()] = src
-	}
-
-	// Then connect them all
-	for _, source := range enabledDataSources {
-		ds, exists := m.DataSources[source.Source]
-		if !exists {
-			continue
-		}
-
-		m.Wg.Add(1)
-		go func(ds datasource.FtsoDataSource) {
-			defer m.Wg.Done()
-			if err := ds.Connect(); err != nil {
-				slog.Error("Data source encountered an error", "source", ds.GetName(), "error", err)
-			}
-		}(ds)
-	}
-
-	return nil
-}
-
-// AddAsset adds new assets to the configuration
 func (m *RPCManager) AddAsset(args AssetsArgs, reply *AssetReply) error {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 
-	m.Wg.Add(1)
-	defer m.Wg.Done()
-
+	modified := false
 	for _, a := range args.Assets {
-		currentAssets, err := m.getAssetsByCategory(a.Category)
+		assetsPtr, err := m.getAssetSlicePtr(a.Category)
 		if err != nil {
 			return err
 		}
 
 		assetName := strings.ToUpper(a.AssetName)
-		if helpers.ItemInSlice(assetName, currentAssets) {
-			return errors.New("asset already exists")
+		if helpers.ItemInSlice(assetName, *assetsPtr) {
+			continue // Skip duplicates
 		}
 
-		// Add the asset to the appropriate category
-		switch a.Category {
-		case "crypto":
-			m.CurrentAssets.Crypto = append(currentAssets, assetName)
-		case "commodities":
-			m.CurrentAssets.Commodities = append(currentAssets, assetName)
-		case "forex":
-			m.CurrentAssets.Forex = append(currentAssets, assetName)
-		case "stocks":
-			m.CurrentAssets.Stocks = append(currentAssets, assetName)
-		}
+		*assetsPtr = append(*assetsPtr, assetName)
+		modified = true
 	}
 
-	m.GlobalConfig.Assets = m.CurrentAssets
+	if !modified {
+		reply.Message = "No new assets added (duplicates or invalid)"
+		return nil
+	}
 
-	// Reload data sources to recognize the new assets
+	// Update global config reference
+	m.updateAssetConfig()
+
+	// Persist to file
+	config.UpdateConfig(m.GlobalConfig)
+
+	// Hot Reload
 	if err := m.reloadDataSourcesLocked(); err != nil {
 		return err
 	}
 
-	msg := "Assets added successfully"
-	slog.Info(msg, "assets", args.Assets)
-	reply.Message = msg
-	config.UpdateConfig(m.GlobalConfig, true)
-
+	reply.Message = "Assets added and data sources reloaded"
+	slog.Info("Assets added via RPC", "assets", args.Assets)
 	return nil
 }
 
-// RemoveAsset removes assets from the configuration
 func (m *RPCManager) RemoveAsset(args AssetsArgs, reply *AssetReply) error {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 
-	m.Wg.Add(1)
-	defer m.Wg.Done()
-
+	modified := false
 	for _, a := range args.Assets {
-		currentAssets, err := m.getAssetsByCategory(a.Category)
+		assetsPtr, err := m.getAssetSlicePtr(a.Category)
 		if err != nil {
 			return err
 		}
 
 		assetName := strings.ToUpper(a.AssetName)
-		if !helpers.ItemInSlice(assetName, currentAssets) {
-			return errors.New("asset to remove does not exist")
+		if !helpers.ItemInSlice(assetName, *assetsPtr) {
+			continue
 		}
 
-		// Remove the asset from the appropriate category
-		switch a.Category {
-		case "crypto":
-			m.CurrentAssets.Crypto = helpers.RemoveFromSlice(m.CurrentAssets.Crypto, assetName)
-		case "commodities":
-			m.CurrentAssets.Commodities = helpers.RemoveFromSlice(m.CurrentAssets.Commodities, assetName)
-		case "forex":
-			m.CurrentAssets.Forex = helpers.RemoveFromSlice(m.CurrentAssets.Forex, assetName)
-		case "stocks":
-			m.CurrentAssets.Stocks = helpers.RemoveFromSlice(m.CurrentAssets.Stocks, assetName)
-		}
+		*assetsPtr = helpers.RemoveFromSlice(*assetsPtr, assetName)
+		modified = true
 	}
 
-	m.GlobalConfig.Assets = m.CurrentAssets
+	if !modified {
+		reply.Message = "No assets removed (not found)"
+		return nil
+	}
 
-	// Reload data sources to reflect the asset removal
+	m.updateAssetConfig()
+	config.UpdateConfig(m.GlobalConfig)
+
 	if err := m.reloadDataSourcesLocked(); err != nil {
 		return err
 	}
 
-	msg := "Assets removed successfully"
-	slog.Info(msg, "assets", args.Assets)
-	reply.Message = msg
-	config.UpdateConfig(m.GlobalConfig, true)
+	reply.Message = "Assets removed and data sources reloaded"
+	slog.Info("Assets removed via RPC", "assets", args.Assets)
 	return nil
 }
 
-// RenameAsset renames an existing asset
 func (m *RPCManager) RenameAsset(args RenameAssetArgs, reply *AssetReply) error {
 	m.Mu.Lock()
 	defer m.Mu.Unlock()
 
-	m.Wg.Add(1)
-	defer m.Wg.Done()
-
-	currentAssets, err := m.getAssetsByCategory(args.Category)
+	assetsPtr, err := m.getAssetSlicePtr(args.Category)
 	if err != nil {
 		return err
 	}
@@ -361,104 +339,98 @@ func (m *RPCManager) RenameAsset(args RenameAssetArgs, reply *AssetReply) error 
 	oldName := strings.ToUpper(args.AssetName)
 	newName := strings.ToUpper(args.NewName)
 
-	if !helpers.ItemInSlice(oldName, currentAssets) {
-		return errors.New("asset to rename does not exist")
+	if !helpers.ItemInSlice(oldName, *assetsPtr) {
+		return fmt.Errorf("asset '%s' does not exist", oldName)
+	}
+	if helpers.ItemInSlice(newName, *assetsPtr) {
+		return fmt.Errorf("new name '%s' already exists", newName)
 	}
 
-	if helpers.ItemInSlice(newName, currentAssets) {
-		return errors.New("new asset name already exists")
-	}
+	// Perform Rename
+	*assetsPtr = helpers.RemoveFromSlice(*assetsPtr, oldName)
+	*assetsPtr = append(*assetsPtr, newName)
 
-	// Replace old asset with new asset in the appropriate category
-	switch args.Category {
-	case "crypto":
-		m.CurrentAssets.Crypto = helpers.RemoveFromSlice(m.CurrentAssets.Crypto, oldName)
-		m.CurrentAssets.Crypto = append(m.CurrentAssets.Crypto, newName)
-	case "commodities":
-		m.CurrentAssets.Commodities = helpers.RemoveFromSlice(m.CurrentAssets.Commodities, oldName)
-		m.CurrentAssets.Commodities = append(m.CurrentAssets.Commodities, newName)
-	case "forex":
-		m.CurrentAssets.Forex = helpers.RemoveFromSlice(m.CurrentAssets.Forex, oldName)
-		m.CurrentAssets.Forex = append(m.CurrentAssets.Forex, newName)
-	case "stocks":
-		m.CurrentAssets.Stocks = helpers.RemoveFromSlice(m.CurrentAssets.Stocks, oldName)
-		m.CurrentAssets.Stocks = append(m.CurrentAssets.Stocks, newName)
-	}
+	m.updateAssetConfig()
+	config.UpdateConfig(m.GlobalConfig)
 
-	m.GlobalConfig.Assets = m.CurrentAssets
-
-	// Reload data sources to reflect the asset renaming
-	if err = m.reloadDataSourcesLocked(); err != nil {
+	if err := m.reloadDataSourcesLocked(); err != nil {
 		return err
 	}
 
-	msg := fmt.Sprintf("Asset renamed successfully from %s to %s", oldName, newName)
-
-	slog.Info(msg, "category", args.Category)
-	reply.Message = msg
-
-	config.UpdateConfig(m.GlobalConfig, true)
+	reply.Message = fmt.Sprintf("Renamed '%s' to '%s'", oldName, newName)
+	slog.Info("Asset renamed via RPC", "old", oldName, "new", newName)
 	return nil
 }
 
-// GetAssets returns the current configured asset list
 func (m *RPCManager) GetAssets(args struct{}, reply *CurrentAssetsReply) error {
-	m.Wg.Add(1)
-	defer m.Wg.Done()
+	m.Mu.Lock()
+	defer m.Mu.Unlock()
 	reply.Assets = m.CurrentAssets
 	return nil
 }
 
-// Shutdown gracefully closes all data sources
+// -----------------------------------------------------------------------------
+// System
+// -----------------------------------------------------------------------------
+
+// Shutdown handles the RPC command to shut down
 func (m *RPCManager) Shutdown(args struct{}, reply *ShutdownReply) error {
-	m.Mu.Lock()
-	defer m.Mu.Unlock()
-
-	for name, ds := range m.DataSources {
-		if err := ds.Close(); err != nil {
-			slog.Error("Error disconnecting data source", "source", name, "error", err)
-		}
-	}
-	m.DataSources = make(map[string]datasource.FtsoDataSource)
-
-	reply.Message = "Shutting down..."
+	// Re-use the CloseAll logic
+	m.CloseAll()
+	reply.Message = "Shutdown initiated"
 	return nil
 }
 
-// reloadDataSourcesLocked reloads data sources assuming the mutex is already locked
-func (m *RPCManager) reloadDataSourcesLocked() error {
-	m.Wg.Add(1)
-	defer m.Wg.Done()
+func (m *RPCManager) CloseAll() {
+	m.Mu.Lock()
+	defer m.Mu.Unlock()
 
-	// Disconnect all existing data sources
+	slog.Info("Stopping all data sources...")
 	for name, ds := range m.DataSources {
+		// Log at INFO so we know exactly what is happening
+		slog.Info("Stopping data source", "source", name)
+
 		if err := ds.Close(); err != nil {
-			slog.Error("Error disconnecting data source", "source", name, "error", err)
+			// Filter out "not running" noise if desired, or just log it
+			if err.Error() != "datasource is not running" {
+				slog.Warn("Error stopping data source", "source", name, "error", err)
+			} else {
+				slog.Debug("Data source was already stopped", "source", name)
+			}
 		}
 	}
+	// Clear the map after closing
 	m.DataSources = make(map[string]datasource.FtsoDataSource)
-
-	// Reinitialize data sources
-	return m.InitDataSources()
 }
 
-// getAssetList returns the current assets configuration
-func (m *RPCManager) getAssetList() config.AssetConfig {
-	return m.CurrentAssets
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+func (m *RPCManager) updateAssetConfig() {
+	m.GlobalConfig.Assets = m.CurrentAssets
 }
 
-// getAssetsByCategory returns assets for a specific category
-func (m *RPCManager) getAssetsByCategory(category string) ([]string, error) {
-	switch category {
+func (m *RPCManager) getAssetSlicePtr(category string) (*[]string, error) {
+	switch strings.ToLower(category) {
 	case "crypto":
-		return m.CurrentAssets.Crypto, nil
+		return &m.CurrentAssets.Crypto, nil
 	case "commodities":
-		return m.CurrentAssets.Commodities, nil
+		return &m.CurrentAssets.Commodities, nil
 	case "forex":
-		return m.CurrentAssets.Forex, nil
+		return &m.CurrentAssets.Forex, nil
 	case "stocks":
-		return m.CurrentAssets.Stocks, nil
+		return &m.CurrentAssets.Stocks, nil
 	default:
-		return nil, errors.New("unknown category")
+		return nil, fmt.Errorf("unknown asset category: %s", category)
 	}
+}
+
+// reloadDataSourcesLocked reloads without acquiring the lock again
+func (m *RPCManager) reloadDataSourcesLocked() error {
+	for name, ds := range m.DataSources {
+		_ = ds.Close()
+		delete(m.DataSources, name)
+	}
+	return m.initDataSourcesLocked()
 }

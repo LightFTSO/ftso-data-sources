@@ -1,11 +1,11 @@
 package fmfw
 
-type wsTickerMessage struct {
-	Channel string                `json:"ch"`
-	Data    map[string]tickerData `json:"data"`
+type WsTickerMessage struct {
+	Channel string                    `json:"ch"`
+	Data    map[string]FmfwTickerData `json:"data"` // Key is Symbol
 }
 
-type tickerData struct {
-	Timestamp int64  `json:"t"` // Timestamp in milliseconds
-	LastPrice string `json:"c"` // Last price
+type FmfwTickerData struct {
+	LastPrice string `json:"c"` // 'c' = close price
+	Timestamp int64  `json:"t"` // 't' = timestamp (ms)
 }

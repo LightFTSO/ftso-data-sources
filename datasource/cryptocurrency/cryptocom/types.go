@@ -11,10 +11,10 @@ type WsTickerMessage struct {
 	Method string `json:"method"`
 	Code   int64  `json:"code"`
 	Result struct {
-		IntrumentName string       `json:"instrument_name"`
-		Subscription  string       `json:"subscription"`
-		Channel       string       `json:"channel"`
-		Data          []TickerData `json:"data"`
+		InstrumentName string       `json:"instrument_name"`
+		Subscription   string       `json:"subscription"`
+		Channel        string       `json:"channel"`
+		Data           []TickerData `json:"data"`
 	}
 }
 

@@ -1,21 +1,21 @@
 package kraken
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/rand"
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
-
-	"log/slog"
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
 	"github.com/hashicorp/go-multierror"
-	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
@@ -23,67 +23,76 @@ import (
 )
 
 type KrakenClient struct {
-	name               string
-	W                  *sync.WaitGroup
-	TickerTopic        *tickertopic.TickerTopic
-	wsClients          []*internal.WebSocketClient
-	wsEndpoint         string
-	apiEndpoint        string
-	SymbolList         model.SymbolList
-	symbolChunks       []model.SymbolList
-	lastTimestamp      time.Time
-	lastTimestampMutex sync.Mutex
-	log                *slog.Logger
+	name string
+	log  *slog.Logger
 
-	pingInterval time.Duration
+	// Core
+	TickerTopic *tickertopic.TickerTopic
+	W           *sync.WaitGroup
+	wsClients   []*internal.WebSocketClient
 
-	isRunning        bool
-	clientClosedChan *broadcast.Broadcaster
+	// Config
+	wsEndpoint   string
+	apiEndpoint  string
+	symbolChunks []model.SymbolList
+
+	// State
+	lastTimestamp atomic.Int64 // UnixMilli
+	isRunning     bool
+
+	// Lifecycle
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
-func NewKrakenClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*KrakenClient, error) {
+func NewKrakenClient(options map[string]any, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*KrakenClient, error) {
 	wsEndpoint := "wss://ws.kraken.com/v2"
 
-	kraken := KrakenClient{
-		name:             "kraken",
-		log:              slog.Default().With(slog.String("datasource", "kraken")),
-		W:                w,
-		TickerTopic:      tickerTopic,
-		wsClients:        []*internal.WebSocketClient{},
-		wsEndpoint:       wsEndpoint,
-		apiEndpoint:      "https://api.kraken.com/0",
-		SymbolList:       symbolList.Crypto,
-		pingInterval:     20 * time.Second,
-		clientClosedChan: broadcast.NewBroadcaster(0),
+	kraken := &KrakenClient{
+		name:        "kraken",
+		log:         slog.Default().With(slog.String("datasource", "kraken")),
+		W:           w,
+		TickerTopic: tickerTopic,
+		wsClients:   []*internal.WebSocketClient{},
+		wsEndpoint:  wsEndpoint,
+		apiEndpoint: "https://api.kraken.com/0",
 	}
 
-	kraken.symbolChunks = kraken.SymbolList.ChunkSymbols(1024)
+	// Kraken V2 supports reasonable batch sizes.
+	// 500 symbols per connection is safe.
+	kraken.symbolChunks = symbolList.Crypto.ChunkSymbols(500)
+
 	kraken.log.Debug("Created new datasource")
-	return &kraken, nil
+	return kraken, nil
 }
 
 func (d *KrakenClient) Connect() error {
+	if d.isRunning {
+		return nil
+	}
 	d.isRunning = true
+	d.ctx, d.cancel = context.WithCancel(context.Background())
 	d.W.Add(1)
 
+	d.lastTimestamp.Store(time.Now().UnixMilli())
+
 	for _, chunk := range d.symbolChunks {
+		currentChunk := chunk
 		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
 		wsClient.SetMessageHandler(d.onMessage)
 		wsClient.SetLogger(d.log)
+
 		wsClient.SetOnConnect(func() error {
-			err := d.SubscribeTickers(wsClient, chunk)
-			if err != nil {
-				d.log.Error("Error subscribing to tickers")
-				return err
-			}
-			return err
+			return d.SubscribeTickers(wsClient, currentChunk)
 		})
+
 		d.wsClients = append(d.wsClients, wsClient)
 		wsClient.Start()
 	}
 
-	d.setPing()
-	d.setLastTickerWatcher()
+	d.startPingLoop()
+	d.startWatchdog()
+	d.log.Info("Kraken V2 datasource connected", "connections", len(d.wsClients))
 
 	return nil
 }
@@ -92,13 +101,16 @@ func (d *KrakenClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
+	d.log.Info("Kraken closing...")
+
+	d.cancel()
+
 	for _, wsClient := range d.wsClients {
 		wsClient.Close()
 	}
-	d.isRunning = false
-	d.clientClosedChan.Send(true)
-	d.W.Done()
 
+	d.W.Done()
+	d.isRunning = false
 	return nil
 }
 
@@ -106,58 +118,157 @@ func (d *KrakenClient) IsRunning() bool {
 	return d.isRunning
 }
 
+func (d *KrakenClient) GetName() string {
+	return d.name
+}
+
+// -------------------------------------------------------------------------
+// Message Handling
+// -------------------------------------------------------------------------
+
 func (d *KrakenClient) onMessage(message internal.WsMessage) {
-	if message.Type == websocket.TextMessage {
-		if strings.Contains(string(message.Message), "pong") {
-			d.PongHandler(message.Message)
+	if message.Type != websocket.TextMessage {
+		return
+	}
+
+	msg := string(message.Message)
+
+	// 1. Handle Pong (V2)
+	if strings.Contains(msg, `"method":"pong"`) {
+		d.lastTimestamp.Store(time.Now().UnixMilli())
+		return
+	}
+
+	// 2. Handle Ticker (V2 Format)
+	// {"channel":"ticker", "type":"snapshot" or "update", "data":[...]}
+	if strings.Contains(msg, `"channel":"ticker"`) && strings.Contains(msg, `"data":`) {
+		// Ignore subscription confirmations
+		if strings.Contains(msg, `"method":"subscribe"`) {
 			return
 		}
-		if strings.Contains(string(message.Message), `"channel":"ticker"`) &&
-			!strings.Contains(string(message.Message), `"method":"subscribe"`) {
-			ticker, err := d.parseTicker(message.Message)
-			if err != nil {
-				d.log.Error("Error parsing ticker",
-					"ticker", ticker, "error", err.Error())
-				return
-			}
-			d.lastTimestampMutex.Lock()
-			d.lastTimestamp = time.Now()
-			d.lastTimestampMutex.Unlock()
 
-			d.TickerTopic.Send(ticker)
+		tickers, err := d.parseTicker(message.Message)
+		if err != nil {
+			return
 		}
 
+		d.lastTimestamp.Store(time.Now().UnixMilli())
+
+		for _, t := range tickers {
+			d.TickerTopic.Send(t)
+		}
 	}
 }
 
-func (d *KrakenClient) parseTicker(message []byte) (*model.Ticker, error) {
-	var newTickerEvent KrakenSnapshotUpdate
-	err := sonic.Unmarshal(message, &newTickerEvent)
-	if err != nil {
-		return &model.Ticker{}, err
-	}
-
-	tickerData := newTickerEvent.Data[0]
-	symbol := model.ParseSymbol(tickerData.Symbol)
-
-	base := KrakenAsset(symbol.Base)
-
-	ticker, err := model.NewTicker(tickerData.Last,
-		model.Symbol{Base: string(base.GetStdName()),
-			Quote: symbol.Quote},
-		d.GetName(),
-		time.Now())
-	if err != nil {
-		d.log.Error("Error parsing ticker", "error", err)
+func (d *KrakenClient) parseTicker(message []byte) ([]model.Ticker, error) {
+	var event KrakenSnapshotUpdate
+	if err := sonic.Unmarshal(message, &event); err != nil {
 		return nil, err
 	}
-	return ticker, err
+
+	result := make([]model.Ticker, 0, len(event.Data))
+
+	for _, t := range event.Data {
+		// Symbol from V2 is typically "BTC/USD"
+		// We use your ParseSymbol helper, but we might need to rely on the Asset Mapping
+		// if ParseSymbol expects standard pairs.
+		// However, usually parsing "BTC/USD" works fine.
+		symbol := model.ParseSymbol(t.Symbol)
+
+		// Normalize using your KrakenAsset types if needed.
+		// Since V2 usually returns clean names like "BTC/USD", this might be redundant
+		// but safe to keep for "XBT" cases.
+		base := KrakenAsset(symbol.Base)
+		quote := KrakenAsset(symbol.Quote)
+
+		finalSymbol := model.Symbol{
+			Base:  string(base.GetStdName()),
+			Quote: string(quote.GetStdName()),
+		}
+
+		// Kraken V2 ticker doesn't strictly provide a timestamp in the 'data' object
+		// (it's sometimes in metadata or implicit). We use receive time.
+		ts := time.Now()
+
+		newTicker, err := model.NewTicker(
+			t.Last,
+			finalSymbol,
+			d.name,
+			ts,
+		)
+		if err != nil {
+			continue
+		}
+		result = append(result, newTicker)
+	}
+
+	return result, nil
 }
 
-func (d *KrakenClient) getAvailableSymbols() ([]AssetPairInfo, error) {
+// -------------------------------------------------------------------------
+// Subscription & Data Fetching
+// -------------------------------------------------------------------------
+
+func (d *KrakenClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
+	// 1. Fetch available symbols to get correct 'wsname' (e.g. "XBT/USD")
+	availableMap, err := d.getAvailableSymbolsMap()
+	if err != nil {
+		d.log.Error("Failed to fetch available symbols", "error", err)
+		return err
+	}
+
+	// 2. Filter Symbols
+	var validPairs []string
+	for _, req := range symbols {
+		// We try to match "BASE/QUOTE" to the map
+		// Kraken map keys from getAvailableSymbolsMap are normalized "BASE:QUOTE"
+		key := fmt.Sprintf("%s:%s", strings.ToUpper(req.Base), strings.ToUpper(req.Quote))
+
+		if wsName, exists := availableMap[key]; exists {
+			validPairs = append(validPairs, wsName)
+		}
+	}
+
+	if len(validPairs) == 0 {
+		return nil
+	}
+
+	// 3. Batch Subscribe (V2)
+	// V2 supports batched symbols in the params
+	chunkSize := 50
+	for i := 0; i < len(validPairs); i += chunkSize {
+		end := i + chunkSize
+		if end > len(validPairs) {
+			end = len(validPairs)
+		}
+
+		batch := validPairs[i:end]
+		reqID := rand.Uint32()
+
+		subMessage := map[string]interface{}{
+			"method": "subscribe",
+			"req_id": reqID,
+			"params": map[string]interface{}{
+				"channel": "ticker",
+				"symbol":  batch,
+			},
+		}
+
+		time.Sleep(50 * time.Millisecond)
+		wsClient.TrySendMessageJSON(websocket.TextMessage, subMessage)
+	}
+
+	d.log.Debug("Subscribed ticker symbols", "count", len(validPairs))
+	return nil
+}
+
+func (d *KrakenClient) getAvailableSymbolsMap() (map[string]string, error) {
 	reqUrl := d.apiEndpoint + "/public/AssetPairs"
 
-	req, err := http.NewRequest(http.MethodGet, reqUrl, nil)
+	ctx, cancel := context.WithTimeout(d.ctx, 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqUrl, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -166,142 +277,98 @@ func (d *KrakenClient) getAvailableSymbols() ([]AssetPairInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer res.Body.Close()
 
 	data, err := io.ReadAll(res.Body)
 	if err != nil {
 		return nil, err
 	}
 
-	var exchangeInfo = new(ApiAssetPairResponse)
-	err = sonic.Unmarshal(data, exchangeInfo)
-	if err != nil {
+	var exchangeInfo ApiAssetPairResponse
+	if err := sonic.Unmarshal(data, &exchangeInfo); err != nil {
 		return nil, err
 	}
 
 	if len(exchangeInfo.Error) > 0 {
 		var apierrors error
 		for _, apierr := range exchangeInfo.Error {
-			multierror.Append(apierrors, errors.New(apierr))
+			apierrors = multierror.Append(apierrors, errors.New(apierr))
 		}
 		return nil, apierrors
 	}
 
-	assetPairs := []AssetPairInfo{}
-
+	// Create Map: "BASE:QUOTE" -> "wsname"
+	// We use the GetStdName helper to ensure we map "XXBT" -> "BTC" for our lookup key
+	result := make(map[string]string)
 	for _, v := range exchangeInfo.Result {
-		assetPairs = append(assetPairs, v)
+		// Use the helper to normalize the key for our lookup
+		baseStd := v.Base.GetStdName()
+		quoteStd := v.Quote.GetStdName()
+
+		key := fmt.Sprintf("%s:%s", strings.ToUpper(string(baseStd)), strings.ToUpper(string(quoteStd)))
+
+		// Map to the wsname required for subscription (e.g. "XBT/USD")
+		result[key] = v.WsName
 	}
 
-	return assetPairs, nil
-
+	return result, nil
 }
 
-func (d *KrakenClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
-	availableSymbols, err := d.getAvailableSymbols()
-	if err != nil {
-		d.log.Error("error obtaining available symbols. Closing kraken datasource", "error", err.Error())
-		d.W.Done()
-		return err
-	}
+// -------------------------------------------------------------------------
+// Heartbeat & Watchdog
+// -------------------------------------------------------------------------
 
-	subscribedSymbols := []string{}
-	for _, v1 := range symbols {
-		for _, v2 := range availableSymbols {
-			if strings.EqualFold(strings.ToUpper(v1.Base), strings.ToUpper(string(v2.Base.GetStdName()))) &&
-				strings.EqualFold(strings.ToUpper(v1.Quote), strings.ToUpper(string(v2.Quote.GetStdName()))) {
-
-				subscribedSymbols = append(subscribedSymbols, (v2.WsName))
-			}
-		}
-	}
-
-	// batch subscriptions in packets of 5
-	chunksize := 5
-	for i := 0; i < len(subscribedSymbols); i += chunksize {
-		subMessage := map[string]interface{}{
-			"method": "subscribe",
-			"req_id": rand.Uint32(),
-		}
-		s := []string{}
-		for j := range chunksize {
-			if i+j >= len(subscribedSymbols) {
-				continue
-			}
-			v := subscribedSymbols[i+j]
-			s = append(s, v)
-		}
-		subMessage["params"] = map[string]interface{}{
-			"channel":       "ticker",
-			"event_trigger": "trades",
-			"snapshot":      true,
-			"symbol":        s,
-		}
-		wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
-	}
-
-	d.log.Debug("Subscribed ticker symbols", "symbols", len(subscribedSymbols))
-	return nil
-}
-
-func (d *KrakenClient) GetName() string {
-	return d.name
-}
-
-func (d *KrakenClient) setLastTickerWatcher() {
-	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	d.lastTimestampMutex.Lock()
-	d.lastTimestamp = time.Now()
-	d.lastTimestampMutex.Unlock()
-
-	timeout := (30 * time.Second)
+func (d *KrakenClient) startPingLoop() {
+	d.W.Add(1)
 	go func() {
-		defer lastTickerIntervalTimer.Stop()
+		defer d.W.Done()
+		// Kraken V2: {"method": "ping"}
+		ticker := time.NewTicker(20 * time.Second)
+		defer ticker.Stop()
+
 		for {
 			select {
-			case <-d.clientClosedChan.Listen().Channel():
-				d.log.Debug("last ticker received watcher goroutine exiting")
+			case <-d.ctx.Done():
 				return
-			case <-lastTickerIntervalTimer.C:
-				now := time.Now()
-				d.lastTimestampMutex.Lock()
-				diff := now.Sub(d.lastTimestamp)
-				d.lastTimestampMutex.Unlock()
+			case <-ticker.C:
+				pingMsg := map[string]interface{}{
+					"method": "ping",
+					"req_id": time.Now().UnixNano(),
+				}
+				for _, wsClient := range d.wsClients {
+					wsClient.TrySendMessage(internal.WsMessage{
+						Type:    websocket.TextMessage,
+						Message: func() []byte { b, _ := sonic.Marshal(pingMsg); return b }(),
+					})
+				}
+			}
+		}
+	}()
+}
 
-				if diff > timeout {
-					// no tickers received in a while, attempt to reconnect
-					d.lastTimestampMutex.Lock()
-					d.lastTimestamp = time.Now()
-					d.lastTimestampMutex.Unlock()
+func (d *KrakenClient) startWatchdog() {
+	d.W.Add(1)
+	go func() {
+		defer d.W.Done()
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		timeout := 30 * time.Second
 
-					d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
+		for {
+			select {
+			case <-d.ctx.Done():
+				return
+			case <-ticker.C:
+				last := d.lastTimestamp.Load()
+				if time.Since(time.UnixMilli(last)) > timeout {
+					d.log.Warn("Watchdog: No tickers received", "timeout", timeout)
+					d.lastTimestamp.Store(time.Now().UnixMilli())
 
-					for _, wsClient := range d.wsClients {
-						wsClient.Reconnect()
+					for _, ws := range d.wsClients {
+						ws.Reconnect()
 					}
 				}
 			}
 		}
 	}()
-}
-
-func (d *KrakenClient) setPing() {
-	ticker := time.NewTicker(d.pingInterval)
-	go func() {
-		defer ticker.Stop()
-		for {
-			select {
-			case <-d.clientClosedChan.Listen().Channel():
-				d.log.Debug("ping sender goroutine exiting")
-				return
-			case <-ticker.C:
-				for _, wsClient := range d.wsClients {
-					wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte(`{"event":"ping"}`)})
-				}
-			}
-		}
-	}()
-}
-
-func (d *KrakenClient) PongHandler(msg []byte) {
-	d.log.Debug("Pong received", "datasource", "kraken")
 }

@@ -14,7 +14,7 @@ Flow goes like this:
 # Supported data sources:
 ### Crypto:
     binance,binance.us,bitfinex,bitget,bitmart,bitrue,bitstamp,bybit,coinex,coinbase,cryptocom,digifinex,fmfw,gateio,
-    hitbtc,huobi,kraken,kucoin,lbank,mexc,okx,pionex,toobit,whitebit,xt
+    hitbtc,htx,kraken,kucoin,lbank,mexc,okx,pionex,toobit,whitebit,xt
 
 ### Stocks, Commodities, Forex:
     tiingo,metalsdev
@@ -28,11 +28,9 @@ Flow goes like this:
 `git clone https://github.com/LightFTSO/ftso-data-sources.git`
 2. cd into it
 `cd ftso-data-sources`
-3. (optionally clone submodules for protobuf codegen)
-`git submodule update --init --recursive`
-4. Create the config.yaml (see the section below)
+3. Create the config.yaml (see the section below)
 `touch config.yaml`
-5. Run it 
+4. Run it 
 Locally with `make run`:
 You need go 1.22+ installed, see https://go.dev/doc/install
 ```bash
@@ -43,11 +41,7 @@ make run
 Run in docker:
 `docker compose up -d ftso-data-sources`
 
-Supported go version: 1.22+
-
-# Protobuf Definitions and Codegen
-
-See https://github.com/RoseLabsMx/ftso-data-sources-proto-files
+Supported go version: 1.25.5+
 
 # Configuration 
 Modify the following sample configuration, by default, the program will look for a file called `config.yaml` in it's root folder or you can specify the file with the `-config <file>` flag
@@ -78,7 +72,7 @@ datasources:
   - source: fmfw
   - source: gateio
   - source: hitbtc
-  - source: huobi
+  - source: htx
   - source: kucoin
   - source: kraken
   - source: lbank
@@ -105,10 +99,10 @@ stats:
   interval: 60s
 
 # see https://mqtt.org/
-mqtt:
-  enabled: false
-  url: "tcp://localhost:1883"
-  qos_level: 1
+zeromq:
+    enabled: false
+    port: 9998
+    flushinterval: 5ms
     
 # See https://redis.io/docs/latest/develop/data-types/timeseries/
 redis_ts:
@@ -132,6 +126,8 @@ file_output:
 websocket_server:
   enabled: false
   ticker_endpoint: /tickers
+  flush_interval: 50ms
+  serialization_protocol: json
     
 assets:
   forex:
@@ -337,15 +333,6 @@ Response:
 	"error": null
 }
 ```
-
-# Counting ticker rate
-You can count the number of tickers per second enabling the file-output consumer, using /dev/stdout as the output file
-or using the MQTT consumer, in another terminal connect to it using a client program and pipe the output to the program `pv`, e.g.:
-
-`./ftso-data-sources | pv --line-mode --timer --rate > /dev/null`
-Outputs:
-`03:22 [ 496 /s]`
-For more info on `pv`, visit [https://docs.oracle.com/cd/E86824_01/html/E54763/pv-1.html](Oracle's man pages)
 
 # Contributing
 

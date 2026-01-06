@@ -31,23 +31,14 @@ func NewTickerTopic(transformationOptions []TransformationOptions, capacity int)
 	return &tickerTopic
 }
 
-func (t *TickerTopic) Send(ticker *model.Ticker) {
-	ticker = t.applyTransformations(ticker)
-
-	t.Broadcaster.Send(ticker)
-}
-
-func (t *TickerTopic) applyTransformations(ticker *model.Ticker) *model.Ticker {
-	if len(t.transformations) <= 0 {
-		return ticker
-	}
-
-	for _, v := range t.transformations {
-		err := v.Transform(ticker)
-		if err != nil {
-			return nil
+func (t *TickerTopic) Send(ticker model.Ticker) {
+	if len(t.transformations) > 0 {
+		for _, v := range t.transformations {
+			err := v.Transform(&ticker)
+			if err != nil {
+				slog.Error("An error occurred while applying ticker transformations, program will now exit", "error", err)
+			}
 		}
 	}
-
-	return ticker
+	t.Broadcaster.Send(ticker)
 }

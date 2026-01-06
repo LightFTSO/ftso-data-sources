@@ -1,7 +1,8 @@
 package config
 
 import (
-	"log/slog"
+	"fmt"
+	"os"
 	"path"
 
 	"github.com/spf13/viper"
@@ -35,7 +36,7 @@ type ConfigOptions struct {
 	RedisOptions             consumer.RedisOptions             `mapstructure:"redis_ts"`
 	WebsocketConsumerOptions consumer.WebsocketConsumerOptions `mapstructure:"websocket_server"`
 	FileConsumerOptions      consumer.FileConsumerOptions      `mapstructure:"file_output"`
-	MQTTConsumerOptions      consumer.MqttConsumerOptions      `mapstructure:"mqtt"`
+	ZMQConsumerOptions       consumer.ZMQConsumerOptions       `mapstructure:"zeromq"`
 
 	TickerTransformationOptions []tickertopic.TransformationOptions `mapstructure:"ticker_transformations"`
 }
@@ -64,15 +65,27 @@ func LoadConfig(configFile string) (config ConfigOptions, err error) {
 		return ConfigOptions{}, err
 	}
 
-	config.WebsocketConsumerOptions.Port = config.Port
-
 	Config = config
 	return config, nil
 }
 
-func SaveConfig() error {
-	slog.Info("Saving current configuraton to backup file")
-	err := viper.WriteConfigAs("config.original.yaml")
+// SafeWriteConfig writes the config to a temp file and atomically moves it
+// to the destination. This prevents file corruption on crash.
+func WriteConfig(filename string) error {
+	// 1. Define a temporary filename (e.g., config.yaml.tmp)
+	tempFile := "tmp." + filename
 
-	return err
+	// 2. Write the viper config to the temporary file
+	if err := viper.WriteConfigAs(tempFile); err != nil {
+		return fmt.Errorf("failed to write temp config: %w", err)
+	}
+
+	// 3. Atomically rename temp file to original file
+	// This operation is atomic on POSIX systems (Linux/macOS) and safe on Windows
+	// (if the file exists, it is replaced).
+	if err := os.Rename(tempFile, filename); err != nil {
+		return fmt.Errorf("failed to move temp config to %s: %w", filename, err)
+	}
+
+	return nil
 }

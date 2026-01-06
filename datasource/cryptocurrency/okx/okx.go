@@ -1,18 +1,18 @@
 package okx
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
-
-	"log/slog"
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
-	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
@@ -20,63 +20,73 @@ import (
 )
 
 type OkxClient struct {
-	name               string
-	W                  *sync.WaitGroup
-	TickerTopic        *tickertopic.TickerTopic
-	wsClients          []*internal.WebSocketClient
-	wsEndpoint         string
-	SymbolList         model.SymbolList
-	symbolChunks       []model.SymbolList
-	lastTimestamp      time.Time
-	lastTimestampMutex sync.Mutex
-	log                *slog.Logger
+	name string
+	log  *slog.Logger
 
-	pingInterval time.Duration
+	// Core
+	TickerTopic *tickertopic.TickerTopic
+	W           *sync.WaitGroup
+	wsClients   []*internal.WebSocketClient
 
-	isRunning        bool
-	clientClosedChan *broadcast.Broadcaster
+	// Config
+	wsEndpoint   string
+	symbolChunks []model.SymbolList
+
+	// State
+	lastTimestamp atomic.Int64 // UnixMilli
+	isRunning     bool
+
+	// Lifecycle
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
-func NewOkxClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*OkxClient, error) {
+func NewOkxClient(options map[string]any, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*OkxClient, error) {
 	wsEndpoint := "wss://ws.okx.com:8443/ws/v5/public"
 
-	okx := OkxClient{
+	okx := &OkxClient{
 		name:        "okx",
 		log:         slog.Default().With(slog.String("datasource", "okx")),
 		W:           w,
 		TickerTopic: tickerTopic,
 		wsClients:   []*internal.WebSocketClient{},
 		wsEndpoint:  wsEndpoint,
-		SymbolList:  symbolList.Crypto,
-
-		pingInterval:     29 * time.Second,
-		clientClosedChan: broadcast.NewBroadcaster(0),
 	}
-	okx.symbolChunks = okx.SymbolList.ChunkSymbols(1024)
+
+	// OKX V5 supports large batches. 500 per connection is safe.
+	okx.symbolChunks = symbolList.Crypto.ChunkSymbols(500)
+
 	okx.log.Debug("Created new datasource")
-	return &okx, nil
+	return okx, nil
 }
 
 func (d *OkxClient) Connect() error {
+	if d.isRunning {
+		return nil
+	}
 	d.isRunning = true
+	d.ctx, d.cancel = context.WithCancel(context.Background())
 	d.W.Add(1)
+
+	d.lastTimestamp.Store(time.Now().UnixMilli())
+
 	for _, chunk := range d.symbolChunks {
+		currentChunk := chunk
 		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
 		wsClient.SetMessageHandler(d.onMessage)
 		wsClient.SetLogger(d.log)
+
 		wsClient.SetOnConnect(func() error {
-			err := d.SubscribeTickers(wsClient, chunk)
-			if err != nil {
-				d.log.Error("Error subscribing to tickers")
-				return err
-			}
-			return err
+			return d.SubscribeTickers(wsClient, currentChunk)
 		})
+
 		d.wsClients = append(d.wsClients, wsClient)
 		wsClient.Start()
 	}
-	d.setPing()
-	d.setLastTickerWatcher()
+
+	d.startPingLoop()
+	d.startWatchdog()
+	d.log.Info("OKX datasource connected", "connections", len(d.wsClients))
 
 	return nil
 }
@@ -85,13 +95,16 @@ func (d *OkxClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
+	d.log.Info("OKX closing...")
+
+	d.cancel()
+
 	for _, wsClient := range d.wsClients {
 		wsClient.Close()
 	}
-	d.isRunning = false
-	d.clientClosedChan.Send(true)
-	d.W.Done()
 
+	d.W.Done()
+	d.isRunning = false
 	return nil
 }
 
@@ -99,53 +112,72 @@ func (d *OkxClient) IsRunning() bool {
 	return d.isRunning
 }
 
+func (d *OkxClient) GetName() string {
+	return d.name
+}
+
+// -------------------------------------------------------------------------
+// Message Handling
+// -------------------------------------------------------------------------
+
 func (d *OkxClient) onMessage(message internal.WsMessage) {
-	if message.Type == websocket.TextMessage {
-		msg := string(message.Message)
+	if message.Type != websocket.TextMessage {
+		return
+	}
 
-		if strings.Contains(msg, `"channel":"index-tickers"`) {
-			tickers, err := d.parseTicker(message.Message)
-			if err != nil {
-				d.log.Error("Error parsing ticker",
-					"error", err.Error())
-				return
-			}
-			d.lastTimestampMutex.Lock()
-			d.lastTimestamp = time.Now()
-			d.lastTimestampMutex.Unlock()
+	msg := string(message.Message)
 
-			for _, v := range tickers {
-				d.TickerTopic.Send(v)
-			}
+	// OKX sends "pong" as text
+	if msg == "pong" {
+		d.lastTimestamp.Store(time.Now().UnixMilli())
+		return
+	}
 
+	// OKX V5: "tickers" channel (Spot), NOT "index-tickers"
+	if strings.Contains(msg, `"channel":"tickers"`) {
+		tickers, err := d.parseTicker(message.Message)
+		if err != nil {
+			return
+		}
+
+		d.lastTimestamp.Store(time.Now().UnixMilli())
+		for _, v := range tickers {
+			d.TickerTopic.Send(v)
 		}
 	}
 }
 
-func (d *OkxClient) parseTicker(message []byte) ([]*model.Ticker, error) {
-	var tickerMessage OkxTicker
-	err := sonic.Unmarshal(message, &tickerMessage)
-	if err != nil {
-		d.log.Error(err.Error())
-		return []*model.Ticker{}, err
+func (d *OkxClient) parseTicker(message []byte) ([]model.Ticker, error) {
+	var event OkxTicker
+	if err := sonic.Unmarshal(message, &event); err != nil {
+		return nil, err
 	}
 
-	tickers := []*model.Ticker{}
-	for _, v := range tickerMessage.Data {
+	tickers := make([]model.Ticker, 0, len(event.Data))
+	for _, v := range event.Data {
+		// InstId: "BTC-USDT"
 		symbol := model.ParseSymbol(v.InstId)
 
+		// Ts is string
 		ts, err := strconv.ParseInt(v.Ts, 10, 64)
 		if err != nil {
-			return nil, err
+			continue
 		}
 
-		newTicker, err := model.NewTickerPriceString(v.Idxpx,
+		// Use "last" (Last Traded Price) for spot tickers
+		// Your old code used "idxPx" (Index Price)
+		price := v.Last
+		if price == "" {
+			price = v.Idxpx // Fallback if you really intended Index Price
+		}
+
+		newTicker, err := model.NewTickerPriceString(
+			price,
 			symbol,
-			d.GetName(),
-			time.UnixMilli(ts))
+			d.name,
+			time.UnixMilli(ts),
+		)
 		if err != nil {
-			d.log.Error("Error parsing ticker",
-				"ticker", newTicker, "error", err.Error())
 			continue
 		}
 		tickers = append(tickers, newTicker)
@@ -154,77 +186,98 @@ func (d *OkxClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	return tickers, nil
 }
 
+// -------------------------------------------------------------------------
+// Subscription
+// -------------------------------------------------------------------------
+
 func (d *OkxClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
-	s := []map[string]interface{}{}
-	for _, v := range symbols {
-		s = append(s, map[string]interface{}{
-			"channel": "index-tickers",
-			"instId": fmt.Sprintf("%s-%s",
-				strings.ToUpper(v.Base), strings.ToUpper(v.Quote)),
-		})
-	}
-	subMessage := map[string]interface{}{
-		"op":   "subscribe",
-		"args": s,
+	// Batch args: [{"channel": "tickers", "instId": "BTC-USDT"}, ...]
+	batchSize := 50
+
+	for i := 0; i < len(symbols); i += batchSize {
+		end := i + batchSize
+		if end > len(symbols) {
+			end = len(symbols)
+		}
+
+		batch := symbols[i:end]
+		args := make([]map[string]string, 0, len(batch))
+
+		for _, v := range batch {
+			args = append(args, map[string]string{
+				"channel": "tickers", // Changed from index-tickers to tickers (Spot)
+				"instId":  fmt.Sprintf("%s-%s", strings.ToUpper(v.Base), strings.ToUpper(v.Quote)),
+			})
+		}
+
+		subMessage := map[string]interface{}{
+			"op":   "subscribe",
+			"args": args,
+		}
+
+		// Throttle
+		time.Sleep(50 * time.Millisecond)
+
+		err := wsClient.TrySendMessageJSON(websocket.TextMessage, subMessage)
+		if err != nil {
+			d.log.Warn("Failed to send subscription batch")
+		}
 	}
 
-	wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
-
+	d.log.Debug("Subscribed ticker symbols", "count", len(symbols))
 	return nil
 }
 
-func (d *OkxClient) setPing() {
-	ticker := time.NewTicker(d.pingInterval)
+// -------------------------------------------------------------------------
+// Heartbeat & Watchdog
+// -------------------------------------------------------------------------
+
+func (d *OkxClient) startPingLoop() {
+	d.W.Add(1)
 	go func() {
+		defer d.W.Done()
+		// OKX V5 expects literal "ping" string as Text Message
+		ticker := time.NewTicker(20 * time.Second)
 		defer ticker.Stop()
+
+		pingMsg := []byte("ping")
+
 		for {
 			select {
-			case <-d.clientClosedChan.Listen().Channel():
-				d.log.Debug("ping sender goroutine exiting")
+			case <-d.ctx.Done():
 				return
 			case <-ticker.C:
 				for _, wsClient := range d.wsClients {
-					wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte(`ping`)})
+					wsClient.TrySendMessage(internal.WsMessage{
+						Type:    websocket.TextMessage,
+						Message: pingMsg,
+					})
 				}
 			}
 		}
 	}()
 }
 
-func (d *OkxClient) GetName() string {
-	return d.name
-}
-
-func (d *OkxClient) setLastTickerWatcher() {
-	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	d.lastTimestampMutex.Lock()
-	d.lastTimestamp = time.Now()
-	d.lastTimestampMutex.Unlock()
-
-	timeout := (30 * time.Second)
+func (d *OkxClient) startWatchdog() {
+	d.W.Add(1)
 	go func() {
-		defer lastTickerIntervalTimer.Stop()
+		defer d.W.Done()
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		timeout := 30 * time.Second
+
 		for {
 			select {
-			case <-d.clientClosedChan.Listen().Channel():
-				d.log.Debug("last ticker received watcher goroutine exiting")
+			case <-d.ctx.Done():
 				return
-			case <-lastTickerIntervalTimer.C:
-				now := time.Now()
-				d.lastTimestampMutex.Lock()
-				diff := now.Sub(d.lastTimestamp)
-				d.lastTimestampMutex.Unlock()
+			case <-ticker.C:
+				last := d.lastTimestamp.Load()
+				if time.Since(time.UnixMilli(last)) > timeout {
+					d.log.Warn("Watchdog: No tickers received", "timeout", timeout)
+					d.lastTimestamp.Store(time.Now().UnixMilli())
 
-				if diff > timeout {
-					// no tickers received in a while, attempt to reconnect
-					d.lastTimestampMutex.Lock()
-					d.lastTimestamp = time.Now()
-					d.lastTimestampMutex.Unlock()
-
-					d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-
-					for _, wsClient := range d.wsClients {
-						wsClient.Reconnect()
+					for _, ws := range d.wsClients {
+						ws.Reconnect()
 					}
 				}
 			}

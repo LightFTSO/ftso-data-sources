@@ -164,7 +164,7 @@ func (d *MetalsDevClient) SubscribeTickers(wsClient *internal.WebSocketClient, s
 					Timestamp: t,
 				}
 				d.log.Info(fmt.Sprintf("metalsdev: base=%s quote=%s price=%f", ticker.Base, ticker.Quote, ticker.Price))
-				br.Send(&ticker)
+				br.Send(ticker)
 			}
 			for _, s := range d.ForexSymbols {
 				price, present := data.Currencies[strings.ToUpper(s.Base)]

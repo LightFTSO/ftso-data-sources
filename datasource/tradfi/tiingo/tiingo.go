@@ -1,6 +1,7 @@
 package tiingo
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -39,7 +40,7 @@ type TiingoClient struct {
 	clientClosedChan *broadcast.Broadcaster
 }
 
-func NewTiingoFxClient(options map[string]interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*TiingoClient, error) {
+func NewTiingoFxClient(options map[string]any, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*TiingoClient, error) {
 	wsEndpoint := "wss://api.tiingo.com/fx"
 
 	apiToken := ""
@@ -155,12 +156,12 @@ func (d *TiingoClient) onMessage(message internal.WsMessage) {
 	}
 }
 
-func (d *TiingoClient) parseTicker(message []byte) (*model.Ticker, error) {
+func (d *TiingoClient) parseTicker(message []byte) (model.Ticker, error) {
 
 	var newTickerEvent WsFxEvent
 	err := sonic.Unmarshal(message, &newTickerEvent)
 	if err != nil {
-		return &model.Ticker{}, err
+		return model.Ticker{}, err
 	}
 
 	tr := newTickerEvent.Data
@@ -170,13 +171,13 @@ func (d *TiingoClient) parseTicker(message []byte) (*model.Ticker, error) {
 
 	ts, err := time.Parse("2006-01-02T15:04:05.999999+00:00", tr[2].(string))
 	if err != nil {
-		return nil, err
+		return model.Ticker{}, err
 	}
 	ask := tr[4].(float64)
 	bid := tr[5].(float64)
 	price := (ask + bid) / 2
 
-	ticker := &model.Ticker{
+	ticker := model.Ticker{
 		Base:  symbol.Base,
 		Quote: symbol.Quote,
 
@@ -214,7 +215,7 @@ func (d *TiingoClient) SubscribeTickers(wsClient *internal.WebSocketClient, symb
 			"thresholdLevel": d.thresholdLevel,
 			"tickers":        s,
 		}
-		wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
+		wsClient.TrySendMessageJSON(websocket.TextMessage, subMessage)
 	}
 
 	d.log.Debug("Subscribed ticker symbols", "symbols", len(subscribedSymbols))
@@ -273,7 +274,13 @@ func (d *TiingoClient) setPing() {
 				return
 			case <-ticker.C:
 				for _, wsClient := range d.wsClients {
-					wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte("ping")})
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+
+					err := wsClient.SendMessage(ctx, internal.WsMessage{Type: websocket.PingMessage, Message: []byte("ping")})
+					if err != nil {
+						// Handle error: maybe trigger a Reconnect()
+					}
 				}
 			}
 		}

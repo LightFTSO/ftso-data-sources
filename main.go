@@ -1,15 +1,21 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"log"
-	slog "log/slog"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/rpc"
 	"net/rpc/jsonrpc"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
+	"time"
 
 	"roselabs.mx/ftso-data-sources/config"
 	"roselabs.mx/ftso-data-sources/consumer"
@@ -21,120 +27,175 @@ import (
 )
 
 func main() {
-	// Parse command-line flags
 	flag.Parse()
 
-	config, err := config.LoadConfig(*flags.ConfigFile)
+	cfg, err := config.LoadConfig(*flags.ConfigFile)
 	if err != nil {
-		log.Fatalf("%s\n", err)
+		log.Fatalf("Failed to load config: %s\n", err)
 	}
 
-	logging.SetupLogging(config)
+	logging.SetupLogging(cfg)
+
+	// Context for Graceful Shutdown
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
 
 	fmt.Println("=========  FTSO Data Sources  =========")
 	slog.Info("Created with <3 by RoseLabs.Mx (LightFTSO)")
 
-	run(config)
+	if err := run(ctx, cfg); err != nil {
+		slog.Error("Application exited with error", "error", err)
+		os.Exit(1)
+	}
 
-	slog.Warn("À Bientôt! Adiós! Goodbye!")
+	slog.Info("À Bientôt! Adiós! Goodbye!")
 }
 
-func run(globalConfig config.ConfigOptions) {
-	slog.Debug(fmt.Sprintf("Ticker broadcaster buffer size is %d", config.Config.MessageBufferSize))
-	tickerTopic := tickertopic.NewTickerTopic(config.Config.TickerTransformationOptions, config.Config.MessageBufferSize)
+func run(ctx context.Context, cfg config.ConfigOptions) error {
+	slog.Debug("Initializing components", "buffer_size", cfg.MessageBufferSize)
 
-	// Initialize consumers
-	initConsumers(tickerTopic, globalConfig)
+	tickerTopic := tickertopic.NewTickerTopic(
+		cfg.TickerTransformationOptions,
+		cfg.MessageBufferSize,
+	)
+
+	// Initialize Consumers (and register Websocket routes to DefaultServeMux)
+	consumerClosers := initConsumers(tickerTopic, cfg)
 
 	// Initialize RPC Manager
 	manager := &rpcmanager.RPCManager{
 		DataSources:   make(map[string]datasource.FtsoDataSource),
 		TickerTopic:   tickerTopic,
-		GlobalConfig:  globalConfig,
-		CurrentAssets: config.Config.Assets,
+		GlobalConfig:  cfg,
+		CurrentAssets: cfg.Assets,
+		Wg:            &sync.WaitGroup{},
 	}
 
-	// Initialize data sources
-	err := manager.InitDataSources()
-	if err != nil {
-		log.Fatalf("Failed to initialize data sources: %v", err)
+	if err := manager.InitDataSources(); err != nil {
+		return fmt.Errorf("failed to init data sources: %w", err)
 	}
 
-	// Start RPC server
-	go startRpcManager(manager)
+	// Register RPC Handlers to DefaultServeMux
+	registerRpcHandlers(manager)
 
-	// Wait for all data sources, consumers and RPC manager to finish
-	manager.Wg.Wait()
-}
-
-func startRpcManager(manager *rpcmanager.RPCManager) {
-	rpc.Register(manager)
-	rpc.HandleHTTP()
-
-	http.HandleFunc("/rpc", func(w http.ResponseWriter, r *http.Request) {
-		var conn = struct {
-			io.Reader
-			io.Writer
-			io.Closer
-		}{r.Body, w, r.Body}
-
-		jsonrpc.ServeConn(conn)
-	})
-
-	// Listen on a TCP port, e.g., 1234
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", manager.GlobalConfig.Port))
-	if err != nil {
-		log.Fatalf("Error starting RPC server: %v", err)
+	// Setup HTTP Server (using DefaultServeMux via Handler: nil)
+	httpServer := &http.Server{
+		Addr:    fmt.Sprintf(":%d", cfg.Port),
+		Handler: nil, // Use DefaultServeMux for both RPC and Websockets
+		BaseContext: func(l net.Listener) context.Context {
+			return ctx
+		},
 	}
-	defer listener.Close()
 
-	slog.Info(fmt.Sprintf("RPC server started on port :%d", manager.GlobalConfig.Port))
+	go func() {
+		slog.Info("Server listening (RPC + WebSocket)", "port", cfg.Port)
+		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("HTTP server failed", "error", err)
+		}
+	}()
 
-	err = http.Serve(listener, nil)
-	if err != nil {
-		log.Fatalf("Error starting HTTP server: %v", err)
+	// Wait for CTRL+C
+	slog.Info("System is running. Press Ctrl+C to stop.")
+	<-ctx.Done()
+
+	// --- Graceful Shutdown Sequence ---
+	slog.Info("Shutdown signal received, stopping components...")
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	// 1. Stop HTTP Server (stops new connections)
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		slog.Warn("HTTP server shutdown error", "error", err)
 	}
-}
 
-func enableConsumer(c consumer.Consumer, tickerTopic *tickertopic.TickerTopic) {
-	c.StartTickerListener(tickerTopic)
-}
+	// 2. Close Data Sources (using the new thread-safe method)
+	// This will log "Stopping data source..." for each source at INFO level
+	manager.CloseAll()
 
-func initConsumers(tickerTopic *tickertopic.TickerTopic, config config.ConfigOptions) {
-	if !config.FileConsumerOptions.Enabled &&
-		!config.RedisOptions.Enabled &&
-		!config.WebsocketConsumerOptions.Enabled &&
-		!config.MQTTConsumerOptions.Enabled {
-		if config.Env != "development" {
-			panic("no consumers enabled")
-		} else {
-			slog.Warn("No consumers enabled, data will go nowhere!")
+	// 3. Close Consumers
+	for _, c := range consumerClosers {
+		if closer, ok := c.(io.Closer); ok {
+			closer.Close()
 		}
 	}
 
-	if config.RedisOptions.Enabled {
-		c := consumer.NewRedisConsumer(config.RedisOptions)
-		enableConsumer(c, tickerTopic)
+	// 4. Wait for background routines to cleanup
+	done := make(chan struct{})
+	go func() {
+		manager.Wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		slog.Info("All components stopped cleanly")
+	case <-shutdownCtx.Done():
+		slog.Warn("Shutdown timed out, forcing exit")
 	}
 
-	if config.FileConsumerOptions.Enabled {
-		c := consumer.NewFileConsumer(config.FileConsumerOptions.OutputFilename)
-		enableConsumer(c, tickerTopic)
+	return nil
+}
+
+func registerRpcHandlers(manager *rpcmanager.RPCManager) {
+	rpcServer := rpc.NewServer()
+	rpcServer.Register(manager)
+
+	http.HandleFunc("/rpc", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("content-type", "application/json")
+		conn := struct {
+			io.ReadCloser
+			io.Writer
+		}{r.Body, w}
+		rpcServer.ServeCodec(jsonrpc.NewServerCodec(conn))
+	})
+}
+
+func initConsumers(tickerTopic *tickertopic.TickerTopic, cfg config.ConfigOptions) []consumer.Consumer {
+	var activeConsumers []consumer.Consumer
+
+	if !cfg.FileConsumerOptions.Enabled &&
+		!cfg.RedisOptions.Enabled &&
+		!cfg.WebsocketConsumerOptions.Enabled &&
+		!cfg.ZMQConsumerOptions.Enabled {
+
+		if cfg.Env != "development" {
+			slog.Error("FATAL: No consumers enabled in production!")
+			os.Exit(1)
+		} else {
+			slog.Warn("No consumers enabled (Development Mode)")
+		}
+		return nil
 	}
 
-	if config.MQTTConsumerOptions.Enabled {
-		c := consumer.NewMqttConsumer(config.MQTTConsumerOptions)
-		enableConsumer(c, tickerTopic)
+	start := func(c consumer.Consumer) {
+		c.StartTickerListener(tickerTopic)
+		activeConsumers = append(activeConsumers, c)
 	}
 
-	if config.WebsocketConsumerOptions.Enabled {
-		c := consumer.NewWebsocketConsumer(config.WebsocketConsumerOptions)
-		enableConsumer(c, tickerTopic)
+	if cfg.RedisOptions.Enabled {
+		start(consumer.NewRedisConsumer(cfg.RedisOptions))
 	}
 
-	// enable statistics generator
-	if config.Stats.Enabled {
-		stats := consumer.NewStatisticsGenerator(config.Stats)
-		enableConsumer(stats, tickerTopic)
+	if cfg.FileConsumerOptions.Enabled {
+		start(consumer.NewFileConsumer(cfg.FileConsumerOptions.OutputFilename))
 	}
+
+	if cfg.ZMQConsumerOptions.Enabled {
+		start(consumer.NewZMQConsumer(cfg.ZMQConsumerOptions))
+	}
+
+	if cfg.WebsocketConsumerOptions.Enabled {
+		start(consumer.NewWebsocketConsumer(cfg.WebsocketConsumerOptions, cfg.Port))
+	}
+
+	if cfg.Stats.Enabled {
+		start(consumer.NewStatisticsGenerator(cfg.Stats))
+	}
+
+	return activeConsumers
 }

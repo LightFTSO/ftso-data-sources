@@ -1,17 +1,16 @@
 package mexc
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"log/slog"
-
 	"github.com/gorilla/websocket"
-	"github.com/textileio/go-threads/broadcast"
 	"google.golang.org/protobuf/proto"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/mexc/pb"
 	"roselabs.mx/ftso-data-sources/internal"
@@ -21,69 +20,75 @@ import (
 )
 
 type MexcClient struct {
-	name               string
-	W                  *sync.WaitGroup
-	TickerTopic        *tickertopic.TickerTopic
-	wsClients          []*internal.WebSocketClient
-	wsEndpoint         string
-	apiEndpoint        string
-	SymbolList         model.SymbolList
-	symbolChunks       []model.SymbolList
-	lastTimestamp      time.Time
-	lastTimestampMutex sync.Mutex
-	log                *slog.Logger
+	name string
+	log  *slog.Logger
 
-	pingInterval time.Duration
+	// Core
+	TickerTopic *tickertopic.TickerTopic
+	W           *sync.WaitGroup
+	wsClients   []*internal.WebSocketClient
 
-	tzInfo           *time.Location
-	subscriptionId   atomic.Uint64
-	isRunning        bool
-	clientClosedChan *broadcast.Broadcaster
+	// Config
+	wsEndpoint   string
+	symbolChunks []model.SymbolList
+
+	// State
+	lastTimestamp  atomic.Int64 // UnixMilli
+	subscriptionId atomic.Uint64
+	isRunning      bool
+
+	// Lifecycle
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
-func NewMexcClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*MexcClient, error) {
+func NewMexcClient(options map[string]any, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*MexcClient, error) {
 	wsEndpoint := "wss://wbs-api.mexc.com/ws"
 
-	shanghaiTimezone, err := time.LoadLocation("Asia/Shanghai")
-	if err != nil {
-		return nil, fmt.Errorf("error loading timezone information: %w", err)
+	mexc := &MexcClient{
+		name:        "mexc",
+		log:         slog.Default().With(slog.String("datasource", "mexc")),
+		W:           w,
+		TickerTopic: tickerTopic,
+		wsClients:   []*internal.WebSocketClient{},
+		wsEndpoint:  wsEndpoint,
 	}
 
-	mexc := MexcClient{
-		name:             "mexc",
-		log:              slog.Default().With(slog.String("datasource", "mexc")),
-		W:                w,
-		TickerTopic:      tickerTopic,
-		wsClients:        []*internal.WebSocketClient{},
-		wsEndpoint:       wsEndpoint,
-		apiEndpoint:      "https://api.mexc.com",
-		SymbolList:       symbolList.Crypto,
-		pingInterval:     20 * time.Second,
-		tzInfo:           shanghaiTimezone,
-		clientClosedChan: broadcast.NewBroadcaster(0),
-	}
-	mexc.symbolChunks = mexc.SymbolList.ChunkSymbols(25)
+	// MEXC supports batch subscriptions.
+	// 500 symbols per connection is safe if batched properly.
+	mexc.symbolChunks = symbolList.Crypto.ChunkSymbols(500)
+
 	mexc.log.Debug("Created new datasource")
-	return &mexc, nil
+	return mexc, nil
 }
 
 func (d *MexcClient) Connect() error {
+	if d.isRunning {
+		return nil
+	}
 	d.isRunning = true
+	d.ctx, d.cancel = context.WithCancel(context.Background())
 	d.W.Add(1)
 
+	d.lastTimestamp.Store(time.Now().UnixMilli())
+
 	for _, chunk := range d.symbolChunks {
+		currentChunk := chunk
 		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
 		wsClient.SetMessageHandler(d.onMessage)
 		wsClient.SetLogger(d.log)
+
 		wsClient.SetOnConnect(func() error {
-			return d.SubscribeTickers(wsClient, chunk)
+			return d.SubscribeTickers(wsClient, currentChunk)
 		})
+
 		d.wsClients = append(d.wsClients, wsClient)
 		wsClient.Start()
 	}
 
-	d.setPing()
-	d.setLastTickerWatcher()
+	d.startPingLoop()
+	d.startWatchdog()
+	d.log.Info("MEXC datasource connected", "connections", len(d.wsClients))
 
 	return nil
 }
@@ -92,13 +97,16 @@ func (d *MexcClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
+	d.log.Info("MEXC closing...")
+
+	d.cancel()
+
 	for _, wsClient := range d.wsClients {
 		wsClient.Close()
 	}
-	d.isRunning = false
-	d.clientClosedChan.Send(true)
-	d.W.Done()
 
+	d.W.Done()
+	d.isRunning = false
 	return nil
 }
 
@@ -106,114 +114,158 @@ func (d *MexcClient) IsRunning() bool {
 	return d.isRunning
 }
 
-func (d *MexcClient) onMessage(message internal.WsMessage) {
-	switch message.Type {
-	case websocket.TextMessage:
-		//fmt.Println("TextMessage ", message.Type, string(message.Message))
-
-	case websocket.BinaryMessage:
-		var newMessage pb.PushDataV3ApiWrapper
-		err := proto.Unmarshal(message.Message, &newMessage)
-		if err != nil {
-			d.log.Error("Error unmarshaling message", "error", err)
-			return
-		}
-		ticker, err := d.parseTicker(&newMessage)
-		if err != nil {
-			d.log.Error("Error parsing ticker",
-				"ticker", ticker, "error", err.Error())
-			return
-		}
-		d.lastTimestampMutex.Lock()
-		d.lastTimestamp = time.Now()
-		d.lastTimestampMutex.Unlock()
-
-		d.TickerTopic.Send(ticker)
-
-	}
-}
-
-func (d *MexcClient) parseTicker(message *pb.PushDataV3ApiWrapper) (*model.Ticker, error) {
-	var newTickerEvent pb.PublicMiniTickerV3Api = *message.GetPublicMiniTicker()
-
-	symbol := model.ParseSymbol(newTickerEvent.GetSymbol())
-	ts := time.UnixMilli(message.GetSendTime())
-	ticker, err := model.NewTickerPriceString(newTickerEvent.GetPrice(),
-		symbol,
-		d.GetName(),
-		ts)
-	if err != nil {
-		d.log.Error("Error parsing ticker", "error", err)
-		return nil, err
-	}
-	return ticker, err
-}
-
-func (d *MexcClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
-	for _, v := range symbols {
-		subMessage := map[string]interface{}{
-			"id":     d.subscriptionId.Add(1),
-			"method": "SUBSCRIPTION",
-			"params": []string{fmt.Sprintf("spot@public.miniTicker.v3.api.pb@%s%s@UTC+0", strings.ToUpper(v.Base), strings.ToUpper(v.Quote))},
-		}
-		wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
-	}
-
-	d.log.Debug("Subscribed ticker symbols", "symbols", len(symbols))
-	return nil
-}
-
 func (d *MexcClient) GetName() string {
 	return d.name
 }
 
-func (d *MexcClient) setLastTickerWatcher() {
-	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	d.lastTimestampMutex.Lock()
-	d.lastTimestamp = time.Now()
-	d.lastTimestampMutex.Unlock()
+// -------------------------------------------------------------------------
+// Message Handling
+// -------------------------------------------------------------------------
 
-	timeout := (30 * time.Second)
+func (d *MexcClient) onMessage(message internal.WsMessage) {
+	switch message.Type {
+	case websocket.BinaryMessage:
+		var newMessage pb.PushDataV3ApiWrapper
+		if err := proto.Unmarshal(message.Message, &newMessage); err != nil {
+			// Fail silently on bad frames
+			return
+		}
+
+		// If using Protobuf wrapper, ensure we have the ticker field
+		if newMessage.GetPublicMiniTicker() == nil {
+			return
+		}
+
+		ticker, err := d.parseTicker(&newMessage)
+		if err != nil {
+			return
+		}
+
+		d.lastTimestamp.Store(time.Now().UnixMilli())
+		d.TickerTopic.Send(ticker)
+
+	case websocket.TextMessage:
+		// Handle JSON PONGs or Errors if needed
+	}
+}
+
+func (d *MexcClient) parseTicker(message *pb.PushDataV3ApiWrapper) (model.Ticker, error) {
+	// Access via getter to be safe (handles nil)
+	event := message.GetPublicMiniTicker()
+
+	symbol := model.ParseSymbol(event.GetSymbol())
+
+	// SendTime is usually the event generation time
+	ts := time.UnixMilli(message.GetSendTime())
+
+	return model.NewTickerPriceString(
+		event.GetPrice(),
+		symbol,
+		d.name,
+		ts,
+	)
+}
+
+// -------------------------------------------------------------------------
+// Subscription
+// -------------------------------------------------------------------------
+
+func (d *MexcClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
+	// Batch subscriptions: MEXC allows list of params
+	// "params": ["spot@public.miniTicker.v3.api.pb@BTCUSDT@UTC+0", ...]
+	batchSize := 30
+
+	for i := 0; i < len(symbols); i += batchSize {
+		end := i + batchSize
+		if end > len(symbols) {
+			end = len(symbols)
+		}
+
+		batch := symbols[i:end]
+		params := make([]string, 0, len(batch))
+
+		for _, v := range batch {
+			// Format: spot@public.miniTicker.v3.api.pb@SYMBOL@UTC+0
+			topic := fmt.Sprintf("spot@public.miniTicker.v3.api.pb@%s%s@UTC+0",
+				strings.ToUpper(v.Base),
+				strings.ToUpper(v.Quote))
+			params = append(params, topic)
+		}
+
+		subMessage := map[string]interface{}{
+			"id":     d.subscriptionId.Add(1),
+			"method": "SUBSCRIPTION",
+			"params": params,
+		}
+
+		// Use Context-aware send
+		ctx, cancel := context.WithTimeout(d.ctx, 5*time.Second)
+		err := wsClient.SendMessageJSON(ctx, websocket.TextMessage, subMessage)
+		cancel()
+
+		if err != nil {
+			d.log.Warn("Failed to send subscription batch")
+		}
+
+		// Throttle
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	d.log.Debug("Subscribed ticker symbols", "count", len(symbols))
+	return nil
+}
+
+// -------------------------------------------------------------------------
+// Heartbeat & Watchdog
+// -------------------------------------------------------------------------
+
+func (d *MexcClient) startPingLoop() {
+	d.W.Add(1)
 	go func() {
-		defer lastTickerIntervalTimer.Stop()
+		defer d.W.Done()
+		// MEXC expects {"method": "PING"} as Text Message
+		ticker := time.NewTicker(20 * time.Second)
+		defer ticker.Stop()
+
+		pingMsg := []byte(`{"method":"PING"}`)
+
 		for {
 			select {
-			case <-d.clientClosedChan.Listen().Channel():
-				d.log.Debug("last ticker received watcher goroutine exiting")
+			case <-d.ctx.Done():
 				return
-			case <-lastTickerIntervalTimer.C:
-				now := time.Now()
-				d.lastTimestampMutex.Lock()
-				diff := now.Sub(d.lastTimestamp)
-				d.lastTimestampMutex.Unlock()
-
-				if diff > timeout {
-					// no tickers received in a while, attempt to reconnect
-					d.lastTimestampMutex.Lock()
-					d.lastTimestamp = time.Now()
-					d.lastTimestampMutex.Unlock()
-					d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-					for _, wsClient := range d.wsClients {
-						wsClient.Reconnect()
-					}
+			case <-ticker.C:
+				for _, wsClient := range d.wsClients {
+					wsClient.TrySendMessage(internal.WsMessage{
+						Type:    websocket.TextMessage, // Must be Text!
+						Message: pingMsg,
+					})
 				}
 			}
 		}
 	}()
 }
 
-func (d *MexcClient) setPing() {
-	ticker := time.NewTicker(d.pingInterval)
+func (d *MexcClient) startWatchdog() {
+	d.W.Add(1)
 	go func() {
+		defer d.W.Done()
+		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
+		timeout := 30 * time.Second
+
 		for {
 			select {
-			case <-d.clientClosedChan.Listen().Channel():
-				d.log.Debug("ping sender goroutine exiting")
+			case <-d.ctx.Done():
 				return
 			case <-ticker.C:
-				for _, wsClient := range d.wsClients {
-					wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte(`{"method":"PING"}`)})
+				last := d.lastTimestamp.Load()
+				if time.Since(time.UnixMilli(last)) > timeout {
+					d.log.Warn("Watchdog: No tickers received", "timeout", timeout)
+					d.lastTimestamp.Store(time.Now().UnixMilli())
+
+					for _, ws := range d.wsClients {
+						ws.Reconnect()
+					}
 				}
 			}
 		}

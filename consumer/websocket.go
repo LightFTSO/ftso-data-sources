@@ -14,36 +14,36 @@ import (
 	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
+const MAX_WS_BUFFER_CAPACITY = 10000
+const INITIAL_BUFFER_SIZE = 1000
+
 type WebsocketConsumerOptions struct {
 	Enabled               bool          `mapstructure:"enabled"`
 	TickersEndpoint       string        `mapstructure:"ticker_endpoint"`
 	FlushInterval         time.Duration `mapstructure:"flush_interval"`
 	SerializationProtocol string        `mapstructure:"serialization_protocol"`
-	Port                  int
 }
 
 type WebsocketServerConsumer struct {
 	wsServer       websocket_server.WebsocketServer
 	TickerListener *broadcast.Listener
 
-	config               WebsocketConsumerOptions
-	useExchangeTimestamp bool
+	config WebsocketConsumerOptions
 
 	tickerBuffer []*model.Ticker
 	mutex        sync.Mutex
 
-	serializer  func([]*model.TickerMessage) ([]byte, error)
+	serializer  func([]model.TickerMessage) ([]byte, error)
 	messageType int
+
+	port int
 }
 
-func (s *WebsocketServerConsumer) getSerializer() (func(tickers []*model.TickerMessage) ([]byte, error), error) {
+func (s *WebsocketServerConsumer) getSerializer() (func(tickers []model.TickerMessage) ([]byte, error), error) {
 	switch s.config.SerializationProtocol {
 	case "json":
 		s.messageType = websocket.TextMessage
 		return serialization.JsonTickerSerializer, nil
-	case "protobuf":
-		s.messageType = websocket.BinaryMessage
-		return serialization.ProtobufTickerSerializer, nil
 	default:
 		err := fmt.Errorf("unknown serialization method %s", s.config.SerializationProtocol)
 		return nil, err
@@ -53,23 +53,27 @@ func (s *WebsocketServerConsumer) getSerializer() (func(tickers []*model.TickerM
 func (s *WebsocketServerConsumer) setup() error {
 	serializer, err := s.getSerializer()
 	if err != nil {
-		panic(err)
+		return err
 	}
 	s.serializer = serializer
 
 	if err := s.wsServer.Connect(); err != nil {
-		panic(err)
+		return err
 	}
-	log.Info("Websocket Consumer started.", "port", s.config.Port, "serializer", s.config.SerializationProtocol)
+	log.Info("Websocket Consumer started.", "port", s.port, "serializer", s.config.SerializationProtocol)
 
 	return nil
 }
 
 func (s *WebsocketServerConsumer) processTickerBatch(tickers []*model.Ticker) {
-	tickersMessage := make([]*model.TickerMessage, len(tickers))
+	if len(tickers) == 0 {
+		return
+	}
+
+	tickersMessage := make([]model.TickerMessage, len(tickers))
 	for i, t := range tickers {
-		tm := model.NewTickerMessage(t)
-		tickersMessage[i] = &tm
+		tm := model.NewTickerMessage(*t)
+		tickersMessage[i] = tm
 	}
 
 	// Marshal the tickers
@@ -80,10 +84,7 @@ func (s *WebsocketServerConsumer) processTickerBatch(tickers []*model.Ticker) {
 	}
 
 	// Broadcast the payload
-	err = s.wsServer.BroadcastMessage(s.messageType, payload)
-	if err != nil {
-		log.Error("error broadcasting tickers", "consumer", "websocket", "error", err)
-	}
+	s.wsServer.BroadcastBytes(websocket.TextMessage, payload)
 }
 
 func (s *WebsocketServerConsumer) flushTickers() {
@@ -91,17 +92,21 @@ func (s *WebsocketServerConsumer) flushTickers() {
 	defer interval.Stop()
 
 	for range interval.C {
+		if !s.wsServer.HasClients() {
+			continue
+		}
+
 		s.mutex.Lock()
 		if len(s.tickerBuffer) == 0 {
 			s.mutex.Unlock()
 			continue
 		}
 		tickersToProcess := s.tickerBuffer
-		s.tickerBuffer = nil // Reset the buffer
+
+		s.tickerBuffer = make([]*model.Ticker, 0, INITIAL_BUFFER_SIZE)
 		s.mutex.Unlock()
 
 		s.processTickerBatch(tickersToProcess)
-
 	}
 }
 
@@ -109,34 +114,51 @@ func (s *WebsocketServerConsumer) StartTickerListener(tickerTopic *tickertopic.T
 	// Listen for tickers and accumulate them
 	s.TickerListener = tickerTopic.Broadcaster.Listen()
 	log.Debug("Websocket ticker listening for tickers now", "consumer", "websocket", "address", s.wsServer.Address)
+
 	go func() {
 		for t := range s.TickerListener.Channel() {
-			ticker := (t.(*model.Ticker))
-			if !s.useExchangeTimestamp {
-				ticker.Timestamp = time.Now().UTC()
-
+			if !s.wsServer.HasClients() {
+				continue
 			}
+
+			ticker := (t.(model.Ticker))
+
 			s.mutex.Lock()
-			s.tickerBuffer = append(s.tickerBuffer, ticker)
+
+			if len(s.tickerBuffer) >= MAX_WS_BUFFER_CAPACITY {
+				s.mutex.Unlock()
+				log.Warn("Websocket Consumer buffer full! Dropping ticker.", "consumer", "websocket")
+				continue
+			}
+
+			s.tickerBuffer = append(s.tickerBuffer, &ticker)
 			s.mutex.Unlock()
 		}
 	}()
+
 	// Start the flush goroutine
 	go s.flushTickers()
 }
 
 func (s *WebsocketServerConsumer) CloseTickerListener() {
-	s.TickerListener.Discard()
+	if s.TickerListener != nil {
+		s.TickerListener.Discard()
+	}
 }
 
-func NewWebsocketConsumer(options WebsocketConsumerOptions) *WebsocketServerConsumer {
-	server := websocket_server.NewWebsocketServer(options.Port, options.TickersEndpoint)
+func NewWebsocketConsumer(options WebsocketConsumerOptions, port int) *WebsocketServerConsumer {
+	server := websocket_server.NewWebsocketServer(port, options.TickersEndpoint)
 
 	newConsumer := &WebsocketServerConsumer{
-		wsServer: *server,
-		config:   options,
+		wsServer:     *server,
+		config:       options,
+		tickerBuffer: make([]*model.Ticker, 0, INITIAL_BUFFER_SIZE),
+		port:         port,
 	}
-	newConsumer.setup()
+
+	if err := newConsumer.setup(); err != nil {
+		panic(err)
+	}
 
 	return newConsumer
 }

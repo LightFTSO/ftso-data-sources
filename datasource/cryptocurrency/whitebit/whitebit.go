@@ -1,21 +1,19 @@
 package whitebit
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"log/slog"
-
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
-	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
@@ -23,68 +21,76 @@ import (
 )
 
 type WhitebitClient struct {
-	name               string
-	W                  *sync.WaitGroup
-	TickerTopic        *tickertopic.TickerTopic
-	wsClients          []*internal.WebSocketClient
-	wsEndpoint         string
-	apiEndpoint        string
-	SymbolList         model.SymbolList
-	symbolChunks       []model.SymbolList
-	lastTimestamp      time.Time
-	lastTimestampMutex sync.Mutex
-	log                *slog.Logger
+	name string
+	log  *slog.Logger
 
-	pingInterval time.Duration
+	// Core
+	TickerTopic *tickertopic.TickerTopic
+	W           *sync.WaitGroup
+	wsClients   []*internal.WebSocketClient
 
+	// Config
+	wsEndpoint   string
+	apiEndpoint  string
+	symbolChunks []model.SymbolList
+
+	// State
+	lastTimestamp  atomic.Int64 // UnixMilli
 	subscriptionId atomic.Uint64
+	isRunning      bool
 
-	isRunning        bool
-	clientClosedChan *broadcast.Broadcaster
+	// Lifecycle
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
-func NewWhitebitClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*WhitebitClient, error) {
+func NewWhitebitClient(options map[string]any, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*WhitebitClient, error) {
 	wsEndpoint := "wss://api.whitebit.com/ws"
 
-	whitebit := WhitebitClient{
-		name:             "whitebit",
-		log:              slog.Default().With(slog.String("datasource", "whitebit")),
-		W:                w,
-		TickerTopic:      tickerTopic,
-		wsClients:        []*internal.WebSocketClient{},
-		wsEndpoint:       wsEndpoint,
-		apiEndpoint:      "https://whitebit.com/api/v4/",
-		SymbolList:       symbolList.Crypto,
-		pingInterval:     30 * time.Second,
-		clientClosedChan: broadcast.NewBroadcaster(0),
+	whitebit := &WhitebitClient{
+		name:        "whitebit",
+		log:         slog.Default().With(slog.String("datasource", "whitebit")),
+		W:           w,
+		TickerTopic: tickerTopic,
+		wsClients:   []*internal.WebSocketClient{},
+		wsEndpoint:  wsEndpoint,
+		apiEndpoint: "https://whitebit.com/api/v4/",
 	}
-	whitebit.symbolChunks = whitebit.SymbolList.ChunkSymbols(1024)
+
+	// WhiteBIT handles batches well. 500 symbols per connection is safe.
+	whitebit.symbolChunks = symbolList.Crypto.ChunkSymbols(500)
+
 	whitebit.log.Debug("Created new datasource")
-	return &whitebit, nil
+	return whitebit, nil
 }
 
 func (d *WhitebitClient) Connect() error {
+	if d.isRunning {
+		return nil
+	}
 	d.isRunning = true
+	d.ctx, d.cancel = context.WithCancel(context.Background())
 	d.W.Add(1)
 
+	d.lastTimestamp.Store(time.Now().UnixMilli())
+
 	for _, chunk := range d.symbolChunks {
+		currentChunk := chunk
 		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
 		wsClient.SetMessageHandler(d.onMessage)
 		wsClient.SetLogger(d.log)
+
 		wsClient.SetOnConnect(func() error {
-			err := d.SubscribeTickers(wsClient, chunk)
-			if err != nil {
-				d.log.Error("Error subscribing to tickers")
-				return err
-			}
-			return err
+			return d.SubscribeTickers(wsClient, currentChunk)
 		})
+
 		d.wsClients = append(d.wsClients, wsClient)
 		wsClient.Start()
 	}
 
-	d.setPing()
-	d.setLastTickerWatcher()
+	d.startPingLoop()
+	d.startWatchdog()
+	d.log.Info("WhiteBIT datasource connected", "connections", len(d.wsClients))
 
 	return nil
 }
@@ -93,13 +99,16 @@ func (d *WhitebitClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
+	d.log.Info("WhiteBIT closing...")
+
+	d.cancel()
+
 	for _, wsClient := range d.wsClients {
 		wsClient.Close()
 	}
-	d.isRunning = false
-	d.clientClosedChan.Send(true)
-	d.W.Done()
 
+	d.W.Done()
+	d.isRunning = false
 	return nil
 }
 
@@ -107,59 +116,125 @@ func (d *WhitebitClient) IsRunning() bool {
 	return d.isRunning
 }
 
-func (d *WhitebitClient) onMessage(message internal.WsMessage) {
-	msg := string(message.Message)
-	if message.Type == websocket.TextMessage {
-		if strings.Contains(msg, "lastprice_update") {
-			ticker, err := d.parseTicker(message.Message)
-			if err != nil {
-				d.log.Error("Error parsing ticker",
-					"ticker", ticker, "error", err.Error())
-				return
-			}
-			d.lastTimestampMutex.Lock()
-			d.lastTimestamp = time.Now()
-			d.lastTimestampMutex.Unlock()
+func (d *WhitebitClient) GetName() string {
+	return d.name
+}
 
-			d.TickerTopic.Send(ticker)
+// -------------------------------------------------------------------------
+// Message Handling
+// -------------------------------------------------------------------------
+
+func (d *WhitebitClient) onMessage(message internal.WsMessage) {
+	if message.Type != websocket.TextMessage {
+		return
+	}
+
+	msg := string(message.Message)
+
+	// WhiteBIT notifications: {"method": "lastprice_update", "params": ["BTC_USDT", "50000.00"]}
+	if strings.Contains(msg, "lastprice_update") {
+		ticker, err := d.parseTicker(message.Message)
+		if err != nil {
+			return
+		}
+
+		d.lastTimestamp.Store(time.Now().UnixMilli())
+		d.TickerTopic.Send(ticker)
+	}
+}
+
+func (d *WhitebitClient) parseTicker(message []byte) (model.Ticker, error) {
+	var event WsTickerMessage
+	if err := sonic.Unmarshal(message, &event); err != nil {
+		return model.Ticker{}, err
+	}
+
+	if len(event.Params) < 2 {
+		return model.Ticker{}, errors.New("invalid params")
+	}
+
+	// Params[0] is Symbol ("BTC_USDT")
+	symbol := model.ParseSymbol(event.Params[0])
+
+	// Params[1] is Price String ("50000.00")
+	priceStr := event.Params[1]
+
+	return model.NewTickerPriceString(
+		priceStr,
+		symbol,
+		d.name,
+		time.Now(), // WhiteBIT "lastprice" feed does not provide timestamp
+	)
+}
+
+// -------------------------------------------------------------------------
+// Subscription & Data Fetching
+// -------------------------------------------------------------------------
+
+func (d *WhitebitClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
+	// 1. Fetch available symbols (O(1) Map)
+	availableMap, err := d.getAvailableSymbolsMap()
+	if err != nil {
+		d.log.Error("Failed to fetch available symbols", "error", err)
+		return err
+	}
+
+	// 2. Filter Symbols
+	var validMarkets []string
+	for _, req := range symbols {
+		// WhiteBIT format: BASE_QUOTE (e.g. BTC_USDT)
+		// Try to match uppercase
+		key := fmt.Sprintf("%s_%s", strings.ToUpper(req.Base), strings.ToUpper(req.Quote))
+
+		if _, exists := availableMap[key]; exists {
+			validMarkets = append(validMarkets, key)
 		}
 	}
+
+	if len(validMarkets) == 0 {
+		return nil
+	}
+
+	// 3. Batch Subscribe
+	// WhiteBIT is lenient, but 100 per batch is safe practice.
+	batchSize := 100
+
+	for i := 0; i < len(validMarkets); i += batchSize {
+		end := i + batchSize
+		if end > len(validMarkets) {
+			end = len(validMarkets)
+		}
+
+		batch := validMarkets[i:end]
+		id := d.subscriptionId.Add(1)
+
+		subMessage := map[string]interface{}{
+			"id":     id,
+			"method": "lastprice_subscribe",
+			"params": batch,
+		}
+
+		// Throttle
+		time.Sleep(50 * time.Millisecond)
+
+		// Fix: Send ONLY to the specific wsClient, not loop all clients
+		err := wsClient.TrySendMessageJSON(websocket.TextMessage, subMessage)
+		if err != nil {
+			d.log.Warn("Failed to send subscription batch")
+		}
+	}
+
+	d.log.Debug("Subscribed ticker symbols", "count", len(validMarkets))
+	return nil
 }
 
-func (d *WhitebitClient) parseTicker(message []byte) (*model.Ticker, error) {
-	var newTickerEvent WsTickerMessage
-	err := sonic.Unmarshal(message, &newTickerEvent)
-	if err != nil {
-		d.log.Error(err.Error())
-		return &model.Ticker{}, err
-	}
-
-	if len(newTickerEvent.Params) != 2 {
-		err = fmt.Errorf("received params have unknown data: %+v", newTickerEvent)
-		return &model.Ticker{}, err
-	}
-
-	_, err = strconv.ParseFloat(newTickerEvent.Params[1], 64)
-	if err != nil {
-		return nil, err
-	}
-
-	symbol := model.ParseSymbol(newTickerEvent.Params[0])
-	ticker, err := model.NewTickerPriceString(newTickerEvent.Params[1],
-		symbol,
-		d.GetName(),
-		time.Now())
-	if err != nil {
-		d.log.Error("Error parsing ticker", "error", err)
-		return nil, err
-	}
-	return ticker, err
-}
-
-func (d *WhitebitClient) getAvailableSymbols() ([]WhitebitMarketPair, error) {
+func (d *WhitebitClient) getAvailableSymbolsMap() (map[string]bool, error) {
 	reqUrl := d.apiEndpoint + "public/markets"
 
-	req, err := http.NewRequest(http.MethodGet, reqUrl, nil)
+	ctx, cancel := context.WithTimeout(d.ctx, 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqUrl, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -168,130 +243,80 @@ func (d *WhitebitClient) getAvailableSymbols() ([]WhitebitMarketPair, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer res.Body.Close()
 
 	data, err := io.ReadAll(res.Body)
 	if err != nil {
 		return nil, err
 	}
 
-	availableSymbols := []WhitebitMarketPair{}
-	err = sonic.Unmarshal(data, &availableSymbols)
-	if err != nil {
+	var markets []WhitebitMarketPair
+	if err := sonic.Unmarshal(data, &markets); err != nil {
 		return nil, err
 	}
-	return availableSymbols, nil
 
-}
-
-func (d *WhitebitClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
-	availableSymbols, err := d.getAvailableSymbols()
-	if err != nil {
-		d.log.Error("error obtaining available symbols. Closing whitebit datasource", "error", err.Error())
-		d.W.Done()
-		return err
+	result := make(map[string]bool, len(markets))
+	for _, m := range markets {
+		// m.Name is like "BTC_USDT"
+		result[m.Name] = true
 	}
 
-	subscribedSymbols := model.SymbolList{}
-	for _, v1 := range d.SymbolList {
-		for _, v2 := range availableSymbols {
-			symbol := model.ParseSymbol(v2.Name)
-			if strings.EqualFold(strings.ToUpper(v1.Base), strings.ToUpper(symbol.Base)) && strings.EqualFold(strings.ToUpper(v1.Quote), strings.ToUpper(symbol.Quote)) {
-				subscribedSymbols = append(subscribedSymbols, model.Symbol{
-					Base:  symbol.Base,
-					Quote: symbol.Quote,
-				},
-				)
-			}
-		}
-	}
-
-	// batch subscriptions
-	chunksize := len(subscribedSymbols)
-	for i := 0; i < len(subscribedSymbols); i += chunksize {
-		subMessage := map[string]interface{}{
-			"id":     d.subscriptionId.Add(1),
-			"method": "lastprice_subscribe",
-			"params": []string{},
-		}
-		s := []string{}
-		for j := range chunksize {
-			if i+j >= len(subscribedSymbols) {
-				continue
-			}
-			v := subscribedSymbols[i+j]
-			s = append(s, fmt.Sprintf("%s_%s", strings.ToUpper(v.Base), strings.ToUpper(v.Quote)))
-		}
-		subMessage["params"] = s
-		for _, wsClient := range d.wsClients {
-			wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
-		}
-
-	}
-
-	d.log.Debug("Subscribed ticker symbols", "symbols", len(subscribedSymbols))
-	return nil
+	return result, nil
 }
 
-func (d *WhitebitClient) GetName() string {
-	return d.name
-}
+// -------------------------------------------------------------------------
+// Heartbeat & Watchdog
+// -------------------------------------------------------------------------
 
-func (d *WhitebitClient) setLastTickerWatcher() {
-	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	d.lastTimestampMutex.Lock()
-	d.lastTimestamp = time.Now()
-	d.lastTimestampMutex.Unlock()
-
-	timeout := (30 * time.Second)
+func (d *WhitebitClient) startPingLoop() {
+	d.W.Add(1)
 	go func() {
-		defer lastTickerIntervalTimer.Stop()
+		defer d.W.Done()
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
 		for {
 			select {
-			case <-d.clientClosedChan.Listen().Channel():
-				d.log.Debug("last ticker received watcher goroutine exiting")
+			case <-d.ctx.Done():
 				return
-			case <-lastTickerIntervalTimer.C:
-				now := time.Now()
-				d.lastTimestampMutex.Lock()
-				diff := now.Sub(d.lastTimestamp)
-				d.lastTimestampMutex.Unlock()
-
-				if diff > timeout {
-					// no tickers received in a while, attempt to reconnect
-					d.lastTimestampMutex.Lock()
-					d.lastTimestamp = time.Now()
-					d.lastTimestampMutex.Unlock()
-
-					d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-
-					for _, wsClient := range d.wsClients {
-						wsClient.Reconnect()
-					}
+			case <-ticker.C:
+				id := d.subscriptionId.Add(1)
+				pingMsg := map[string]interface{}{
+					"id":     id,
+					"method": "ping",
+					"params": []string{},
+				}
+				for _, wsClient := range d.wsClients {
+					wsClient.TrySendMessage(internal.WsMessage{
+						Type:    websocket.TextMessage,
+						Message: func() []byte { b, _ := sonic.Marshal(pingMsg); return b }(),
+					})
 				}
 			}
 		}
 	}()
 }
 
-func (d *WhitebitClient) setPing() {
-	ticker := time.NewTicker(d.pingInterval)
+func (d *WhitebitClient) startWatchdog() {
+	d.W.Add(1)
 	go func() {
+		defer d.W.Done()
+		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
+		timeout := 30 * time.Second
+
 		for {
 			select {
-			case <-d.clientClosedChan.Listen().Channel():
-				d.log.Debug("ping sender goroutine exiting")
+			case <-d.ctx.Done():
 				return
 			case <-ticker.C:
-				for _, wsClient := range d.wsClients {
-					if err := wsClient.SendMessageJSON(websocket.TextMessage,
-						map[string]interface{}{
-							"id":     d.subscriptionId.Add(1),
-							"method": "ping",
-							"params": []string{},
-						},
-					); err != nil {
-						d.log.Warn("Failed to send ping", "error", err)
+				last := d.lastTimestamp.Load()
+				if time.Since(time.UnixMilli(last)) > timeout {
+					d.log.Warn("Watchdog: No tickers received", "timeout", timeout)
+					d.lastTimestamp.Store(time.Now().UnixMilli())
+
+					for _, ws := range d.wsClients {
+						ws.Reconnect()
 					}
 				}
 			}

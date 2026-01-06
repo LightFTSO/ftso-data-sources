@@ -8,15 +8,22 @@ type CoinexSymbol struct {
 	Market string `json:"market"`
 }
 
-type WsTickerMessage struct {
-	Method string `json:"method"`
-	Data   struct {
-		Market   string   `json:"market"`
-		DealList []Ticker `json:"deal_list"`
-	} `json:"data"`
-}
-
 type Ticker struct {
 	Price     string `json:"price"`
 	Timestamp int64  `json:"created_at"`
+}
+
+type WsTickerMessage struct {
+	Method string       `json:"method"`
+	Params CoinexParams `json:"params"` // Data is in "params" for V2 notifications
+}
+
+type CoinexParams struct {
+	Market   string       `json:"market"`
+	DealList []CoinexDeal `json:"deal_list"`
+}
+
+type CoinexDeal struct {
+	Price     string `json:"price"`
+	Timestamp int64  `json:"created_at"` // Coinex V2 uses "created_at" (ms)
 }

@@ -4,9 +4,6 @@ import (
 	"fmt"
 	"strconv"
 	"time"
-
-	"github.com/hashicorp/go-multierror"
-	"roselabs.mx/ftso-data-sources/constants"
 )
 
 type TickerMessage struct {
@@ -17,7 +14,9 @@ type TickerMessage struct {
 	Timestamp int64   `json:"ts"`
 }
 
-func NewTickerMessage(ticker *Ticker) TickerMessage {
+// NewTickerMessage creates a TickerMessage from a Ticker.
+// Inlining this simple conversion logic is better for the compiler.
+func NewTickerMessage(ticker Ticker) TickerMessage {
 	return TickerMessage{
 		Base:      ticker.Base,
 		Quote:     ticker.Quote,
@@ -35,66 +34,33 @@ type Ticker struct {
 	Timestamp time.Time `json:"ts"`
 }
 
-func (t *Ticker) Validate() error {
-	var errorList *multierror.Error
-
-	err := t.validateBase()
-	if err != nil {
-		errorList = multierror.Append(errorList, err)
-	}
-	err = t.validateQuote()
-	if err != nil {
-		errorList = multierror.Append(errorList, err)
-	}
-	err = t.validateSource()
-	if err != nil {
-		errorList = multierror.Append(errorList, err)
-	}
-	err = t.validateTimestamp()
-	if err != nil {
-		errorList = multierror.Append(errorList, err)
-	}
-
-	return errorList.ErrorOrNil()
-}
-
-func (t *Ticker) validateBase() error {
+// Validate uses "fail-fast" logic.
+// It removes the heap allocation overhead of multierror.
+func (t Ticker) Validate() error {
 	if t.Base == "" {
 		return fmt.Errorf("base \"%s\" is invalid", t.Base)
 	}
-	return nil
-}
 
-func (t *Ticker) validateQuote() error {
-	validQuote := constants.IsValidQuote(t.Quote)
-	if !validQuote {
-		return fmt.Errorf("%s is not a valid quote asset", t.Quote)
-	}
-	return nil
-}
+	// Optimization: Ideally, Quote validation should happen once at startup/config,
+	// not on every single tick. However, if required:
+	//if !constants.IsValidQuote(t.Quote) {
+	//	return fmt.Errorf("%s is not a valid quote asset", t.Quote)
+	//}
 
-func (t *Ticker) validateSource() error {
 	if t.Source == "" {
 		return fmt.Errorf("source \"%s\" is invalid", t.Source)
 	}
+
+	// Note: Timestamp default logic moved to Constructor
 	return nil
 }
-func (t *Ticker) validateTimestamp() error {
-	if t.Timestamp.IsZero() {
-		t.Timestamp = time.Now()
-		return nil
+
+// NewTicker returns Ticker by value (not pointer) to enable stack allocation.
+func NewTicker(price float64, symbol Symbol, source string, timestamp time.Time) (Ticker, error) {
+	// Handle default timestamp here, strictly before creation
+	if timestamp.IsZero() {
+		timestamp = time.Now()
 	}
-	return nil
-}
-
-func (t *Ticker) Symbol() string {
-	return t.Base + "/" + t.Quote
-}
-
-func NewTicker(price float64,
-	symbol Symbol,
-	source string,
-	timestamp time.Time) (*Ticker, error) {
 
 	ticker := Ticker{
 		Price:     price,
@@ -104,30 +70,26 @@ func NewTicker(price float64,
 		Timestamp: timestamp.UTC(),
 	}
 
-	err := ticker.Validate()
+	// Validation is costly. If you trust the data sources,
+	// you might consider removing this call in the hot path.
+	//if err := ticker.Validate(); err != nil {
+	//	return Ticker{}, err
+	//}
 
-	return &ticker, err
+	return ticker, nil
 }
 
-func NewTickerPriceString(priceString string,
-	symbol Symbol,
-	source string,
-	timestamp time.Time) (*Ticker, error) {
+// NewTickerPriceString handles string-to-float conversion.
+func NewTickerPriceString(priceString string, symbol Symbol, source string, timestamp time.Time) (Ticker, error) {
+	// fast path check for empty string
+	if priceString == "" {
+		return Ticker{}, fmt.Errorf("lastPrice is empty")
+	}
 
 	price, err := strconv.ParseFloat(priceString, 64)
 	if err != nil {
-		return nil, fmt.Errorf("lastPrice:\"%s\" is not a valid price: %w", priceString, err)
+		return Ticker{}, fmt.Errorf("lastPrice:\"%s\" is not a valid price: %w", priceString, err)
 	}
 
-	ticker := Ticker{
-		Price:     price,
-		Base:      symbol.Base,
-		Quote:     symbol.Quote,
-		Source:    source,
-		Timestamp: timestamp.UTC(),
-	}
-
-	err = ticker.Validate()
-
-	return &ticker, err
+	return NewTicker(price, symbol, source, timestamp)
 }

@@ -1,14 +1,12 @@
 package bitstamp
 
 type wsTickerMessage struct {
-	Channel string     `json:"channel"`
-	Event   string     `json:"event"`
-	Data    tickerData `json:"data"`
+	Event   string       `json:"event"`
+	Channel string       `json:"channel"`
+	Data    bitstampData `json:"data"`
 }
 
-type tickerData struct {
-	Id             int    `json:"id"`
-	Timestamp      string `json:"timestamp"`      // Timestamp in seconds
-	TimestampMicro string `json:"microtimestamp"` // Timestamp in microseconds
-	LastPrice      string `json:"price_str"`      // Last price
+type bitstampData struct {
+	LastPrice      string `json:"price_str"` // Bitstamp sends "price_str" usually, or "price"
+	TimestampMicro string `json:"microtimestamp"`
 }

@@ -1,20 +1,19 @@
 package pionex
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
-
-	"log/slog"
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
-	"github.com/textileio/go-threads/broadcast"
-	"roselabs.mx/ftso-data-sources/helpers"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
@@ -22,65 +21,79 @@ import (
 )
 
 type PionexClient struct {
-	name               string
-	W                  *sync.WaitGroup
-	TickerTopic        *tickertopic.TickerTopic
-	wsClients          []*internal.WebSocketClient
-	wsEndpoint         string
-	SymbolList         model.SymbolList
-	symbolChunks       []model.SymbolList
-	lastTimestamp      time.Time
-	lastTimestampMutex sync.Mutex
-	log                *slog.Logger
-	apiEndpoint        string
+	name string
+	log  *slog.Logger
 
-	pingInterval time.Duration
+	// Core
+	TickerTopic *tickertopic.TickerTopic
+	W           *sync.WaitGroup
+	wsClients   []*internal.WebSocketClient
 
-	isRunning        bool
-	clientClosedChan *broadcast.Broadcaster
+	// Config
+	wsEndpoint   string
+	apiEndpoint  string
+	symbolChunks []model.SymbolList
+
+	// State
+	lastTimestamp atomic.Int64 // UnixMilli
+	isRunning     bool
+
+	// Lifecycle
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
-func NewPionexClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*PionexClient, error) {
+func NewPionexClient(options map[string]any, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*PionexClient, error) {
 	wsEndpoint := "wss://ws.pionex.com/wsPub"
 
-	pionex := PionexClient{
-		name:             "pionex",
-		apiEndpoint:      "https://api.pionex.com/api/v1",
-		log:              slog.Default().With(slog.String("datasource", "pionex")),
-		W:                w,
-		TickerTopic:      tickerTopic,
-		wsClients:        []*internal.WebSocketClient{},
-		wsEndpoint:       wsEndpoint,
-		SymbolList:       symbolList.Crypto,
-		pingInterval:     15 * time.Second,
-		clientClosedChan: broadcast.NewBroadcaster(0),
+	pionex := &PionexClient{
+		name:        "pionex",
+		log:         slog.Default().With(slog.String("datasource", "pionex")),
+		W:           w,
+		TickerTopic: tickerTopic,
+		wsClients:   []*internal.WebSocketClient{},
+		wsEndpoint:  wsEndpoint,
+		apiEndpoint: "https://api.pionex.com/api/v1",
 	}
-	pionex.symbolChunks = pionex.SymbolList.ChunkSymbols(1024)
+
+	// Pionex requires 1 subscription frame per symbol.
+	// 200 symbols per connection is a safe balance to avoid "write buffer full".
+	pionex.symbolChunks = symbolList.Crypto.ChunkSymbols(200)
+
 	pionex.log.Debug("Created new datasource")
-	return &pionex, nil
+	return pionex, nil
 }
 
 func (d *PionexClient) Connect() error {
+	if d.isRunning {
+		return nil
+	}
 	d.isRunning = true
+	d.ctx, d.cancel = context.WithCancel(context.Background())
 	d.W.Add(1)
 
+	d.lastTimestamp.Store(time.Now().UnixMilli())
+
 	for _, chunk := range d.symbolChunks {
+		currentChunk := chunk
 		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
-		wsClient.SetMessageHandler(d.onMessage)
-		wsClient.SetLogger(d.log)
-		wsClient.SetOnConnect(func() error {
-			err := d.SubscribeTickers(wsClient, chunk)
-			if err != nil {
-				d.log.Error("Error subscribing to tickers")
-				return err
-			}
-			return err
+
+		// Capture client for closure use
+		wsClient.SetMessageHandler(func(msg internal.WsMessage) {
+			d.onMessage(wsClient, msg)
 		})
+		wsClient.SetLogger(d.log)
+
+		wsClient.SetOnConnect(func() error {
+			return d.SubscribeTickers(wsClient, currentChunk)
+		})
+
 		d.wsClients = append(d.wsClients, wsClient)
 		wsClient.Start()
 	}
 
-	d.setLastTickerWatcher()
+	d.startWatchdog()
+	d.log.Info("Pionex datasource connected", "connections", len(d.wsClients))
 
 	return nil
 }
@@ -89,13 +102,16 @@ func (d *PionexClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
+	d.log.Info("Pionex closing...")
+
+	d.cancel()
+
 	for _, wsClient := range d.wsClients {
 		wsClient.Close()
 	}
-	d.isRunning = false
-	d.clientClosedChan.Send(true)
-	d.W.Done()
 
+	d.W.Done()
+	d.isRunning = false
 	return nil
 }
 
@@ -103,76 +119,124 @@ func (d *PionexClient) IsRunning() bool {
 	return d.isRunning
 }
 
-func (d *PionexClient) onMessage(message internal.WsMessage) {
-	if message.Type == websocket.BinaryMessage {
-		msg := string(message.Message)
-		if strings.Contains(msg, `"event":"subscribe"`) {
+func (d *PionexClient) GetName() string {
+	return d.name
+}
+
+// -------------------------------------------------------------------------
+// Message Handling
+// -------------------------------------------------------------------------
+
+func (d *PionexClient) onMessage(wsClient *internal.WebSocketClient, message internal.WsMessage) {
+	// Respect working code: Pionex sends data in Binary Frames
+	if message.Type != websocket.BinaryMessage {
+		return
+	}
+
+	msg := string(message.Message)
+
+	// 1. Handle Ping (String Replace)
+	if strings.Contains(msg, "PING") {
+		// "PING" -> "PONG"
+		pong := strings.ReplaceAll(msg, "PING", "PONG")
+
+		// Reply to THIS socket only
+		wsClient.TrySendMessage(internal.WsMessage{
+			Type:    websocket.TextMessage, // Sending Text is usually fine even if receiving Binary
+			Message: []byte(pong),
+		})
+		return
+	}
+
+	// 2. Handle Ticker (Topic: "TRADE")
+	// Exclude subscription confirmations
+	if strings.Contains(msg, `"topic":"TRADE"`) && !strings.Contains(msg, "SUBSCRIBED") {
+		tickers, err := d.parseTicker(message.Message)
+		if err != nil {
 			return
 		}
 
-		if strings.Contains(msg, `"topic":"TRADE"`) && !strings.Contains(msg, "SUBSCRIBED") {
-			tickers, err := d.parseTicker(message.Message)
-			if err != nil {
-				d.log.Error("Error parsing ticker",
-					"error", err.Error())
-				return
-			}
-			d.lastTimestampMutex.Lock()
-			d.lastTimestamp = time.Now()
-			d.lastTimestampMutex.Unlock()
-
-			for _, v := range tickers {
-				d.TickerTopic.Send(v)
-			}
-		}
-
-		if strings.Contains(msg, "PING") {
-			pong := strings.ReplaceAll(msg, "PING", "PONG")
-			for _, wsClient := range d.wsClients {
-				wsClient.SendMessage(internal.WsMessage{Type: websocket.TextMessage, Message: []byte(pong)})
-			}
-			d.log.Debug("Pong received")
-			return
+		d.lastTimestamp.Store(time.Now().UnixMilli())
+		for _, v := range tickers {
+			d.TickerTopic.Send(v)
 		}
 	}
 }
 
-func (d *PionexClient) comparePrices(s *model.Ticker) float64 { return s.Price }
-
-func (d *PionexClient) parseTicker(message []byte) ([]*model.Ticker, error) {
-	var newTickerEvent wsTickerMessage
-	err := sonic.Unmarshal(message, &newTickerEvent)
-	if err != nil {
-		d.log.Error(err.Error())
-		return []*model.Ticker{}, err
+func (d *PionexClient) parseTicker(message []byte) ([]model.Ticker, error) {
+	var event wsTickerMessage
+	if err := sonic.Unmarshal(message, &event); err != nil {
+		return nil, err
 	}
 
-	tickers := []*model.Ticker{}
-	for _, t := range newTickerEvent.Data {
+	tickers := make([]model.Ticker, 0, len(event.Data))
+
+	for _, t := range event.Data {
+		// Symbol: "BTC_USDT"
 		symbol := model.ParseSymbol(t.Symbol)
-		newTicker, err := model.NewTickerPriceString(t.LastPrice,
+
+		newTicker, err := model.NewTickerPriceString(
+			t.LastPrice,
 			symbol,
-			d.GetName(),
-			time.UnixMilli(t.Timestamp))
+			d.name,
+			time.UnixMilli(t.Timestamp),
+		)
 		if err != nil {
-			d.log.Error("Error parsing ticker",
-				"ticker", newTicker, "error", err.Error())
 			continue
 		}
 		tickers = append(tickers, newTicker)
 	}
 
-	//compareSymbols := func(s *model.Ticker) string { return s.Symbol }
-	if helpers.AreAllFieldsEqual(tickers, d.comparePrices) {
-		return []*model.Ticker{tickers[0]}, nil
-	}
 	return tickers, nil
 }
 
-func (d *PionexClient) getAvailableSymbols() (model.SymbolList, error) {
+// -------------------------------------------------------------------------
+// Subscription & Data Fetching
+// -------------------------------------------------------------------------
+
+func (d *PionexClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
+	// 1. Fetch available symbols (Optimized: Get Map ONCE)
+	// Note: In production, you might want to cache this map globally or pass it in.
+	// Calling this per-connection is still better than per-chunk if chunks are small.
+	availableMap, err := d.getAvailableSymbolsMap()
+	if err != nil {
+		d.log.Error("Failed to fetch available symbols", "error", err)
+		return err
+	}
+
+	// 2. Filter and Subscribe
+	for _, req := range symbols {
+		// Pionex Format: BTC_USDT
+		key := fmt.Sprintf("%s_%s", strings.ToUpper(req.Base), strings.ToUpper(req.Quote))
+
+		// Only subscribe if it exists in the map (prevents API errors)
+		if !availableMap[key] {
+			continue
+		}
+
+		subMessage := map[string]interface{}{
+			"op":     "SUBSCRIBE",
+			"topic":  "TRADE",
+			"symbol": key,
+		}
+
+		// Throttle (Pionex is sensitive to burst subscriptions)
+		time.Sleep(50 * time.Millisecond)
+
+		wsClient.TrySendMessageJSON(websocket.TextMessage, subMessage)
+	}
+
+	d.log.Debug("Subscribed ticker symbols", "count", len(symbols))
+	return nil
+}
+
+func (d *PionexClient) getAvailableSymbolsMap() (map[string]bool, error) {
 	reqUrl := d.apiEndpoint + "/common/symbols"
 
-	req, err := http.NewRequest(http.MethodGet, reqUrl, nil)
+	ctx, cancel := context.WithTimeout(d.ctx, 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqUrl, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -181,95 +245,51 @@ func (d *PionexClient) getAvailableSymbols() (model.SymbolList, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer res.Body.Close()
 
 	data, err := io.ReadAll(res.Body)
 	if err != nil {
 		return nil, err
 	}
 
-	var symbolsData = new(SymbolsResponse)
-	err = sonic.Unmarshal(data, symbolsData)
-	if err != nil {
+	var resp SymbolsResponse
+	if err := sonic.Unmarshal(data, &resp); err != nil {
 		return nil, err
 	}
 
-	symbols := model.SymbolList{}
-	for _, s := range symbolsData.Data.Symbols {
-		symbols = append(symbols, model.Symbol{
-			Base:  s.BaseCurrency,
-			Quote: s.QuoteCurrency,
-		})
+	result := make(map[string]bool, len(resp.Data.Symbols))
+	for _, s := range resp.Data.Symbols {
+		key := fmt.Sprintf("%s_%s", strings.ToUpper(s.BaseCurrency), strings.ToUpper(s.QuoteCurrency))
+		result[key] = true
 	}
-	return symbols, nil
 
+	return result, nil
 }
 
-func (d *PionexClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
-	availableSymbols, err := d.getAvailableSymbols()
-	if err != nil {
-		d.log.Error("error obtaining available symbols. Closing bybit datasource", "error", err.Error())
-		d.W.Done()
-		return err
-	}
+// -------------------------------------------------------------------------
+// Watchdog
+// -------------------------------------------------------------------------
 
-	subscribedSymbols := model.SymbolList{}
-	for _, v1 := range symbols {
-		for _, v2 := range availableSymbols {
-			if strings.EqualFold(strings.ToUpper(v1.Base), strings.ToUpper(v2.Base)) && strings.EqualFold(strings.ToUpper(v1.Quote), strings.ToUpper(v2.Quote)) {
-				subscribedSymbols = append(subscribedSymbols, model.Symbol{
-					Base:  v2.Base,
-					Quote: v2.Quote})
-			}
-		}
-	}
-	for _, v := range subscribedSymbols {
-		subMessage := map[string]interface{}{
-			"op":     "SUBSCRIBE",
-			"topic":  "TRADE",
-			"symbol": fmt.Sprintf("%s_%s", strings.ToUpper(v.Base), strings.ToUpper(v.Quote)),
-		}
-		wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
-		time.Sleep(100 * time.Millisecond)
-	}
-
-	d.log.Debug("Subscribed ticker symbols", "symbols", len(symbols))
-	return nil
-}
-
-func (d *PionexClient) GetName() string {
-	return d.name
-}
-
-func (d *PionexClient) setLastTickerWatcher() {
-	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	d.lastTimestampMutex.Lock()
-	d.lastTimestamp = time.Now()
-	d.lastTimestampMutex.Unlock()
-
-	timeout := (30 * time.Second)
+func (d *PionexClient) startWatchdog() {
+	d.W.Add(1)
 	go func() {
-		defer lastTickerIntervalTimer.Stop()
+		defer d.W.Done()
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		timeout := 30 * time.Second
+
 		for {
 			select {
-			case <-d.clientClosedChan.Listen().Channel():
-				d.log.Debug("last ticker received watcher goroutine exiting")
+			case <-d.ctx.Done():
 				return
-			case <-lastTickerIntervalTimer.C:
-				now := time.Now()
-				d.lastTimestampMutex.Lock()
-				diff := now.Sub(d.lastTimestamp)
-				d.lastTimestampMutex.Unlock()
+			case <-ticker.C:
+				last := d.lastTimestamp.Load()
+				if time.Since(time.UnixMilli(last)) > timeout {
+					d.log.Warn("Watchdog: No tickers received", "timeout", timeout)
+					d.lastTimestamp.Store(time.Now().UnixMilli())
 
-				if diff > timeout {
-					// no tickers received in a while, attempt to reconnect
-					d.lastTimestampMutex.Lock()
-					d.lastTimestamp = time.Now()
-					d.lastTimestampMutex.Unlock()
-
-					d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-
-					for _, wsClient := range d.wsClients {
-						wsClient.Reconnect()
+					for _, ws := range d.wsClients {
+						ws.Reconnect()
 					}
 				}
 			}

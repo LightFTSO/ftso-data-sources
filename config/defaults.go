@@ -12,7 +12,7 @@ func setDefaults() {
 	viper.SetDefault("message_buffer_size", 0)
 	viper.SetDefault("port", 9999)
 
-	viper.SetDefault("assets.crypto", constants.BASES_CRYPTO)
+	viper.SetDefault("assets.crypto", constants.AssetList{})
 	viper.SetDefault("assets.commodities", constants.AssetList{})
 	viper.SetDefault("assets.forex", constants.AssetList{})
 	viper.SetDefault("assets.stocks", constants.AssetList{})
@@ -25,9 +25,6 @@ func setDefaults() {
 	viper.SetDefault("file_output.enabled", false)
 	viper.SetDefault("file_output.filename", "")
 
-	viper.SetDefault("mqtt.enabled", false)
-	viper.SetDefault("mqtt.qos_level", 0)
-
 	viper.SetDefault("redis_ts.enabled", false)
 	viper.SetDefault("redis_ts.client_options.initaddress", []string{"127.0.0.1:6379"})
 	viper.SetDefault("redis_ts.client_options.username", "")
@@ -38,14 +35,12 @@ func setDefaults() {
 
 	viper.SetDefault("websocket_server.enabled", false)
 	viper.SetDefault("websocket_server.ticker_endpoint", "/tickers")
-	viper.SetDefault("websocket_server.flush_interval", "500ms")
+	viper.SetDefault("websocket_server.flush_interval", "50ms")
 	viper.SetDefault("websocket_server.serialization_protocol", "json")
 
-	viper.SetDefault("questdb.enabled", false)
-	viper.SetDefault("questdb.flush_interval", "10s")
-	viper.SetDefault("questdb.client_options.address", "127.0.0.0.1:9000")
-	viper.SetDefault("questdb.client_options.schema", "http")
-	viper.SetDefault("questdb.individual_feed_table", true)
+	viper.SetDefault("zeromq.enabled", "")
+	viper.SetDefault("zeromq.port", 9998)
+	viper.SetDefault("zeromq.flush_interval", "5ms")
 
 	viper.SetDefault("ticker_transformations", tickertopic.TransformationOptions{})
 }

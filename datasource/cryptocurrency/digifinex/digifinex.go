@@ -1,20 +1,19 @@
 package digifinex
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
-
-	"log/slog"
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
-	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
@@ -22,68 +21,77 @@ import (
 )
 
 type DigifinexClient struct {
-	name               string
-	W                  *sync.WaitGroup
-	TickerTopic        *tickertopic.TickerTopic
-	wsClients          []*internal.WebSocketClient
-	wsEndpoint         string
-	apiEndpoint        string
-	SymbolList         model.SymbolList
-	symbolChunks       []model.SymbolList
-	lastTimestamp      time.Time
-	lastTimestampMutex sync.Mutex
-	log                *slog.Logger
+	name string
+	log  *slog.Logger
 
-	pingInterval     time.Duration
-	availableMarkets model.SymbolList
+	// Core
+	TickerTopic *tickertopic.TickerTopic
+	W           *sync.WaitGroup
+	wsClients   []*internal.WebSocketClient
 
-	isRunning        bool
-	clientClosedChan *broadcast.Broadcaster
+	// Config
+	wsEndpoint   string
+	apiEndpoint  string
+	symbolChunks []model.SymbolList
+
+	// State
+	lastTimestamp  atomic.Int64 // UnixMilli
+	subscriptionId atomic.Uint64
+	isRunning      bool
+
+	// Lifecycle
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
-func NewDigifinexClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*DigifinexClient, error) {
+func NewDigifinexClient(options map[string]any, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*DigifinexClient, error) {
 	wsEndpoint := "wss://openapi.digifinex.com/ws/v1/"
 
-	digifinex := DigifinexClient{
-		name:             "digifinex",
-		log:              slog.Default().With(slog.String("datasource", "digifinex")),
-		W:                w,
-		TickerTopic:      tickerTopic,
-		wsClients:        []*internal.WebSocketClient{},
-		wsEndpoint:       wsEndpoint,
-		apiEndpoint:      "https://openapi.digifinex.com",
-		SymbolList:       symbolList.Crypto,
-		pingInterval:     15 * time.Second,
-		clientClosedChan: broadcast.NewBroadcaster(0),
+	digifinex := &DigifinexClient{
+		name:        "digifinex",
+		log:         slog.Default().With(slog.String("datasource", "digifinex")),
+		W:           w,
+		TickerTopic: tickerTopic,
+		wsClients:   []*internal.WebSocketClient{},
+		wsEndpoint:  wsEndpoint,
+		apiEndpoint: "https://openapi.digifinex.com",
 	}
-	digifinex.symbolChunks = digifinex.SymbolList.ChunkSymbols(30)
+
+	// Digifinex allows large batches (100+).
+	// 500 symbols per connection is safe and efficient.
+	digifinex.symbolChunks = symbolList.Crypto.ChunkSymbols(500)
+
 	digifinex.log.Debug("Created new datasource")
-	return &digifinex, nil
+	return digifinex, nil
 }
 
 func (d *DigifinexClient) Connect() error {
+	if d.isRunning {
+		return nil
+	}
 	d.isRunning = true
+	d.ctx, d.cancel = context.WithCancel(context.Background())
 	d.W.Add(1)
 
+	d.lastTimestamp.Store(time.Now().UnixMilli())
+
 	for _, chunk := range d.symbolChunks {
+		currentChunk := chunk
 		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
 		wsClient.SetMessageHandler(d.onMessage)
 		wsClient.SetLogger(d.log)
+
 		wsClient.SetOnConnect(func() error {
-			time.Sleep(500 * time.Millisecond)
-			err := d.SubscribeTickers(wsClient, chunk)
-			if err != nil {
-				d.log.Error("Error subscribing to tickers")
-				return err
-			}
-			return err
+			return d.SubscribeTickers(wsClient, currentChunk)
 		})
+
 		d.wsClients = append(d.wsClients, wsClient)
 		wsClient.Start()
 	}
 
-	d.setPing()
-	d.setLastTickerWatcher()
+	d.startPingLoop()
+	d.startWatchdog()
+	d.log.Info("Digifinex datasource connected", "connections", len(d.wsClients))
 
 	return nil
 }
@@ -92,13 +100,16 @@ func (d *DigifinexClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
+	d.log.Info("Digifinex closing...")
+
+	d.cancel()
+
 	for _, wsClient := range d.wsClients {
 		wsClient.Close()
 	}
-	d.isRunning = false
-	d.clientClosedChan.Send(true)
-	d.W.Done()
 
+	d.W.Done()
+	d.isRunning = false
 	return nil
 }
 
@@ -106,63 +117,72 @@ func (d *DigifinexClient) IsRunning() bool {
 	return d.isRunning
 }
 
+func (d *DigifinexClient) GetName() string {
+	return d.name
+}
+
+// -------------------------------------------------------------------------
+// Message Handling
+// -------------------------------------------------------------------------
+
 func (d *DigifinexClient) onMessage(message internal.WsMessage) {
-	if message.Type == websocket.BinaryMessage {
-		/*if strings.Contains(msg, `"table":"spot/ticker"`) {
-		tickers, err := d.parseTicker(message.Message)
-		if err != nil {
-			d.log.Error("Error parsing ticker",
-				"error", err.Error())
-			return err
-		}
+	// Digifinex sends ZLIB Compressed Binary Frames
+	if message.Type != websocket.BinaryMessage {
+		return
+	}
 
-		for _, v := range tickers {
-			d.TickerTopic.Send(v)
-		}
-		}*/
+	// 1. Decompress
+	decompressedData, err := internal.DecompressZlib(message.Message)
+	if err != nil {
+		d.log.Error("Error decompressing Digifinex message", "error", err)
+		return
+	}
 
-		// decompress
-		decompressedData, err := internal.DecompressZlib(message.Message)
+	// sonic works faster on bytes, but we need string checks
+	dataStr := string(decompressedData)
+
+	// 2. Handle Pong
+	// Response to server.ping: {"error": null, "result": "pong", "id": ...}
+	if strings.Contains(dataStr, `"result":"pong"`) {
+		d.lastTimestamp.Store(time.Now().UnixMilli())
+		return
+	}
+
+	// 3. Handle Ticker
+	// {"method": "ticker.update", "params": [...]}
+	if strings.Contains(dataStr, `"ticker.update"`) {
+		tickers, err := d.parseTicker(decompressedData)
 		if err != nil {
-			d.log.Error("Error decompressing message", "error", err.Error())
 			return
 		}
-		data := string(decompressedData)
-		if strings.Contains(data, "ticker.update") && strings.Contains(data, "tick") && !strings.Contains(data, "event_rep") {
-			tickers, err := d.parseTicker([]byte(data))
-			if err != nil {
-				d.log.Error("Error parsing ticker", "error", err.Error())
-				return
-			}
-			d.lastTimestampMutex.Lock()
-			d.lastTimestamp = time.Now()
-			d.lastTimestampMutex.Unlock()
 
-			for _, t := range tickers {
-				d.TickerTopic.Send(t)
-			}
+		d.lastTimestamp.Store(time.Now().UnixMilli())
+
+		for _, t := range tickers {
+			d.TickerTopic.Send(t)
 		}
 	}
 }
 
-func (d *DigifinexClient) parseTicker(message []byte) ([]*model.Ticker, error) {
-	var newTickerEvent wsTickerMessage
-	err := sonic.Unmarshal(message, &newTickerEvent)
-	if err != nil {
-		d.log.Error(err.Error())
-		return []*model.Ticker{}, err
+func (d *DigifinexClient) parseTicker(message []byte) ([]model.Ticker, error) {
+	var event WsTickerMessage
+	if err := sonic.Unmarshal(message, &event); err != nil {
+		return nil, err
 	}
 
-	tickers := []*model.Ticker{}
-	for _, t := range newTickerEvent.Params {
+	tickers := make([]model.Ticker, 0, len(event.Params))
+
+	for _, t := range event.Params {
+		// Symbol format: "BTC_USDT"
 		symbol := model.ParseSymbol(t.Symbol)
-		newTicker, err := model.NewTickerPriceString(t.LastPrice,
+
+		newTicker, err := model.NewTickerPriceString(
+			t.LastPrice,
 			symbol,
-			d.GetName(),
-			time.UnixMilli(t.Timestamp))
+			d.name,
+			time.UnixMilli(t.Timestamp),
+		)
 		if err != nil {
-			d.log.Error("Error parsing ticker",
-				"ticker", newTicker, "error", err.Error())
 			continue
 		}
 		tickers = append(tickers, newTicker)
@@ -171,14 +191,74 @@ func (d *DigifinexClient) parseTicker(message []byte) ([]*model.Ticker, error) {
 	return tickers, nil
 }
 
-func (b *DigifinexClient) getAvailableSymbols() (model.SymbolList, error) {
-	if b.availableMarkets != nil {
-		return b.availableMarkets, nil
+// -------------------------------------------------------------------------
+// Subscription & Data Fetching
+// -------------------------------------------------------------------------
+
+func (d *DigifinexClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
+	// 1. Fetch Available Symbols (O(1) Map)
+	availableMap, err := d.getAvailableSymbolsMap()
+	if err != nil {
+		d.log.Error("Failed to fetch available symbols", "error", err)
+		return err
 	}
 
-	reqUrl := b.apiEndpoint + "/v3/markets"
+	// 2. Filter Symbols
+	var validMarkets []string
+	for _, req := range symbols {
+		// Digifinex Format: BASE_QUOTE (e.g. BTC_USDT)
+		// API returns lower case usually, but accepts upper case in subscribe.
+		// Let's normalize to Upper Case "BASE_QUOTE" for matching.
+		key := fmt.Sprintf("%s_%s", strings.ToUpper(req.Base), strings.ToUpper(req.Quote))
 
-	req, err := http.NewRequest(http.MethodGet, reqUrl, nil)
+		if _, exists := availableMap[key]; exists {
+			validMarkets = append(validMarkets, key)
+		}
+	}
+
+	if len(validMarkets) == 0 {
+		return nil
+	}
+
+	// 3. Batch Subscribe
+	// Digifinex documentation says multiple symbols allowed.
+	// We'll batch 50 at a time.
+	chunkSize := 50
+	for i := 0; i < len(validMarkets); i += chunkSize {
+		end := i + chunkSize
+		if end > len(validMarkets) {
+			end = len(validMarkets)
+		}
+
+		batch := validMarkets[i:end]
+		id := d.subscriptionId.Add(1)
+
+		subMessage := map[string]interface{}{
+			"method": "ticker.subscribe",
+			"id":     id,
+			"params": batch,
+		}
+
+		// Throttle
+		time.Sleep(50 * time.Millisecond)
+
+		// Note: Digifinex uses Binary Frames for receiving, but Text Frames for sending usually work.
+		// If strict binary send is required, one would marshal to bytes.
+		// Most libraries support sending Text to Digifinex.
+		wsClient.TrySendMessageJSON(websocket.TextMessage, subMessage)
+	}
+
+	d.log.Debug("Subscribed ticker symbols", "count", len(validMarkets))
+	return nil
+}
+
+func (d *DigifinexClient) getAvailableSymbolsMap() (map[string]bool, error) {
+	reqUrl := d.apiEndpoint + "/v3/markets"
+
+	ctx, cancel := context.WithTimeout(d.ctx, 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqUrl, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -187,129 +267,83 @@ func (b *DigifinexClient) getAvailableSymbols() (model.SymbolList, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer res.Body.Close()
 
 	data, err := io.ReadAll(res.Body)
 	if err != nil {
 		return nil, err
 	}
 
-	var exchangeInfo = new(MarketInfo)
-	err = sonic.Unmarshal(data, exchangeInfo)
-	if err != nil {
+	var marketInfo MarketInfo
+	if err := sonic.Unmarshal(data, &marketInfo); err != nil {
 		return nil, err
 	}
 
-	availableMarkets := model.SymbolList{}
-	for _, v := range exchangeInfo.Data {
-		availableMarkets = append(availableMarkets, model.ParseSymbol(v.Market))
+	// Create Map for fast lookup
+	// Digifinex returns markets like "btc_usdt" (lowercase)
+	result := make(map[string]bool, len(marketInfo.Data))
+	for _, m := range marketInfo.Data {
+		result[strings.ToUpper(m.Market)] = true
 	}
 
-	b.availableMarkets = availableMarkets
-	return availableMarkets, nil
+	return result, nil
 }
 
-func (d *DigifinexClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
-	availableSymbols, err := d.getAvailableSymbols()
-	if err != nil {
-		d.log.Error("error obtaining available symbols. Closing digifinex datasource", "error", err.Error())
-		d.W.Done()
-		return err
-	}
+// -------------------------------------------------------------------------
+// Heartbeat & Watchdog
+// -------------------------------------------------------------------------
 
-	subscribedSymbols := []string{}
-	for _, v1 := range symbols {
-		for _, v2 := range availableSymbols {
-			if strings.EqualFold(strings.ToUpper(v1.Base), strings.ToUpper(string(v2.Base))) &&
-				strings.EqualFold(strings.ToUpper(v1.Quote), strings.ToUpper(string(v2.Quote))) {
-
-				subscribedSymbols = append(subscribedSymbols, fmt.Sprintf("%s_%s", strings.ToUpper(v2.Base), strings.ToUpper(v2.Quote)))
-			}
-		}
-	}
-
-	// batch subscriptions in packets of 20
-	chunksize := 20
-	for i := 0; i < len(subscribedSymbols); i += chunksize {
-		subMessage := map[string]interface{}{
-			"method": "ticker.subscribe",
-			"id":     fmt.Sprint(rand.Uint32() % 9999),
-		}
-		s := []string{}
-		for j := range chunksize {
-			if i+j >= len(subscribedSymbols) {
-				continue
-			}
-			v := subscribedSymbols[i+j]
-			s = append(s, v)
-		}
-		subMessage["params"] = s
-		wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
-
-	}
-
-	d.log.Debug("Subscribed ticker symbols", "symbols", len(subscribedSymbols))
-	return nil
-}
-
-func (d *DigifinexClient) GetName() string {
-	return d.name
-}
-
-func (d *DigifinexClient) setLastTickerWatcher() {
-	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	d.lastTimestampMutex.Lock()
-	d.lastTimestamp = time.Now()
-	d.lastTimestampMutex.Unlock()
-
-	timeout := (30 * time.Second)
+func (d *DigifinexClient) startPingLoop() {
+	d.W.Add(1)
 	go func() {
-		defer lastTickerIntervalTimer.Stop()
+		defer d.W.Done()
+		// Digifinex requires "server.ping" every ~20s
+		ticker := time.NewTicker(20 * time.Second)
+		defer ticker.Stop()
+
 		for {
 			select {
-			case <-d.clientClosedChan.Listen().Channel():
-				d.log.Debug("last ticker received watcher goroutine exiting")
+			case <-d.ctx.Done():
 				return
-			case <-lastTickerIntervalTimer.C:
-				now := time.Now()
-				d.lastTimestampMutex.Lock()
-				diff := now.Sub(d.lastTimestamp)
-				d.lastTimestampMutex.Unlock()
-
-				if diff > timeout {
-					// no tickers received in a while, attempt to reconnect
-					d.lastTimestampMutex.Lock()
-					d.lastTimestamp = time.Now()
-					d.lastTimestampMutex.Unlock()
-
-					d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-
-					for _, wsClient := range d.wsClients {
-						wsClient.Reconnect()
-					}
+			case <-ticker.C:
+				id := d.subscriptionId.Add(1)
+				// CRITICAL FIX: "method": "server.ping" (not "ping")
+				pingMsg := map[string]interface{}{
+					"method": "server.ping",
+					"params": []string{},
+					"id":     id,
+				}
+				for _, wsClient := range d.wsClients {
+					wsClient.TrySendMessage(internal.WsMessage{
+						Type:    websocket.TextMessage,
+						Message: func() []byte { b, _ := sonic.Marshal(pingMsg); return b }(),
+					})
 				}
 			}
 		}
 	}()
 }
 
-func (d *DigifinexClient) setPing() {
-	ticker := time.NewTicker(d.pingInterval)
+func (d *DigifinexClient) startWatchdog() {
+	d.W.Add(1)
 	go func() {
+		defer d.W.Done()
+		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
+		timeout := 30 * time.Second
+
 		for {
 			select {
-			case <-d.clientClosedChan.Listen().Channel():
-				d.log.Debug("ping sender goroutine exiting")
+			case <-d.ctx.Done():
 				return
 			case <-ticker.C:
-				msg := map[string]interface{}{
-					"ping":   fmt.Sprint(rand.Uint32() % 999999),
-					"method": "ping",
-					"params": []string{},
-				}
-				for _, wsClient := range d.wsClients {
-					if err := wsClient.SendMessageJSON(websocket.TextMessage, msg); err != nil {
-						d.log.Warn("Failed to send ping", "error", err)
+				last := d.lastTimestamp.Load()
+				if time.Since(time.UnixMilli(last)) > timeout {
+					d.log.Warn("Watchdog: No tickers received", "timeout", timeout)
+					d.lastTimestamp.Store(time.Now().UnixMilli())
+
+					for _, ws := range d.wsClients {
+						ws.Reconnect()
 					}
 				}
 			}

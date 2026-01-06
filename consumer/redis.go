@@ -14,11 +14,16 @@ import (
 )
 
 const TICKERS_KEY string = "tickers"
+const MAX_BUFFER_CAPACITY = 5000
 
 type RedisOptions struct {
-	Enabled       bool
-	ClientOptions rueidis.ClientOption `mapstructure:"client_options"`
-	TsOptions     struct {
+	Enabled       bool `mapstructure:"enabled"`
+	ClientOptions struct {
+		Username    string   `mapstructure:"username"`
+		Password    string   `mapstructure:"password"`
+		InitAddress []string `mapstructure:"initaddress"`
+	} `mapstructure:"client_options"`
+	TsOptions struct {
 		Retention time.Duration `mapstructure:"retention"`
 		ChunkSize int64         `mapstructure:"chunksize"`
 		MaxMemory string        `mapstructure:"maxmemory"`
@@ -27,13 +32,11 @@ type RedisOptions struct {
 
 type RedisConsumer struct {
 	TickerListener *broadcast.Listener
+	redisClient    rueidis.Client
 
-	redisClient rueidis.Client
-
-	tsRetention          time.Duration
-	tsChunkSize          int64
-	instanceMaxMemory    string
-	useExchangeTimestamp bool
+	tsRetention       time.Duration
+	tsChunkSize       int64
+	instanceMaxMemory string
 
 	tickerBuffer []*model.Ticker
 	mutex        sync.Mutex
@@ -42,52 +45,37 @@ type RedisConsumer struct {
 }
 
 func (s *RedisConsumer) setup() error {
-	log.Info("Setting maxmemory configuration value", "consumer", "redis", "maxmemory", s.instanceMaxMemory, "maxmemory-policy", "volatile-ttl")
-	if len(s.instanceMaxMemory) <= 0 {
-		log.Warn("Redis's config param maxmemory is empty. Please check memory usage", "consumer", "redis")
-	}
-	maxMemCmd := s.redisClient.B().
-		ConfigSet().
-		ParameterValue().
-		ParameterValue("maxmemory", s.instanceMaxMemory).
-		ParameterValue("maxmemory-policy", "volatile-ttl").
-		Build()
-
-	if err := s.redisClient.Do(context.Background(), maxMemCmd).Error(); err != nil {
-		log.Error("Error setting maxmemory", "consumer", "redis", "error", err)
-		panic(err)
-	}
-
-	// initialize
 	s.timeSeriesKeys = make(map[string]bool)
 
-	log.Info("Creating informational keys", "consumer", "redis")
+	if len(s.instanceMaxMemory) > 0 {
+		log.Info("Setting maxmemory configuration value", "consumer", "redis")
+		maxMemCmd := s.redisClient.B().
+			ConfigSet().
+			ParameterValue().
+			ParameterValue("maxmemory", s.instanceMaxMemory).
+			ParameterValue("maxmemory-policy", "volatile-ttl").
+			Build()
 
-	cmd := s.redisClient.B().Keys().Pattern(fmt.Sprintf("%s:*", TICKERS_KEY)).Build()
-	tsKeys, err := s.redisClient.Do(context.Background(), cmd).AsStrSlice()
-	if err != nil {
-		log.Error("Error creating meta informational keys", "consumer", "redis")
-		return err
+		if err := s.redisClient.Do(context.Background(), maxMemCmd).Error(); err != nil {
+			log.Warn("Could not set Redis maxmemory (permission denied?)", "consumer", "redis", "error", err)
+			// Do NOT panic here. The app can still function.
+		}
 	}
-
-	log.Info("Updating retention rules", "consumer", "redis")
-	for _, key := range tsKeys {
-		cmd := s.redisClient.B().TsAlter().Key(key).Retention(s.tsRetention.Milliseconds()).ChunkSize(s.tsChunkSize).DuplicatePolicyLast().Build()
-		s.redisClient.Do(context.Background(), cmd)
-	}
-
 	return nil
-
 }
 
 func (s *RedisConsumer) processTickerBatch(tickers []*model.Ticker) {
+	if len(tickers) == 0 {
+		return
+	}
+
 	tsMaddCommand := s.redisClient.B().TsMadd().KeyTimestampValue()
 
-	for _, ticker := range tickers {
+	validCommandsCount := 0
 
+	for _, ticker := range tickers {
 		key := fmt.Sprintf("%s:%s:%s:%s", TICKERS_KEY, ticker.Source, ticker.Base, ticker.Quote)
 
-		// Check if the key exists in our map
 		if !s.timeSeriesKeys[key] {
 			// Check if key exists in Redis
 			cmd := s.redisClient.B().Exists().Key(key).Build()
@@ -96,6 +84,7 @@ func (s *RedisConsumer) processTickerBatch(tickers []*model.Ticker) {
 				log.Error("Error checking key existence", "consumer", "redis", "key", key, "error", err)
 				continue
 			}
+
 			if !exists {
 				// Create the time series
 				cmd := s.redisClient.B().
@@ -110,9 +99,10 @@ func (s *RedisConsumer) processTickerBatch(tickers []*model.Ticker) {
 					Labels("base", ticker.Base).
 					Labels("quote", ticker.Quote).
 					Build()
+
 				err := s.redisClient.Do(context.Background(), cmd).Error()
 				if err != nil {
-					log.Error("Error creating time series", "consumer", "redis", "key", key, "error", err)
+					log.Error("Error creating time series", "key", key, "error", err)
 					continue
 				}
 			}
@@ -121,15 +111,16 @@ func (s *RedisConsumer) processTickerBatch(tickers []*model.Ticker) {
 		}
 
 		ts := ticker.Timestamp.UTC().UnixMilli()
-
 		tsMaddCommand = tsMaddCommand.KeyTimestampValue(key, ts, ticker.Price)
+		validCommandsCount++
 	}
 
-	err := s.redisClient.Do(context.Background(), tsMaddCommand.Build()).Error()
-	if err != nil {
-		log.Error("Error executing TS.MADD", "consumer", "redis", "error", err)
+	if validCommandsCount > 0 {
+		err := s.redisClient.Do(context.Background(), tsMaddCommand.Build()).Error()
+		if err != nil {
+			log.Error("Error executing TS.MADD", "consumer", "redis", "error", err)
+		}
 	}
-
 }
 
 func (s *RedisConsumer) flushTickers() {
@@ -142,51 +133,63 @@ func (s *RedisConsumer) flushTickers() {
 			s.mutex.Unlock()
 			continue
 		}
+
 		tickersToProcess := s.tickerBuffer
-		s.tickerBuffer = nil // Reset the buffer
+		s.tickerBuffer = make([]*model.Ticker, 0, 500) // Reset with some initial capacity
 		s.mutex.Unlock()
 
 		s.processTickerBatch(tickersToProcess)
-
 	}
 }
 
 func (s *RedisConsumer) StartTickerListener(tickerTopic *tickertopic.TickerTopic) {
-	// Listen for tickers in the ch channel and sends them to a io.Writer
 	log.Debug("Redis ticker listener started", "consumer", "redis")
 	s.TickerListener = tickerTopic.Broadcaster.Listen()
+
 	go func() {
 		for t := range s.TickerListener.Channel() {
-			ticker := (t.(*model.Ticker))
-			if !s.useExchangeTimestamp {
-				ticker.Timestamp = time.Now().UTC()
-			}
+			originalTicker := (t.(*model.Ticker))
+
+			tickerCopy := *originalTicker
 
 			s.mutex.Lock()
-			s.tickerBuffer = append(s.tickerBuffer, ticker)
-			s.mutex.Unlock()
 
+			if len(s.tickerBuffer) >= MAX_BUFFER_CAPACITY {
+				s.mutex.Unlock()
+				log.Warn("Redis Consumer buffer full! Dropping ticker.", "base", tickerCopy.Base)
+				continue
+			}
+
+			s.tickerBuffer = append(s.tickerBuffer, &tickerCopy)
+			s.mutex.Unlock()
 		}
 	}()
-	// Start the flush goroutine
-	go s.flushTickers()
 
+	go s.flushTickers()
 }
+
 func (s *RedisConsumer) CloseTickerListener() {
 	s.TickerListener.Discard()
 	s.redisClient.Close()
 }
 
 func NewRedisConsumer(options RedisOptions) *RedisConsumer {
-	r, err := rueidis.NewClient(options.ClientOptions)
+	clientOptions := rueidis.ClientOption{
+		Username:    options.ClientOptions.Username,
+		Password:    options.ClientOptions.Password,
+		InitAddress: options.ClientOptions.InitAddress,
+	}
+	r, err := rueidis.NewClient(clientOptions)
 	if err != nil {
 		panic(err)
 	}
 
 	newConsumer := &RedisConsumer{
-		redisClient: r,
-		tsRetention: options.TsOptions.Retention,
-		tsChunkSize: options.TsOptions.ChunkSize,
+		redisClient:       r,
+		tsRetention:       options.TsOptions.Retention,
+		tsChunkSize:       options.TsOptions.ChunkSize,
+		instanceMaxMemory: options.TsOptions.MaxMemory,
+		tickerBuffer:      make([]*model.Ticker, 0, 500),
 	}
 	newConsumer.setup()
 

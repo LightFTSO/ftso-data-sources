@@ -1,19 +1,19 @@
 package gateio
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
-
-	"log/slog"
 
 	"github.com/bytedance/sonic"
 	"github.com/gorilla/websocket"
-	"github.com/textileio/go-threads/broadcast"
 	"roselabs.mx/ftso-data-sources/internal"
 	"roselabs.mx/ftso-data-sources/model"
 	"roselabs.mx/ftso-data-sources/symbols"
@@ -21,66 +21,75 @@ import (
 )
 
 type GateIoClient struct {
-	name               string
-	W                  *sync.WaitGroup
-	TickerTopic        *tickertopic.TickerTopic
-	wsClients          []*internal.WebSocketClient
-	wsEndpoint         string
-	apiEndpoint        string
-	SymbolList         model.SymbolList
-	symbolChunks       []model.SymbolList
-	lastTimestamp      time.Time
-	lastTimestampMutex sync.Mutex
-	log                *slog.Logger
+	name string
+	log  *slog.Logger
 
-	pingInterval time.Duration
+	// Core
+	TickerTopic *tickertopic.TickerTopic
+	W           *sync.WaitGroup
+	wsClients   []*internal.WebSocketClient
 
-	isRunning        bool
-	clientClosedChan *broadcast.Broadcaster
+	// Config
+	wsEndpoint   string
+	apiEndpoint  string
+	symbolChunks []model.SymbolList
+
+	// State
+	lastTimestamp atomic.Int64 // UnixMilli
+	isRunning     bool
+
+	// Lifecycle
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
-func NewGateIoClient(options interface{}, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*GateIoClient, error) {
+func NewGateIoClient(options map[string]any, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*GateIoClient, error) {
 	wsEndpoint := "wss://api.gateio.ws/ws/v4/"
 
-	gateio := GateIoClient{
-		name:             "gateio",
-		log:              slog.Default().With(slog.String("datasource", "gateio")),
-		W:                w,
-		TickerTopic:      tickerTopic,
-		wsClients:        []*internal.WebSocketClient{},
-		wsEndpoint:       wsEndpoint,
-		apiEndpoint:      "https://api.gateio.ws/api/v4",
-		SymbolList:       symbolList.Crypto,
-		pingInterval:     30 * time.Second,
-		clientClosedChan: broadcast.NewBroadcaster(0),
+	gateio := &GateIoClient{
+		name:        "gateio",
+		log:         slog.Default().With(slog.String("datasource", "gateio")),
+		W:           w,
+		TickerTopic: tickerTopic,
+		wsClients:   []*internal.WebSocketClient{},
+		wsEndpoint:  wsEndpoint,
+		apiEndpoint: "https://api.gateio.ws/api/v4",
 	}
-	gateio.symbolChunks = gateio.SymbolList.ChunkSymbols(1024)
+
+	// Gate.io handles reasonable volume. 500 symbols per connection.
+	gateio.symbolChunks = symbolList.Crypto.ChunkSymbols(500)
+
 	gateio.log.Debug("Created new datasource")
-	return &gateio, nil
+	return gateio, nil
 }
 
 func (d *GateIoClient) Connect() error {
+	if d.isRunning {
+		return nil
+	}
 	d.isRunning = true
+	d.ctx, d.cancel = context.WithCancel(context.Background())
 	d.W.Add(1)
 
+	d.lastTimestamp.Store(time.Now().UnixMilli())
+
 	for _, chunk := range d.symbolChunks {
+		currentChunk := chunk
 		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
 		wsClient.SetMessageHandler(d.onMessage)
 		wsClient.SetLogger(d.log)
+
 		wsClient.SetOnConnect(func() error {
-			err := d.SubscribeTickers(wsClient, chunk)
-			if err != nil {
-				d.log.Error("Error subscribing to tickers")
-				return err
-			}
-			return err
+			return d.SubscribeTickers(wsClient, currentChunk)
 		})
+
 		d.wsClients = append(d.wsClients, wsClient)
 		wsClient.Start()
 	}
 
-	d.setPing()
-	d.setLastTickerWatcher()
+	d.startPingLoop()
+	d.startWatchdog()
+	d.log.Info("Gate.io datasource connected", "connections", len(d.wsClients))
 
 	return nil
 }
@@ -89,13 +98,16 @@ func (d *GateIoClient) Close() error {
 	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
+	d.log.Info("Gate.io closing...")
+
+	d.cancel()
+
 	for _, wsClient := range d.wsClients {
 		wsClient.Close()
 	}
-	d.isRunning = false
-	d.clientClosedChan.Send(true)
-	d.W.Done()
 
+	d.W.Done()
+	d.isRunning = false
 	return nil
 }
 
@@ -103,49 +115,120 @@ func (d *GateIoClient) IsRunning() bool {
 	return d.isRunning
 }
 
+func (d *GateIoClient) GetName() string {
+	return d.name
+}
+
+// -------------------------------------------------------------------------
+// Message Handling
+// -------------------------------------------------------------------------
+
 func (d *GateIoClient) onMessage(message internal.WsMessage) {
-	if message.Type == websocket.TextMessage {
-		if strings.Contains(string(message.Message), "spot.tickers") && strings.Contains(string(message.Message), "\"event\":\"update\"") {
-			ticker, err := d.parseTicker(message.Message)
-			if err != nil {
-				d.log.Error("Error parsing ticker",
-					"ticker", ticker, "error", err.Error())
-				return
-			}
+	if message.Type != websocket.TextMessage {
+		return
+	}
 
-			d.lastTimestampMutex.Lock()
-			d.lastTimestamp = time.Now()
-			d.lastTimestampMutex.Unlock()
+	msg := string(message.Message)
 
-			d.TickerTopic.Send(ticker)
+	// Gate.io sends {"channel": "spot.pong", ...}
+	if strings.Contains(msg, "spot.pong") {
+		d.lastTimestamp.Store(time.Now().UnixMilli())
+		return
+	}
+
+	// Filter Tickers: channel="spot.tickers" event="update"
+	if strings.Contains(msg, "spot.tickers") && strings.Contains(msg, `"update"`) {
+		ticker, err := d.parseTicker(message.Message)
+		if err != nil {
+			return
+		}
+
+		d.lastTimestamp.Store(time.Now().UnixMilli())
+		d.TickerTopic.Send(ticker)
+	}
+}
+
+func (d *GateIoClient) parseTicker(message []byte) (model.Ticker, error) {
+	var event WsTickerMessage
+	if err := sonic.Unmarshal(message, &event); err != nil {
+		return model.Ticker{}, err
+	}
+
+	symbol := model.ParseSymbol(event.Result.CurrencyPair)
+
+	return model.NewTickerPriceString(
+		event.Result.Last,
+		symbol,
+		d.name,
+		time.UnixMilli(event.TimeMs), // Gate.io V4 sends time_ms at top level
+	)
+}
+
+// -------------------------------------------------------------------------
+// Subscription & Data Fetching
+// -------------------------------------------------------------------------
+
+func (d *GateIoClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
+	// 1. Fetch available symbols (O(1) Map)
+	availableMap, err := d.getAvailableSymbolsMap()
+	if err != nil {
+		d.log.Error("Failed to fetch available symbols", "error", err)
+		return err
+	}
+
+	// 2. Filter Symbols
+	var validPairs []string
+	for _, req := range symbols {
+		// Gate.io format: BASE_QUOTE (e.g. BTC_USDT)
+		key := fmt.Sprintf("%s_%s", strings.ToUpper(req.Base), strings.ToUpper(req.Quote))
+
+		if _, exists := availableMap[key]; exists {
+			validPairs = append(validPairs, key)
 		}
 	}
-}
 
-func (d *GateIoClient) parseTicker(message []byte) (*model.Ticker, error) {
-	var newTickerEvent WsTickerMessage
-	err := sonic.Unmarshal(message, &newTickerEvent)
-	if err != nil {
-		d.log.Error(err.Error())
-		return &model.Ticker{}, err
+	if len(validPairs) == 0 {
+		return nil
 	}
 
-	symbol := model.ParseSymbol(newTickerEvent.Result.CurrencyPair)
-	ticker, err := model.NewTickerPriceString(newTickerEvent.Result.Last,
-		symbol,
-		d.GetName(),
-		time.UnixMilli(newTickerEvent.TimeMs))
-	if err != nil {
-		d.log.Error("Error parsing ticker", "error", err)
-		return nil, err
+	// 3. Batch Subscribe
+	// Gate.io handles reasonably sized batches. 50 is safe.
+	chunkSize := 50
+	for i := 0; i < len(validPairs); i += chunkSize {
+		end := i + chunkSize
+		if end > len(validPairs) {
+			end = len(validPairs)
+		}
+
+		batch := validPairs[i:end]
+
+		subMessage := map[string]interface{}{
+			"time":    time.Now().UnixMilli(),
+			"channel": "spot.tickers",
+			"event":   "subscribe",
+			"payload": batch,
+		}
+
+		// Small delay
+		time.Sleep(50 * time.Millisecond)
+
+		err := wsClient.TrySendMessageJSON(websocket.TextMessage, subMessage)
+		if err != nil {
+			d.log.Warn("Failed to send subscription batch")
+		}
 	}
-	return ticker, err
+
+	d.log.Debug("Subscribed ticker symbols", "count", len(validPairs))
+	return nil
 }
 
-func (d *GateIoClient) getAvailableSymbols() (*[]GateIoInstrument, error) {
+func (d *GateIoClient) getAvailableSymbolsMap() (map[string]bool, error) {
 	reqUrl := d.apiEndpoint + "/spot/currency_pairs"
 
-	req, err := http.NewRequest(http.MethodGet, reqUrl, nil)
+	ctx, cancel := context.WithTimeout(d.ctx, 10*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqUrl, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -154,118 +237,83 @@ func (d *GateIoClient) getAvailableSymbols() (*[]GateIoInstrument, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer res.Body.Close()
 
 	data, err := io.ReadAll(res.Body)
 	if err != nil {
 		return nil, err
 	}
 
-	var availableSymbols = new([]GateIoInstrument)
-	err = sonic.Unmarshal(data, availableSymbols)
-	if err != nil {
+	var pairs []GateIoInstrument
+	if err := sonic.Unmarshal(data, &pairs); err != nil {
 		return nil, err
 	}
-	return availableSymbols, nil
 
-}
-
-func (d *GateIoClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
-	availableSymbols, err := d.getAvailableSymbols()
-	if err != nil {
-		d.log.Error("error obtaining available symbols. Closing gateio datasource", "error", err.Error())
-		d.W.Done()
-		return err
+	result := make(map[string]bool, len(pairs))
+	for _, p := range pairs {
+		// Gate.io usually returns "id": "BTC_USDT" or "base": "BTC", "quote": "USDT"
+		// The struct provided had Base/Quote. Let's stick to that if verified.
+		// Assuming GateIoInstrument matches: {"base": "BTC", "quote": "USDT", ...}
+		key := fmt.Sprintf("%s_%s", strings.ToUpper(p.Base), strings.ToUpper(p.Quote))
+		result[key] = true
 	}
 
-	subscribedSymbols := model.SymbolList{}
-	for _, v1 := range symbols {
-		for _, v2 := range *availableSymbols {
-			if strings.EqualFold(strings.ToUpper(v1.Base), strings.ToUpper(v2.Base)) && strings.EqualFold(strings.ToUpper(v1.Quote), strings.ToUpper(v2.Quote)) {
-				subscribedSymbols = append(subscribedSymbols, model.Symbol{
-					Base:  v2.Base,
-					Quote: v2.Quote})
-			}
-		}
-	}
-
-	// batch subscriptions in packets of 10
-	chunksize := 10
-	for i := 0; i < len(subscribedSymbols); i += chunksize {
-		subMessage := map[string]interface{}{
-			"time":    time.Now().UnixMilli(),
-			"channel": "spot.tickers",
-			"event":   "subscribe",
-		}
-		s := []string{}
-		for j := range chunksize {
-			if i+j >= len(subscribedSymbols) {
-				continue
-			}
-			v := subscribedSymbols[i+j]
-			s = append(s, fmt.Sprintf("%s_%s", strings.ToUpper(v.Base), strings.ToUpper(v.Quote)))
-		}
-		subMessage["payload"] = s
-		wsClient.SendMessageJSON(websocket.TextMessage, subMessage)
-	}
-
-	d.log.Debug("Subscribed ticker symbols", "symbols", len(subscribedSymbols))
-	return nil
+	return result, nil
 }
 
-func (d *GateIoClient) GetName() string {
-	return d.name
-}
+// -------------------------------------------------------------------------
+// Heartbeat & Watchdog
+// -------------------------------------------------------------------------
 
-func (d *GateIoClient) setLastTickerWatcher() {
-	lastTickerIntervalTimer := time.NewTicker(1 * time.Second)
-	d.lastTimestampMutex.Lock()
-	d.lastTimestamp = time.Now()
-	d.lastTimestampMutex.Unlock()
-
-	timeout := (30 * time.Second)
+func (d *GateIoClient) startPingLoop() {
+	d.W.Add(1)
 	go func() {
-		defer lastTickerIntervalTimer.Stop()
+		defer d.W.Done()
+		// Gate.io V4 expects: {"channel": "spot.ping"}
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
 		for {
 			select {
-			case <-d.clientClosedChan.Listen().Channel():
-				d.log.Debug("last ticker received watcher goroutine exiting")
+			case <-d.ctx.Done():
 				return
-			case <-lastTickerIntervalTimer.C:
-				now := time.Now()
-				d.lastTimestampMutex.Lock()
-				diff := now.Sub(d.lastTimestamp)
-				d.lastTimestampMutex.Unlock()
-
-				if diff > timeout {
-					// no tickers received in a while, attempt to reconnect
-					d.lastTimestampMutex.Lock()
-					d.lastTimestamp = time.Now()
-					d.lastTimestampMutex.Unlock()
-
-					d.log.Warn(fmt.Sprintf("No tickers received in %s", diff))
-
-					for _, wsClient := range d.wsClients {
-						wsClient.Reconnect()
-					}
+			case <-ticker.C:
+				pingMsg := map[string]interface{}{
+					"time":    time.Now().UnixMilli(),
+					"channel": "spot.ping",
+				}
+				for _, wsClient := range d.wsClients {
+					wsClient.TrySendMessage(internal.WsMessage{
+						Type:    websocket.TextMessage,
+						Message: func() []byte { b, _ := sonic.Marshal(pingMsg); return b }(),
+					})
 				}
 			}
 		}
 	}()
 }
 
-func (d *GateIoClient) setPing() {
-	ticker := time.NewTicker(d.pingInterval)
+func (d *GateIoClient) startWatchdog() {
+	d.W.Add(1)
 	go func() {
+		defer d.W.Done()
+		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
+		timeout := 30 * time.Second
+
 		for {
 			select {
-			case <-d.clientClosedChan.Listen().Channel():
-				d.log.Debug("ping sender goroutine exiting")
+			case <-d.ctx.Done():
 				return
 			case <-ticker.C:
-				for _, wsClient := range d.wsClients {
-					wsClient.SendMessage(internal.WsMessage{Type: websocket.PingMessage, Message: []byte(`{"method":"server.ping"}`)})
+				last := d.lastTimestamp.Load()
+				if time.Since(time.UnixMilli(last)) > timeout {
+					d.log.Warn("Watchdog: No tickers received", "timeout", timeout)
+					d.lastTimestamp.Store(time.Now().UnixMilli())
 
+					for _, ws := range d.wsClients {
+						ws.Reconnect()
+					}
 				}
 			}
 		}

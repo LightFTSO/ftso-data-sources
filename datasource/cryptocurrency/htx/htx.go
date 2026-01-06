@@ -1,4 +1,4 @@
-package bitrue
+package htx
 
 import (
 	"context"
@@ -18,7 +18,7 @@ import (
 	"roselabs.mx/ftso-data-sources/tickertopic"
 )
 
-type BitrueClient struct {
+type HTXClient struct {
 	name string
 	log  *slog.Logger
 
@@ -40,27 +40,27 @@ type BitrueClient struct {
 	cancel context.CancelFunc
 }
 
-func NewBitrueClient(options map[string]any, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*BitrueClient, error) {
-	wsEndpoint := "wss://ws.bitrue.com/kline-api/ws"
+func NewHTXClient(options map[string]any, symbolList symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (*HTXClient, error) {
+	// Updated to HTX Endpoint
+	wsEndpoint := "wss://api.htx.com/ws"
 
-	bitrue := &BitrueClient{
-		name:        "bitrue",
-		log:         slog.Default().With(slog.String("datasource", "bitrue")),
+	htx := &HTXClient{
+		name:        "htx", // Keeping internal name "htx" for config compatibility
+		log:         slog.Default().With(slog.String("datasource", "htx")),
 		W:           w,
 		TickerTopic: tickerTopic,
 		wsClients:   []*internal.WebSocketClient{},
 		wsEndpoint:  wsEndpoint,
 	}
 
-	// Bitrue requires 1 subscription message per symbol.
-	// 2048 is fine per connection as long as we throttle the subscribe loop slightly.
-	bitrue.symbolChunks = symbolList.Crypto.ChunkSymbols(2048)
+	// HTX handles ~1000 subs per connection reasonably well if throttled.
+	htx.symbolChunks = symbolList.Crypto.ChunkSymbols(1024)
 
-	bitrue.log.Debug("Created new datasource")
-	return bitrue, nil
+	htx.log.Debug("Created new datasource")
+	return htx, nil
 }
 
-func (d *BitrueClient) Connect() error {
+func (d *HTXClient) Connect() error {
 	if d.isRunning {
 		return nil
 	}
@@ -74,12 +74,12 @@ func (d *BitrueClient) Connect() error {
 		currentChunk := chunk
 		wsClient := internal.NewWebSocketClient(d.wsEndpoint)
 
-		// CRITICAL FIX: Capture wsClient in closure so we reply Pong only to THIS socket
+		// Capture client for Ping replies
 		wsClient.SetMessageHandler(func(msg internal.WsMessage) {
 			d.onMessage(wsClient, msg)
 		})
-
 		wsClient.SetLogger(d.log)
+
 		wsClient.SetOnConnect(func() error {
 			return d.SubscribeTickers(wsClient, currentChunk)
 		})
@@ -89,16 +89,16 @@ func (d *BitrueClient) Connect() error {
 	}
 
 	d.startWatchdog()
-	d.log.Info("Bitrue datasource connected", "connections", len(d.wsClients))
+	d.log.Info("HTX (HTX) datasource connected", "connections", len(d.wsClients))
 
 	return nil
 }
 
-func (d *BitrueClient) Close() error {
-	if !d.isRunning {
+func (d *HTXClient) Close() error {
+	if !d.IsRunning() {
 		return errors.New("datasource is not running")
 	}
-	d.log.Info("Bitrue closing...")
+	d.log.Info("HTX closing...")
 
 	d.cancel()
 
@@ -111,11 +111,11 @@ func (d *BitrueClient) Close() error {
 	return nil
 }
 
-func (d *BitrueClient) IsRunning() bool {
+func (d *HTXClient) IsRunning() bool {
 	return d.isRunning
 }
 
-func (d *BitrueClient) GetName() string {
+func (d *HTXClient) GetName() string {
 	return d.name
 }
 
@@ -123,43 +123,36 @@ func (d *BitrueClient) GetName() string {
 // Message Handling
 // -------------------------------------------------------------------------
 
-func (d *BitrueClient) onMessage(wsClient *internal.WebSocketClient, message internal.WsMessage) {
-	// Bitrue sends compressed binary GZIP data
+func (d *HTXClient) onMessage(wsClient *internal.WebSocketClient, message internal.WsMessage) {
+	// HTX sends binary GZIP frames for everything
 	if message.Type != websocket.BinaryMessage {
 		return
 	}
 
 	// 1. Decompress
-	decompressedData, err := internal.DecompressGzip(message.Message)
+	decompressed, err := internal.DecompressGzip(message.Message)
 	if err != nil {
-		d.log.Error("Error decompressing Bitrue message", "error", err)
+		d.log.Error("Gzip error", "err", err)
 		return
 	}
 
-	// Convert once to string/bytes for parsing
-	// Note: sonic can often unmarshal []byte directly, avoiding string alloc
-	// but we do string checks first.
-	dataStr := string(decompressedData)
+	// 2. Check for Ping (Server-initiated)
+	// HTX Format: {"ping": 123456789}
+	// We do a fast string check first
+	msgStr := string(decompressed)
+	if strings.Contains(msgStr, "ping") {
+		d.handlePing(wsClient, decompressed)
+		return
+	}
 
-	// 2. Handle Ping
-	// Bitrue sends: {"ping": 123456789}
-	if strings.Contains(dataStr, "ping") {
-		// Replace "ping" -> "pong" and send back raw
-		// This works because the structure is identical: {"pong": 123456789}
-		pong := strings.Replace(dataStr, "ping", "pong", 1)
-
-		// Send ONLY to the client that pinged us
-		wsClient.TrySendMessage(internal.WsMessage{
-			Type:    websocket.TextMessage,
-			Message: []byte(pong),
-		})
+	if strings.Contains(msgStr, "subbed") || strings.Contains(msgStr, "err-msg") {
 		return
 	}
 
 	// 3. Handle Ticker
-	// Look for unique ticker identifiers
-	if strings.Contains(dataStr, "_ticker") && strings.Contains(dataStr, "tick") && !strings.Contains(dataStr, "event_rep") {
-		ticker, err := d.parseTicker(decompressedData)
+	// Format: {"ch": "market.btcusdt.ticker", "ts": ..., "tick": {...}}
+	if strings.Contains(msgStr, "market.") && strings.Contains(msgStr, ".ticker") {
+		ticker, err := d.parseTicker(decompressed)
 		if err != nil {
 			return
 		}
@@ -169,23 +162,45 @@ func (d *BitrueClient) onMessage(wsClient *internal.WebSocketClient, message int
 	}
 }
 
-func (d *BitrueClient) parseTicker(message []byte) (model.Ticker, error) {
-	var event TickerResponse
+func (d *HTXClient) handlePing(wsClient *internal.WebSocketClient, data []byte) {
+	var pingMsg struct {
+		Ping int64 `json:"ping"`
+	}
+	if err := sonic.Unmarshal(data, &pingMsg); err != nil {
+		return
+	}
+
+	// Must verify it's actually a ping (Ping > 0)
+	if pingMsg.Ping > 0 {
+		pongMsg := map[string]interface{}{
+			"pong": pingMsg.Ping,
+		}
+
+		// Reply immediately to the same socket
+		wsClient.TrySendMessage(internal.WsMessage{
+			Type:    websocket.TextMessage,
+			Message: func() []byte { b, _ := sonic.Marshal(pongMsg); return b }(),
+		})
+	}
+}
+
+func (d *HTXClient) parseTicker(message []byte) (model.Ticker, error) {
+	var event HTXTicker
 	if err := sonic.Unmarshal(message, &event); err != nil {
 		return model.Ticker{}, err
 	}
 
-	// Channel format: "market_btcusdt_ticker"
-	// We strip the prefix/suffix to get "btcusdt"
-	pair := strings.TrimSuffix(strings.TrimPrefix(event.Channel, "market_"), "_ticker")
+	// Channel: "market.btcusdt.ticker"
+	// Strip parts to get "btcusdt"
+	market := strings.TrimSuffix(strings.TrimPrefix(event.Channel, "market."), ".ticker")
 
-	symbol := model.ParseSymbol(pair)
+	symbol := model.ParseSymbol(market)
 
 	return model.NewTicker(
-		event.TickData.Close,
+		event.Tick.LastPrice,
 		symbol,
 		d.name,
-		time.UnixMilli(int64(event.Timestamp)),
+		time.UnixMilli(event.Timestamp),
 	)
 }
 
@@ -193,22 +208,17 @@ func (d *BitrueClient) parseTicker(message []byte) (model.Ticker, error) {
 // Subscription
 // -------------------------------------------------------------------------
 
-func (d *BitrueClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
+func (d *HTXClient) SubscribeTickers(wsClient *internal.WebSocketClient, symbols model.SymbolList) error {
 	for _, v := range symbols {
-		cb_id := fmt.Sprintf("%s%s", strings.ToLower(v.Base), strings.ToLower(v.Quote))
+		// HTX Format: market.btcusdt.ticker
+		ch := fmt.Sprintf("market.%s%s.ticker", strings.ToLower(v.Base), strings.ToLower(v.Quote))
 
 		subMessage := map[string]interface{}{
-			"event": "sub",
-			"params": map[string]interface{}{
-				"channel": fmt.Sprintf("market_%s_ticker", cb_id),
-				"cb_id":   cb_id,
-			},
+			"sub": ch,
+			"id":  fmt.Sprintf("%d", time.Now().UnixNano()),
 		}
 
-		// THROTTLE: Bitrue requires 1 frame per symbol.
-		// Sending 2000 frames instantly will fill the write buffer and drop messages.
-		// 1ms delay = 1000 subs/sec. Safe enough.
-		// Or use a batching strategy if the API supports it (Bitrue usually doesn't).
+		// Throttle: 1ms delay prevents "write buffer full" on large lists
 		time.Sleep(1 * time.Millisecond)
 
 		wsClient.TrySendMessageJSON(websocket.TextMessage, subMessage)
@@ -222,7 +232,7 @@ func (d *BitrueClient) SubscribeTickers(wsClient *internal.WebSocketClient, symb
 // Watchdog
 // -------------------------------------------------------------------------
 
-func (d *BitrueClient) startWatchdog() {
+func (d *HTXClient) startWatchdog() {
 	d.W.Add(1)
 	go func() {
 		defer d.W.Done()

@@ -19,7 +19,7 @@ import (
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/fmfw"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/gateio"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/hitbtc"
-	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/huobi"
+	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/htx"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/kraken"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/kucoin"
 	"roselabs.mx/ftso-data-sources/datasource/cryptocurrency/lbank"
@@ -47,8 +47,8 @@ type FtsoDataSource interface {
 }
 
 type DataSourceOptions struct {
-	Source  string                 `mapstructure:"source"`
-	Options map[string]interface{} `mapstructure:"options"`
+	Source  string         `mapstructure:"source"`
+	Options map[string]any `mapstructure:"options"`
 }
 
 func BuildDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, tickerTopic *tickertopic.TickerTopic, w *sync.WaitGroup) (FtsoDataSource, error) {
@@ -84,8 +84,8 @@ func BuildDataSource(source DataSourceOptions, allSymbols symbols.AllSymbols, ti
 		return gateio.NewGateIoClient(source.Options, allSymbols, tickerTopic, w)
 	case "hitbtc":
 		return hitbtc.NewHitbtcClient(source.Options, allSymbols, tickerTopic, w)
-	case "huobi":
-		return huobi.NewHuobiClient(source.Options, allSymbols, tickerTopic, w)
+	case "htx":
+		return htx.NewHTXClient(source.Options, allSymbols, tickerTopic, w)
 	case "kraken":
 		return kraken.NewKrakenClient(source.Options, allSymbols, tickerTopic, w)
 	case "kucoin":

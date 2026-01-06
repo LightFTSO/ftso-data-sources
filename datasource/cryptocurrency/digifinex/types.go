@@ -8,13 +8,13 @@ type DigifinexMarket struct {
 	Market string `json:"market"`
 }
 
-type wsTickerMessage struct {
-	Method string       `json:"method"`
-	Params []TickerData `json:"params"`
+type WsTickerMessage struct {
+	Method string          `json:"method"`
+	Params []DigifinexData `json:"params"`
 }
 
-type TickerData struct {
-	LastPrice string `json:"last"`
-	Timestamp int64  `json:"timestamp"`
-	Symbol    string `json:"symbol"`
+type DigifinexData struct {
+	Symbol    string `json:"symbol"`    // e.g. BTC_USDT
+	LastPrice string `json:"last"`      // Digifinex usually sends float, but string is safer
+	Timestamp int64  `json:"timestamp"` // ms?
 }

@@ -307,16 +307,50 @@ func (c *WebSocketClient) writePump(ctx context.Context, conn *websocket.Conn, e
 // -------------------------------------------------------------------------
 
 func (c *WebSocketClient) messageProcessor() {
+	const workerCount = 20
+	const jobQueueSize = 1000
+	var workerWg sync.WaitGroup
+
+	jobQueue := make(chan WsMessage, jobQueueSize)
+
+	for i := range workerCount {
+		workerWg.Add(1)
+		go c.worker(i, jobQueue, &workerWg)
+	}
+
 	for {
 		select {
 		case <-c.ctx.Done():
+			// Shutdown: Close queue and wait for workers to finish
+			close(jobQueue)
+			workerWg.Wait()
 			return
+
 		case msg := <-c.receive:
-			if c.onMessage != nil {
-				// NOTE: This blocks the read pump if onMessage is slow.
-				c.onMessage(msg)
+			select {
+			case jobQueue <- msg:
+			default:
+				c.log.Warn("Message queue full! Dropping message.", "queue_size", jobQueueSize)
 			}
 		}
+	}
+}
+
+func (c *WebSocketClient) worker(id int, jobs <-chan WsMessage, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for msg := range jobs {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					c.log.Error("Panic in onMessage worker", "worker_id", id, "error", r)
+				}
+			}()
+
+			if c.onMessage != nil {
+				c.onMessage(msg)
+			}
+		}()
 	}
 }
 

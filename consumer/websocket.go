@@ -60,7 +60,7 @@ func (s *WebsocketServerConsumer) setup() error {
 	if err := s.wsServer.Connect(); err != nil {
 		return err
 	}
-	log.Info("Websocket Consumer started.", "port", s.port, "serializer", s.config.SerializationProtocol)
+	log.Info("Websocket Consumer started.", "consumer", "websocket", "port", s.port, "serializer", s.config.SerializationProtocol)
 
 	return nil
 }

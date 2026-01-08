@@ -173,11 +173,11 @@ func (d *CoinexClient) parseTicker(message []byte) ([]model.Ticker, error) {
 
 	// Coinex V2 Structure: Data is inside "params"
 	// event.Params.Market = "BTCUSDT"
-	symbol := model.ParseSymbol(event.Params.Market)
+	symbol := model.ParseSymbol(event.Data.Market)
 
-	tickers := make([]model.Ticker, 0, len(event.Params.DealList))
+	tickers := make([]model.Ticker, 0, len(event.Data.DealList))
 
-	for _, t := range event.Params.DealList {
+	for _, t := range event.Data.DealList {
 		// "price" is string in Coinex V2
 		newTicker, err := model.NewTickerPriceString(
 			t.Price,

@@ -15,7 +15,7 @@ type Ticker struct {
 
 type WsTickerMessage struct {
 	Method string       `json:"method"`
-	Params CoinexParams `json:"params"` // Data is in "params" for V2 notifications
+	Data   CoinexParams `json:"data"`
 }
 
 type CoinexParams struct {

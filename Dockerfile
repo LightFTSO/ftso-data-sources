@@ -1,25 +1,41 @@
-FROM golang:1.25 AS build
+FROM golang:1.25-alpine AS build
 
-# `boilerplate` should be replaced with your project name
 WORKDIR /go/src/ftso-data-sources
 
-# Copy all the Code and stuff to compile everything
-COPY . .
+RUN apk add --no-cache \
+    build-base \
+    pkgconf \
+    git \
+    ca-certificates \
+    tzdata \
+    zeromq \
+    zeromq-dev \
+    czmq-static \
+    libzmq-static \
+    libsodium-static
+
+COPY go.mod go.sum ./
 RUN go mod download
 
-# Builds the application as a staticly linked one, to allow it to run on alpine
-RUN GOOS=linux go build -o ftso-data-sources ./
+COPY . .
 
-# Moving the binary to the 'final Image' to make it smaller
-FROM ubuntu:latest AS release
+ENV CGO_ENABLED=1 \
+    GOOS=linux \
+    GOARCH=amd64
+
+RUN go build \
+    -tags musl \
+    -ldflags="-w -s -linkmode external -extldflags '-static -lstdc++ -lm -lsodium'" \
+    -o ftso-data-sources .
+
+# --- Release Stage ---
+FROM scratch AS release
+
 WORKDIR /app
 
-# `boilerplate` should be replaced here as well
-COPY --from=build /go/src/ftso-data-sources/ftso-data-sources .
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=build /usr/share/zoneinfo /usr/share/zoneinfo
 
-# Add packages
-RUN apt update && apt install -y \
-    ca-certificates tzdata && \
-    chmod +x /app/ftso-data-sources
+COPY --from=build /go/src/ftso-data-sources/ftso-data-sources /ftso-data-sources
 
-ENTRYPOINT [ "/app/ftso-data-sources" ]
+ENTRYPOINT ["/ftso-data-sources"]

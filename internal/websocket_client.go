@@ -20,7 +20,7 @@ const (
 	// Send pings to peer with this period. Must be less than pongWait.
 	pingPeriod = (pongWait * 9) / 10
 	// Base reconnection delay
-	baseReconnectDelay = 1 * time.Second
+	baseReconnectDelay = 250 * time.Millisecond
 	maxReconnectDelay  = 30 * time.Second
 )
 
@@ -49,6 +49,8 @@ type WebSocketClient struct {
 	onConnect    func() error
 	onDisconnect func() error
 	onMessage    func(WsMessage)
+
+	reconnectDelay time.Duration
 
 	log *slog.Logger
 }
@@ -161,7 +163,7 @@ func (c *WebSocketClient) TrySendMessageJSON(msgType int, message interface{}) e
 // -------------------------------------------------------------------------
 
 func (c *WebSocketClient) connectionSupervisor() {
-	reconnectDelay := baseReconnectDelay
+	c.reconnectDelay = baseReconnectDelay
 
 	for {
 		select {
@@ -170,7 +172,7 @@ func (c *WebSocketClient) connectionSupervisor() {
 		default:
 			// Attempt connection
 			if err := c.connectAndServe(); err != nil {
-				c.log.Error("Connection lost/failed", "error", err, "retry_in", reconnectDelay.String())
+				c.log.Error("Connection lost/failed", "error", err, "retry_in", c.reconnectDelay.String())
 
 				// Notify disconnect handler
 				if c.onDisconnect != nil {
@@ -181,11 +183,11 @@ func (c *WebSocketClient) connectionSupervisor() {
 				select {
 				case <-c.ctx.Done():
 					return
-				case <-time.After(reconnectDelay):
-					reconnectDelay = min(maxReconnectDelay, reconnectDelay*2)
+				case <-time.After(c.reconnectDelay):
+					c.reconnectDelay = min(maxReconnectDelay, c.reconnectDelay*2)
 				}
 			} else {
-				reconnectDelay = baseReconnectDelay
+				c.reconnectDelay = baseReconnectDelay
 			}
 		}
 	}
@@ -214,6 +216,8 @@ func (c *WebSocketClient) connectAndServe() error {
 	c.mu.Lock()
 	c.conn = conn
 	c.mu.Unlock()
+
+	c.reconnectDelay = baseReconnectDelay
 
 	c.log.Info("WebSocket Connected", "url", c.url)
 	if c.onConnect != nil {
@@ -310,8 +314,6 @@ func (c *WebSocketClient) messageProcessor() {
 		case msg := <-c.receive:
 			if c.onMessage != nil {
 				// NOTE: This blocks the read pump if onMessage is slow.
-				// If you need high throughput with slow handlers, spawn a goroutine here
-				// or use a worker pool in the layer above.
 				c.onMessage(msg)
 			}
 		}

@@ -136,6 +136,7 @@ assets:
   #  - aud
   commodities:
   crypto:
+	- AAVE
     - ADA
     - ALGO
     - ARB
